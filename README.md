@@ -1,15 +1,15 @@
 # TrueFA
 
-A secure two-factor authentication code generator with support for QR code scanning and encrypted storage. This tools is designed to generate TOPT codes from QR code images or screenshots
+A secure two-factor authentication code generator with support for QR code scanning and encrypted storage.
 
 ## Features
 
+- **Enhanced Security with Rust Cryptography** - Critical security operations handled by Rust
+- **Vault-Based Envelope Encryption** - Two-layer encryption for maximum protection
 - Secure memory handling for sensitive data
 - QR code scanning support
 - Encrypted storage of TOTP secrets
-- Master password protection
-- Export/import functionality
-- Auto-cleanup of secrets
+- Stateless operation mode (no master password required for viewing codes on fresh install)
 - Cross-platform support
 
 ## Installation
@@ -41,138 +41,87 @@ docker run -it --name truefa `
   -v "$HOME\Downloads:/home/truefa/Downloads" `
   truefa
 
-# For subsequent runs, just use:
+# For subsequent runs:
 docker start -ai truefa
 ```
 
-The application will be available in your terminal. Place your QR code images in the `images` directory to scan them
-
 ### Option 2: Direct Installation
+
+**Prerequisites:**
+- Python 3.8+
+- [Rust and Cargo](https://rustup.rs/)
+- ZBar (for QR code scanning)
+- GPG (for export functionality)
 
 #### Windows Prerequisites
 
-1. Install ZBar:
-   - Download the [ZBar Windows Binaries](https://sourceforge.net/projects/zbar/files/zbar/0.10/zbar-0.10-setup.exe/download)
-   - Run the installer
-   - Add the installation directory (usually `C:\Program Files (x86)\ZBar`) to your system PATH
-
-2. Install GPG:
-   - Download [GPG4Win](https://www.gpg4win.org/download.html)
-   - Run the installer
-   - Add the installation directory to your system PATH
+1. Install ZBar: [ZBar Windows Binaries](https://sourceforge.net/projects/zbar/files/zbar/0.10/zbar-0.10-setup.exe/download)
+2. Install GPG: [GPG4Win](https://www.gpg4win.org/download.html)
 
 #### Linux/macOS Prerequisites
 
-- For Ubuntu/Debian:
-  ```bash
-  sudo apt-get install libzbar0 zbar-tools gpg
-  ```
-
-- For macOS:
-  ```bash
-  brew install zbar gpg
-  ```
+- Ubuntu/Debian: `sudo apt-get install libzbar0 zbar-tools gpg`
+- macOS: `brew install zbar gpg`
 
 #### Installation Steps
 
-1. Clone the repository:
+1. Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/zainibeats/truefa.git
 cd truefa
-```
-
-2. Install dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-3. Install the package:
+2. Build the Rust crypto module and run:
 ```bash
-pip install -e .
+python build_rust.py
+python -m src.main
 ```
 
 ## Usage
 
-### Using with Docker
+### Basic Usage
 
-1. Place your QR code images in the `images` directory
-2. Start the container:
-```bash
-docker start -ai truefa
-```
-3. Use the interactive menu in your terminal
-4. When exporting secrets, they will be saved to your system's Downloads folder
-5. To stop the application, press Ctrl+C
-
-### Running Locally
-
-1. Run the application:
-```bash
-truefa
-```
-
-2. Follow the on-screen menu to:
+1. Place QR code images in the `images` directory
+2. Run the application (via Docker or directly)
+3. Use the interactive menu to:
    - Load QR codes from images
    - Enter TOTP secrets manually
-   - Save secrets securely
-   - Load saved secrets
-   - Export secrets (will be saved to your Downloads folder)
+   - Save/load secrets securely
+   - Export secrets (saved to Downloads folder)
 
-## Directory Structure
+### Stateless Operation
 
-- `images/` - Place your QR code images here
-- `.truefa/` - Secure storage for encrypted secrets
-- Your system's Downloads folder - Location for exported secrets
+By default, TrueFA operates in stateless mode:
+- Scan QR codes or enter secrets without setting a master password
+- No data is saved unless explicitly chosen
+- Saved secrets are encrypted with your master password
 
-## Security Features
+## Security Architecture
 
-- Secure memory handling with page locking
-- AES-GCM encryption for stored secrets
-- Scrypt key derivation for master password
-- Auto-cleanup of secrets after timeout
-- GPG encryption for exports
+TrueFA implements a high-security architecture:
 
-## Requirements
-
-### For Docker Installation
-- Docker
-
-### For Direct Installation
-- Python 3.8 or higher
-- GPG for export functionality
-- ZBar library for QR code scanning
-
-## Development
-
-1. Set up a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install development dependencies:
-```bash
-pip install -r requirements.txt
-```
+- **Envelope Encryption** - Two-layer encryption with vault password (outer) and master key (inner)
+- **Rust-Based Memory Safety** - Critical cryptographic operations implemented in Rust
+- **AES-GCM encryption** with Scrypt key derivation
+- **Secure memory handling** with page locking and memory zeroization
 
 ## Project Structure
 
 ```
 truefa/
-├── src/
-│   ├── security/         # Security-related modules
-│   │   ├── secure_memory.py
-│   │   ├── secure_string.py
-│   │   └── secure_storage.py
-│   ├── totp/            # TOTP-related functionality
-│   │   └── auth.py
-│   ├── utils/           # Utility functions
-│   │   └── screen.py
-│   └── main.py          # Main application entry point
-├── images/              # Directory for QR code images
-├── .truefa/             # Secure storage directory
-├── Dockerfile          # Docker configuration
-└── requirements.txt     # Python dependencies
+├── src/               # Core application code
+│   ├── security/      # Security-related modules
+│   ├── totp/          # TOTP-related functionality
+│   ├── utils/         # Utility functions
+│   └── main.py        # Main application entry point
+├── images/            # Directory for QR code images
+├── .truefa/           # Secure storage directory
+├── Dockerfile         # Docker configuration
+├── requirements.txt   # Python dependencies
+├── build_rust.py      # Rust module build script
+├── build_module.py    # Python module build script
+└── README.md          # This file
 ```
 
 ## License
