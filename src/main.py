@@ -45,12 +45,7 @@ def main():
                 if error:
                     print(f"Error: {error}")
                     continue
-                    
-                # Require master password before showing codes
-                if not auth.ensure_unlocked("view 2FA codes"):
-                    auth.cleanup()
-                    continue
-                    
+                
                 auth.secret = secret
                 print("Secret key successfully extracted from QR code!")
                 
@@ -63,11 +58,7 @@ def main():
                 if not auth.validate_secret(secret_input):
                     print("Error: Invalid secret key format. Must be base32 encoded.")
                     continue
-                    
-                # Require master password before showing codes
-                if not auth.ensure_unlocked("view 2FA codes"):
-                    continue
-                    
+                
                 auth.secret = SecureString(secret_input)
                 print("Secret key successfully set!")
 

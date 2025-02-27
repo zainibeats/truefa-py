@@ -20,6 +20,7 @@ class TwoFactorAuth:
         self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
         self.is_generating = False
         self.storage = SecureStorage()  # Add storage instance
+        self.is_vault_mode = self.storage.vault.is_initialized()
         # Register signal handlers for secure cleanup
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -138,27 +139,62 @@ class TwoFactorAuth:
 
     def ensure_unlocked(self, purpose="continue"):
         """Ensure storage is unlocked with master password"""
+        # Allow stateless operation for viewing codes without requiring a master password
+        if purpose == "view 2FA codes":
+            return True
+            
+        # For operations that need storage (saving, loading, exporting), require master password
         if not self.storage.is_unlocked:
-            if not self.storage.has_master_password():
-                print("\nYou need to set up a master password to", purpose)
-                while True:
-                    password = input("Enter new master password: ")
-                    if not password:
-                        return False
-                    confirm = input("Confirm master password: ")
-                    if password == confirm:
-                        self.storage.set_master_password(password)
+            # Check if we're using vault mode
+            if self.is_vault_mode:
+                if not self.storage.vault.is_initialized():
+                    print("\nYou need to set up a vault with a vault password and master password to", purpose)
+                    while True:
+                        vault_password = input("Enter vault password (this unlocks the entire vault): ")
+                        if not vault_password:
+                            return False
+                        master_password = input("Enter master password (this encrypts individual secrets): ")
+                        if not master_password:
+                            return False
+                        confirm_master = input("Confirm master password: ")
+                        if master_password != confirm_master:
+                            print("Master passwords don't match. Try again.")
+                            continue
+                        self.storage.set_master_password(master_password, vault_password)
                         return True
-                    print("Passwords don't match. Try again.")
+                else:
+                    print("\nVault is locked. Please enter your passwords to", purpose)
+                    attempts = 3
+                    while attempts > 0:
+                        vault_password = input("Enter vault password: ")
+                        if self.storage.verify_master_password(None, vault_password):
+                            return True
+                        attempts -= 1
+                        if attempts > 0:
+                            print(f"Incorrect password. {attempts} attempts remaining.")
+                    return False
             else:
-                print("\nStorage is locked. Please enter your master password to", purpose)
-                attempts = 3
-                while attempts > 0:
-                    password = input("Enter master password: ")
-                    if self.storage.verify_master_password(password):
-                        return True
-                    attempts -= 1
-                    if attempts > 0:
-                        print(f"Incorrect password. {attempts} attempts remaining.")
-                return False
-        return True 
+                # Legacy mode
+                if not self.storage.has_master_password():
+                    print("\nYou need to set up a master password to", purpose)
+                    while True:
+                        password = input("Enter new master password: ")
+                        if not password:
+                            return False
+                        confirm = input("Confirm master password: ")
+                        if password == confirm:
+                            self.storage.set_master_password(password)
+                            return True
+                        print("Passwords don't match. Try again.")
+                else:
+                    print("\nStorage is locked. Please enter your master password to", purpose)
+                    attempts = 3
+                    while attempts > 0:
+                        password = input("Enter master password: ")
+                        if self.storage.verify_master_password(password):
+                            return True
+                        attempts -= 1
+                        if attempts > 0:
+                            print(f"Incorrect password. {attempts} attempts remaining.")
+                    return False
+        return True

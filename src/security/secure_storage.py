@@ -8,6 +8,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .secure_string import SecureString
+from .vault import SecureVault
 
 class SecureStorage:
     """Handles secure storage of TOTP secrets and master password"""
@@ -21,6 +22,9 @@ class SecureStorage:
         self.exports_path = os.path.join(self.storage_path, 'exports')
         os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
         os.makedirs(self.exports_path, mode=0o700, exist_ok=True)
+        
+        # Initialize the secure vault
+        self.vault = SecureVault(storage_path=self.storage_path)
         
         # Try to set permissions, but don't fail if we can't (e.g., mounted volume)
         try:
@@ -49,7 +53,11 @@ class SecureStorage:
     @property
     def is_unlocked(self):
         """Check if storage is unlocked"""
-        return self._is_unlocked and self.key is not None
+        # If using the vault, check both vault and legacy unlock status
+        if self.vault.is_initialized():
+            return self.vault.is_unlocked() and (self._is_unlocked or self.key is not None)
+        else:
+            return self._is_unlocked and self.key is not None
 
     def _unlock(self):
         """Set the unlocked state"""
@@ -59,13 +67,34 @@ class SecureStorage:
         """Reset the unlocked state"""
         self._is_unlocked = False
         self.key = None
+        if self.vault.is_initialized():
+            self.vault.lock_vault()
 
     def has_master_password(self):
         """Check if a master password has been set"""
+        if self.vault.is_initialized():
+            return True
         return self.master_hash is not None
 
-    def verify_master_password(self, password):
-        """Verify the master password"""
+    def verify_master_password(self, password, vault_password=None):
+        """
+        Verify the master password.
+        
+        If vault_password is provided and the vault is initialized,
+        use the vault for verification. Otherwise, fall back to legacy
+        verification.
+        """
+        # If vault is enabled, try to use it first
+        if self.vault.is_initialized() and vault_password:
+            # Unlock the vault with the vault password
+            if not self.vault.unlock_vault(vault_password):
+                return False
+                
+            # The vault is now unlocked, so we set up our unlock state
+            self._unlock()
+            return True
+            
+        # Legacy verification
         if not self.master_hash or not self.salt:
             return False
         try:
@@ -84,8 +113,19 @@ class SecureStorage:
             self._lock()  # Reset state on failure
             return False
 
-    def set_master_password(self, password):
-        """Set up the master password"""
+    def set_master_password(self, password, vault_password=None):
+        """
+        Set up the master password.
+        
+        If vault_password is provided, also initialize the vault with
+        two-layer encryption.
+        """
+        # If vault password is provided, set up the vault
+        if vault_password:
+            if not self.vault.create_vault(vault_password, password):
+                return False
+                
+        # Legacy master password setup
         self.salt = secrets.token_bytes(16)
         kdf = Scrypt(
             salt=self.salt,
@@ -107,6 +147,7 @@ class SecureStorage:
         # Set up encryption key
         self.derive_key(password)
         self._unlock()  # Set unlocked state
+        return True
 
     def derive_key(self, password):
         """Derive encryption key from password using Scrypt"""
@@ -123,6 +164,15 @@ class SecureStorage:
 
     def encrypt_secret(self, secret, name):
         """Encrypt a TOTP secret"""
+        # If vault is enabled and unlocked, use it for encryption
+        if self.vault.is_initialized() and self.vault.is_unlocked():
+            master_key = self.vault.get_master_key()
+            if master_key and master_key.get():
+                # Use the master key from the vault for encryption
+                if not self.key:
+                    self.key = base64.b64decode(master_key.get().encode())
+                master_key.clear()  # Immediately clear the secure string
+        
         if not self.key:
             raise ValueError("No encryption key set")
         
@@ -292,4 +342,4 @@ class SecureStorage:
             print(f"Export failed: {str(e)}")
             if os.path.exists(temp_export):
                 os.remove(temp_export)
-            return False 
+            return False
