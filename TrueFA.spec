@@ -6,7 +6,7 @@ a = Analysis(
     ['src/main_opencv.py'],
     pathex=[],
     binaries=[
-        ('rust_crypto/target/release/truefa_crypto.dll', 'src/truefa_crypto'),
+        ('rust_crypto/target/release/truefa_crypto.dll', '.'),
     ],
     datas=[
         ('images', 'images'),
@@ -38,7 +38,7 @@ exe = EXE(
     a.datas,
     [],
     name='TrueFA',
-    debug=False,
+    debug=True,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
