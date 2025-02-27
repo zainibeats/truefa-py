@@ -4,7 +4,7 @@
 .gitattributes
 
 # Python
-__pycache__/
+__pycache__
 *.py[cod]
 *$py.class
 *.so
@@ -25,13 +25,50 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Rust
+rust_crypto/target/
+rust_crypto/Cargo.lock
+
+# Development and build tools
+ez-release/
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+
+# Test files and directories
+tests/
+test/
+testing/
+*.test.*
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.dll
+*.dylib
+
+# Environment
+.env
+.venv
+env/
 venv/
 ENV/
 
-# IDE
-.vscode/
-.idea/
+# Local development
+.DS_Store
+Thumbs.db
 
 # Application specific
 images/*
@@ -47,7 +84,4 @@ images/*
 docker-compose.yml
 
 # Misc
-*.log
-.DS_Store
-README.md
-LICENSE 
+*.log 
