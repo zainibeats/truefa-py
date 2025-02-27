@@ -1,3 +1,20 @@
+"""
+Secure Storage Module for TOTP Secrets
+
+This module provides secure storage functionality for TOTP secrets using
+a combination of envelope encryption and secure memory handling. It supports
+both a legacy single-password mode and a more secure vault-based mode with
+two-layer encryption.
+
+Key Features:
+- Two-layer envelope encryption in vault mode
+- Scrypt-based key derivation
+- AES-GCM authenticated encryption
+- Secure memory handling with zeroization
+- GPG-based secret export
+- Secure file permissions
+"""
+
 import os
 import json
 import base64
@@ -11,13 +28,40 @@ from .secure_string import SecureString
 from .vault import SecureVault
 
 class SecureStorage:
-    """Handles secure storage of TOTP secrets and master password"""
+    """
+    Secure storage implementation for TOTP secrets.
+    
+    This class provides two storage modes:
+    1. Legacy Mode: Single master password for all secrets
+    2. Vault Mode: Two-layer encryption with vault and master passwords
+    
+    Features:
+    - Secure key derivation using Scrypt
+    - Authenticated encryption using AES-GCM
+    - Automatic key cleanup
+    - Secure file permissions
+    - GPG-based secret export
+    """
     
     def __init__(self):
+        """
+        Initialize secure storage.
+        
+        Sets up:
+        - Storage directories with secure permissions
+        - Secure vault initialization
+        - Master password state
+        - Key derivation parameters
+        
+        Security:
+        - Creates directories with 0700 permissions
+        - Validates storage directory writability
+        - Loads existing master password securely
+        """
         self.salt = None
         self.key = None
         self.master_hash = None
-        self._is_unlocked = False  # Private variable for state
+        self._is_unlocked = False
         self.storage_path = os.path.expanduser('~/.truefa')
         self.exports_path = os.path.join(self.storage_path, 'exports')
         os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
@@ -26,11 +70,11 @@ class SecureStorage:
         # Initialize the secure vault
         self.vault = SecureVault(storage_path=self.storage_path)
         
-        # Try to set permissions, but don't fail if we can't (e.g., mounted volume)
+        # Set secure permissions
         try:
             os.chmod(self.storage_path, 0o700)
         except Exception:
-            # Check if we can at least write to the directory
+            # Verify writability if permissions can't be set
             test_file = os.path.join(self.storage_path, '.test')
             try:
                 with open(test_file, 'w') as f:
@@ -39,7 +83,7 @@ class SecureStorage:
             except Exception as e:
                 raise Exception(f"Storage directory is not writable: {e}")
         
-        # Load master password hash if it exists
+        # Load existing master password state
         self.master_file = os.path.join(self.storage_path, '.master')
         if os.path.exists(self.master_file):
             try:
@@ -52,45 +96,78 @@ class SecureStorage:
 
     @property
     def is_unlocked(self):
-        """Check if storage is unlocked"""
-        # If using the vault, check both vault and legacy unlock status
+        """
+        Check if storage is unlocked and ready for operations.
+        
+        Returns:
+            bool: True if storage is unlocked and keys are available
+            
+        Security:
+        - Checks both vault and legacy unlock states
+        - Verifies key availability
+        """
         if self.vault.is_initialized():
             return self.vault.is_unlocked() and (self._is_unlocked or self.key is not None)
         else:
             return self._is_unlocked and self.key is not None
 
     def _unlock(self):
-        """Set the unlocked state"""
+        """
+        Set the storage to unlocked state.
+        
+        Security:
+        - Only sets state, does not handle keys
+        """
         self._is_unlocked = True
 
     def _lock(self):
-        """Reset the unlocked state"""
+        """
+        Lock storage and clear sensitive data.
+        
+        Security:
+        - Clears encryption key from memory
+        - Resets unlock state
+        - Locks vault if initialized
+        """
         self._is_unlocked = False
         self.key = None
         if self.vault.is_initialized():
             self.vault.lock_vault()
 
     def has_master_password(self):
-        """Check if a master password has been set"""
+        """
+        Check if a master password has been set.
+        
+        Returns:
+            bool: True if master password exists
+            
+        Security:
+        - Checks both vault and legacy modes
+        """
         if self.vault.is_initialized():
             return True
         return self.master_hash is not None
 
     def verify_master_password(self, password, vault_password=None):
         """
-        Verify the master password.
+        Verify the provided master password.
         
-        If vault_password is provided and the vault is initialized,
-        use the vault for verification. Otherwise, fall back to legacy
-        verification.
+        Args:
+            password: Master password to verify
+            vault_password: Optional vault password for two-layer auth
+            
+        Returns:
+            bool: True if password is correct
+            
+        Security:
+        - Uses constant-time comparison
+        - Handles both vault and legacy modes
+        - Limits error information
         """
-        # If vault is enabled, try to use it first
+        # Try vault mode first if enabled
         if self.vault.is_initialized() and vault_password:
-            # Unlock the vault with the vault password
             if not self.vault.unlock_vault(vault_password):
                 return False
-                
-            # The vault is now unlocked, so we set up our unlock state
             self._unlock()
             return True
             
@@ -106,21 +183,30 @@ class SecureStorage:
                 p=1,
             )
             kdf.verify(password.encode(), self.master_hash)
-            self.derive_key(password)  # Set up encryption key
-            self._unlock()  # Set unlocked state
+            self.derive_key(password)
+            self._unlock()
             return True
         except Exception:
-            self._lock()  # Reset state on failure
+            self._lock()
             return False
 
     def set_master_password(self, password, vault_password=None):
         """
-        Set up the master password.
+        Set up master password and encryption keys.
         
-        If vault_password is provided, also initialize the vault with
-        two-layer encryption.
+        Args:
+            password: New master password
+            vault_password: Optional vault password for two-layer auth
+            
+        Returns:
+            bool: True if setup successful
+            
+        Security:
+        - Uses strong key derivation parameters
+        - Supports two-layer encryption
+        - Securely stores password hash
         """
-        # If vault password is provided, set up the vault
+        # Set up vault if password provided
         if vault_password:
             if not self.vault.create_vault(vault_password, password):
                 return False
@@ -146,11 +232,20 @@ class SecureStorage:
         
         # Set up encryption key
         self.derive_key(password)
-        self._unlock()  # Set unlocked state
+        self._unlock()
         return True
 
     def derive_key(self, password):
-        """Derive encryption key from password using Scrypt"""
+        """
+        Derive encryption key from password.
+        
+        Args:
+            password: Password to derive key from
+            
+        Security:
+        - Uses Scrypt with strong parameters
+        - Generates new salt if needed
+        """
         if not self.salt:
             self.salt = secrets.token_bytes(16)
         kdf = Scrypt(
@@ -163,55 +258,81 @@ class SecureStorage:
         self.key = kdf.derive(password.encode())
 
     def encrypt_secret(self, secret, name):
-        """Encrypt a TOTP secret"""
-        # If vault is enabled and unlocked, use it for encryption
+        """
+        Encrypt a TOTP secret.
+        
+        Args:
+            secret: Secret to encrypt
+            name: Name to associate with the secret
+            
+        Returns:
+            str: Base64-encoded encrypted data
+            
+        Security:
+        - Uses AES-GCM authenticated encryption
+        - Includes name in authentication data
+        - Uses random nonce
+        - Supports vault-based encryption
+        """
+        # Use vault key if available
         if self.vault.is_initialized() and self.vault.is_unlocked():
             master_key = self.vault.get_master_key()
             if master_key and master_key.get():
-                # Use the master key from the vault for encryption
                 if not self.key:
                     self.key = base64.b64decode(master_key.get().encode())
-                master_key.clear()  # Immediately clear the secure string
+                master_key.clear()
         
         if not self.key:
             raise ValueError("No encryption key set")
         
-        # Generate a random nonce
+        # Generate random nonce
         nonce = secrets.token_bytes(12)
         
         # Create cipher
         aesgcm = AESGCM(self.key)
         
-        # Encrypt the secret
+        # Encrypt with authenticated data
         ciphertext = aesgcm.encrypt(
             nonce,
             secret.encode(),
-            name.encode()  # Use name as associated data
+            name.encode()
         )
         
-        # Combine salt, nonce, and ciphertext for storage
+        # Combine components for storage
         return base64.b64encode(self.salt + nonce + ciphertext).decode('utf-8')
 
     def decrypt_secret(self, encrypted_data, name):
-        """Decrypt a TOTP secret"""
+        """
+        Decrypt a TOTP secret.
+        
+        Args:
+            encrypted_data: Base64-encoded encrypted secret
+            name: Name associated with the secret
+            
+        Returns:
+            str: Decrypted secret or None if failed
+            
+        Security:
+        - Verifies authentication tag
+        - Validates associated data
+        - Returns None on any error
+        """
         if not self.is_unlocked or not self.key:
             return None
             
         try:
-            # Decode the combined data
+            # Decode and extract components
             data = base64.b64decode(encrypted_data.encode('utf-8'))
-            
-            # Extract components
             salt = data[:16]
             nonce = data[16:28]
             ciphertext = data[28:]
             
-            # Decrypt
+            # Decrypt with authentication
             aesgcm = AESGCM(self.key)
             plaintext = aesgcm.decrypt(
                 nonce,
                 ciphertext,
-                name.encode()  # Use name as associated data
+                name.encode()
             )
             
             return plaintext.decode('utf-8')
@@ -219,7 +340,19 @@ class SecureStorage:
             return None
 
     def load_secret(self, name):
-        """Load a secret from storage."""
+        """
+        Load an encrypted secret from storage.
+        
+        Args:
+            name: Name of the secret to load
+            
+        Returns:
+            str: Encrypted secret data or None if failed
+            
+        Security:
+        - Verifies storage is unlocked
+        - Returns None on any error
+        """
         if not self.is_unlocked:
             return None
         
@@ -230,7 +363,17 @@ class SecureStorage:
             return None
 
     def load_all_secrets(self):
-        """Load all secrets from storage."""
+        """
+        Load all encrypted secrets from storage.
+        
+        Returns:
+            dict: Map of secret names to encrypted data
+            
+        Security:
+        - Verifies storage is unlocked
+        - Returns empty dict on any error
+        - Only loads .enc files
+        """
         if not self.is_unlocked:
             return {}
         
@@ -238,7 +381,7 @@ class SecureStorage:
         try:
             for filename in os.listdir(self.storage_path):
                 if filename.endswith('.enc'):
-                    name = filename[:-4]  # Remove .enc extension
+                    name = filename[:-4]
                     secret = self.load_secret(name)
                     if secret:
                         secrets[name] = secret
@@ -249,8 +392,22 @@ class SecureStorage:
         return secrets
 
     def export_secrets(self, export_path, export_password):
-        """Export secrets as a password-protected file."""
-                
+        """
+        Export secrets as a GPG-encrypted file.
+        
+        Args:
+            export_path: Path to save the exported file
+            export_password: Password to encrypt the export
+            
+        Returns:
+            bool: True if export successful
+            
+        Security:
+        - Uses GPG symmetric encryption
+        - Cleans up temporary files
+        - Validates paths and permissions
+        - Uses secure file operations
+        """
         if not self.is_unlocked:
             print("Storage must be unlocked to export secrets")
             return False
@@ -262,30 +419,29 @@ class SecureStorage:
         # Clean up the export path
         export_path = export_path.strip('"').strip("'")
         
-        # If it's not a full path, save to Downloads folder
+        # Use Downloads folder for relative paths
         if not os.path.isabs(export_path):
-            # Get Downloads folder path based on OS
             if platform.system() == 'Windows':
                 downloads_dir = os.path.expanduser('~\\Downloads')
             else:
                 downloads_dir = os.path.expanduser('~/Downloads')
             export_path = os.path.join(downloads_dir, export_path)
         
-        # Ensure the export path has .gpg extension
+        # Ensure .gpg extension
         if not export_path.endswith('.gpg'):
             export_path += '.gpg'
         
         try:
-            # Create a temporary file for the export
+            # Create temporary export file
             temp_export = os.path.join(self.exports_path, '.temp_export')
             
-            # Write secrets to temporary file
+            # Write secrets to temp file
             secrets_count = 0
             with open(temp_export, 'w') as f:
                 secrets = {}
                 for filename in os.listdir(self.storage_path):
                     if filename.endswith('.enc'):
-                        name = filename[:-4]  # Remove .enc extension
+                        name = filename[:-4]
                         with open(os.path.join(self.storage_path, filename), 'r') as sf:
                             encrypted = sf.read()
                             decrypted = self.decrypt_secret(encrypted, name)
@@ -294,16 +450,15 @@ class SecureStorage:
                                 secrets_count += 1
                 json.dump(secrets, f, indent=4)
             
-            # Use GPG for symmetric encryption only (no keys)
             try:
-                # Ensure the exports directory exists with correct permissions
+                # Set up secure exports directory
                 os.makedirs(self.exports_path, mode=0o700, exist_ok=True)
                 
-                # Remove any existing temporary files
+                # Clean up any existing temp files
                 if os.path.exists(temp_export):
                     os.remove(temp_export)
                 
-                # Write secrets to temporary file
+                # Write secrets to temp file
                 with open(temp_export, 'w') as f:
                     json.dump(secrets, f, indent=4)
                 
@@ -311,11 +466,11 @@ class SecureStorage:
                 gpg_env = os.environ.copy()
                 gpg_env['GNUPGHOME'] = self.exports_path
                 
-                # Use process substitution to provide password
+                # Encrypt with GPG
                 result = subprocess.run([
                     'gpg',
                     '--batch',
-                    '--yes',  # Automatically overwrite output file if it exists
+                    '--yes',
                     '--passphrase-fd', '0',
                     '--symmetric',
                     '--cipher-algo', 'AES256',
@@ -323,7 +478,7 @@ class SecureStorage:
                     temp_export
                 ], input=export_password.encode(), env=gpg_env, capture_output=True)
                 
-                # Clean up temporary files
+                # Clean up
                 if os.path.exists(temp_export):
                     os.remove(temp_export)
                 

@@ -1,15 +1,42 @@
+"""
+TrueFA - Secure Two-Factor Authentication Generator
+Main application module that provides the command-line interface and core functionality.
+
+This module handles:
+- User interface and command processing
+- QR code scanning and secret key management
+- Secure storage operations
+- TOTP code generation
+- Auto-cleanup of sensitive data
+"""
+
 import sys
 import time
 import os
 from pathlib import Path
 
-from .security.secure_storage import SecureStorage
-from .security.secure_string import SecureString
-from .totp.auth import TwoFactorAuth
-from .utils.screen import clear_screen
+from src.security.secure_storage import SecureStorage
+from src.security.secure_string import SecureString
+from src.totp.auth import TwoFactorAuth
+from src.utils.screen import clear_screen
 
 def main():
-    """Main application entry point and UI loop"""
+    """
+    Main application entry point that provides an interactive command-line interface.
+    
+    Features:
+    - QR code scanning from image files
+    - Manual secret key entry
+    - Secure storage of TOTP secrets
+    - Automatic code generation
+    - Secure cleanup of sensitive data
+    
+    The function implements a secure event loop that:
+    1. Maintains a clean security state
+    2. Auto-cleans secrets after timeout
+    3. Handles interrupts gracefully
+    4. Ensures secure cleanup on exit
+    """
     auth = TwoFactorAuth()
     
     try:
@@ -35,7 +62,7 @@ def main():
             choice = input("\nEnter your choice (1-7): ")
             
             if choice == '1':
-                # Auto-cleanup before new secret
+                # Auto-cleanup before new secret for security
                 if auth.secret:
                     auth.cleanup()
                 
@@ -50,7 +77,7 @@ def main():
                 print("Secret key successfully extracted from QR code!")
                 
             elif choice == '2':
-                # Auto-cleanup before new secret
+                # Auto-cleanup before new secret for security
                 if auth.secret:
                     auth.cleanup()
                 
@@ -76,10 +103,11 @@ def main():
                     continue
                 
                 try:
+                    # Securely handle the secret during encryption
                     with SecureString(auth.secret.get()) as temp_secret:
                         encrypted = auth.storage.encrypt_secret(temp_secret.get(), name)
                     
-                    # Save to file
+                    # Save encrypted secret to file
                     with open(os.path.join(auth.storage.storage_path, f"{name}.enc"), "w") as f:
                         f.write(encrypted)
                     
@@ -103,6 +131,7 @@ def main():
                     continue
                 
                 try:
+                    # Load and decrypt the secret
                     with open(file_path, "r") as f:
                         encrypted = f.read()
                     
@@ -111,7 +140,7 @@ def main():
                         print("Failed to decrypt secret")
                         continue
                     
-                    # Auto-cleanup before new secret
+                    # Auto-cleanup before loading new secret
                     if auth.secret:
                         auth.cleanup()
                     
@@ -122,14 +151,12 @@ def main():
                     continue
 
             elif choice == '5':
-                
-                # First verify master password
+                # Export secrets with GPG encryption
                 if not auth.storage.is_unlocked:
                     print("\nPlease enter your master password to access secrets.")
                     if not auth.ensure_unlocked("access secrets for export"):
                         continue
 
-                # Then check if we have any secrets to export
                 secrets = auth.storage.load_all_secrets()
                 if not secrets:
                     print("\nNo secrets available to export.")
@@ -175,7 +202,7 @@ def main():
                 print("Invalid choice. Please try again.")
                 continue
                 
-            # Generate codes if secret is set
+            # Generate TOTP codes if a secret is set
             if auth.secret:
                 print("\nGenerating TOTP codes. Press Ctrl+C to stop.")
                 auth.is_generating = True
@@ -191,7 +218,7 @@ def main():
                     # Don't clear the secret here, let it auto-clear after timeout
 
     except Exception as e:
-        # Secure cleanup on any exception
+        # Ensure secure cleanup on any exception
         auth.cleanup()
         print("\nAn error occurred. Exiting securely...")
         sys.exit(1)

@@ -1,53 +1,85 @@
-import mmap
-import platform
-import ctypes
-from datetime import datetime
+"""
+Secure Memory Management Module
 
-class SecureMemory:
-    """Secure memory handler with page locking and secure wiping"""
+This module provides Python wrappers around the Rust-based secure memory implementation.
+It ensures that sensitive data (like TOTP secrets) is properly protected in memory
+through automatic zeroization and secure cleanup.
+
+Key Features:
+- SecureString class for protected memory storage
+- Vault-based secret management
+- Secure random number generation
+- Automatic cleanup on process termination
+
+The module uses the Rust truefa_crypto library for the actual implementation
+of security-critical operations.
+"""
+
+import sys
+import os
+
+# Add the project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from truefa_crypto import (
+    SecureString as RustSecureString,
+    create_vault,
+    unlock_vault,
+    lock_vault,
+    is_vault_unlocked,
+    vault_exists,
+    secure_random_bytes
+)
+
+class SecureString:
+    """
+    Python wrapper for Rust's SecureString implementation.
     
-    def __init__(self, size=4096):
-        self.size = size
-        self.mm = None
-        try:
-            # Create a memory map with read/write access
-            self.mm = mmap.mmap(-1, self.size, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, mmap.PROT_READ | mmap.PROT_WRITE)
-            if platform.system() != 'Windows':
-                # Lock memory to prevent swapping (Unix-like systems only)
-                try:
-                    import resource
-                    resource.mlock(self.mm)
-                except Exception:
-                    pass  # If mlock isn't available, continue without it
-            else:
-                try:
-                    kernel32 = ctypes.windll.kernel32
-                    # Create a ctypes char buffer from the mmap object
-                    address = ctypes.addressof(ctypes.c_char.from_buffer(self.mm))
-                    if not kernel32.VirtualLock(address, ctypes.c_size_t(self.size)):
-                        print("Warning: Failed to lock memory on Windows")
-                except Exception as e:
-                    print("Warning: Windows memory locking failed:", e)
-        except Exception:
-            pass  # Handle initialization failures gracefully
-
+    This class provides a secure way to store sensitive strings in memory.
+    The underlying data is automatically zeroized when the object is destroyed
+    or when clear() is explicitly called.
+    
+    Usage:
+        secret = SecureString("sensitive_data")
+        # Use the secret
+        print(str(secret))  # Temporarily exposes the secret
+        secret.clear()      # Explicitly clear when done
+    """
+    def __init__(self, value):
+        """Initialize with a string value to be protected."""
+        self._inner = RustSecureString(value)
+        
+    def __str__(self):
+        """
+        Get the protected string value.
+        Note: This temporarily exposes the secret in memory.
+        """
+        return str(self._inner)
+        
+    def clear(self):
+        """
+        Explicitly clear the protected data.
+        The memory is securely zeroized.
+        """
+        self._inner.clear()
+        
     def __del__(self):
+        """
+        Ensure secure cleanup when the object is destroyed.
+        Ignores cleanup errors during destruction.
+        """
         try:
-            self.secure_wipe()
-        except Exception:
+            self.clear()
+        except:
             pass  # Ignore cleanup errors in destructor
 
-    def secure_wipe(self):
-        """Securely wipe memory multiple times"""
-        if self.mm is not None and hasattr(self.mm, 'write'):
-            try:
-                for _ in range(3):
-                    self.mm.seek(0)
-                    # Using ctypes.memset on the buffer for more secure wiping
-                    buf = (ctypes.c_char * self.size).from_buffer(self.mm)
-                    ctypes.memset(ctypes.addressof(buf), 0, self.size)
-                self.mm.close()
-            except Exception:
-                pass  # Handle wiping errors gracefully
-            finally:
-                self.mm = None 
+# Export Rust functions directly with their original docstrings
+__all__ = [
+    'SecureString',
+    'create_vault',
+    'unlock_vault',
+    'lock_vault',
+    'is_vault_unlocked',
+    'vault_exists',
+    'secure_random_bytes'
+]

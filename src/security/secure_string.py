@@ -1,21 +1,16 @@
 from datetime import datetime
-from .secure_memory import SecureMemory
+from .secure_memory import SecureString as BaseSecureString
 
 class SecureString:
     """Secure string storage with automatic cleanup"""
     
     def __init__(self, string):
-        self._memory = None
-        self._size = len(string)
+        self._secure_string = None
         self._creation_time = datetime.now()
         try:
-            self._memory = SecureMemory()
-            if self._memory.mm is not None:
-                # Store the string in secured memory
-                self._memory.mm.seek(0)
-                self._memory.mm.write(string.encode())
+            self._secure_string = BaseSecureString(string)
         except Exception:
-            self._memory = None
+            self._secure_string = None
 
     def __enter__(self):
         return self
@@ -30,22 +25,20 @@ class SecureString:
             pass  # Ignore cleanup errors in destructor
         
     def clear(self):
-        if self._memory is not None:
+        if self._secure_string is not None:
             try:
-                self._memory.secure_wipe()
+                self._secure_string.clear()
             except Exception:
                 pass  # Handle wiping errors gracefully
             finally:
-                self._memory = None
-                self._size = 0
+                self._secure_string = None
                 self._creation_time = None
             
     def get(self):
-        if self._memory is None or self._memory.mm is None:
+        if self._secure_string is None:
             return None
         try:
-            self._memory.mm.seek(0)
-            return self._memory.mm.read(self._size).decode()
+            return str(self._secure_string)
         except Exception:
             return None
 
