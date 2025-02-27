@@ -32,6 +32,11 @@ qrtest.png
 dist-electron/
 node_modules/
 
+# Production files
+ez-release/
+*.exe
+*.bat
+setup.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
