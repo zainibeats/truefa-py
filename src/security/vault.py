@@ -9,6 +9,7 @@ import json
 import base64
 from pathlib import Path
 from .secure_string import SecureString
+from datetime import datetime
 
 # Import our Rust crypto module with proper fallbacks
 try:
@@ -293,7 +294,7 @@ class SecureVault:
     def __init__(self, storage_path=None):
         """Initialize the vault with the specified storage path."""
         self.storage_path = storage_path or os.path.expanduser('~/.truefa')
-        self.vault_file = os.path.join(self.storage_path, '.vault')
+        self.vault_dir = os.path.join(self.storage_path, '.vault')
         
         # Ensure storage directory exists with proper permissions
         os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
@@ -305,83 +306,110 @@ class SecureVault:
             pass
         
         # Vault state
-        self._vault_config = None
+        self._initialized = False
         self._master_key = None
-        self._is_initialized = False
         
         # Load vault configuration if it exists
         self._load_vault_config()
 
     def _load_vault_config(self):
         """Load vault configuration from disk if it exists."""
-        if os.path.exists(self.vault_file):
+        if os.path.exists(self.vault_dir):
             try:
-                with open(self.vault_file, 'r') as f:
+                with open(os.path.join(self.vault_dir, "vault.meta"), 'r') as f:
                     self._vault_config = json.load(f)
-                    self._is_initialized = True
+                    self._initialized = True
             except Exception as e:
                 print(f"Error loading vault configuration: {e}")
                 self._vault_config = None
-                self._is_initialized = False
+                self._initialized = False
         else:
             self._vault_config = None
-            self._is_initialized = False
+            self._initialized = False
 
     def is_initialized(self):
         """Check if the vault has been initialized."""
-        return self._is_initialized
+        return self._initialized
 
     def is_unlocked(self):
         """Check if the vault is currently unlocked."""
         return truefa_crypto.is_vault_unlocked()
 
-    def create_vault(self, vault_password, master_password):
+    def create_vault(self, vault_password, master_password=None):
         """
-        Create a new secure vault with the given passwords.
+        Create a new secure vault for storing the TOTP secrets.
         
-        This sets up the two-layer encryption:
-        1. Generates a vault key from the vault password
-        2. Generates a master key from the master password
-        3. Encrypts the master key with the vault key
-        4. Stores the encrypted master key and vault salt
+        Args:
+            vault_password: Password to unlock the vault in the future
+            master_password: Optional secondary password for additional encryption
+            
+        Returns:
+            bool: True if successful, False otherwise
+            
+        Security:
+        - Uses secure key derivation (Argon2id if available, else PBKDF2)
+        - Generates secure random salt
+        - Provides envelope encryption when master_password is supplied
         """
-        # Create the vault (generates and caches vault key)
-        vault_salt = truefa_crypto.create_vault(vault_password)
-        
-        # Generate a salt for the master key
-        master_salt = truefa_crypto.generate_salt()
-        
-        # Derive the master key
-        master_key = truefa_crypto.derive_master_key(master_password, master_salt)
-        
-        # Encrypt the master key with the vault key
-        encrypted_master_key = truefa_crypto.encrypt_master_key(master_key)
-        
-        # Store the vault configuration
-        self._vault_config = {
-            'vault_salt': vault_salt,
-            'master_salt': master_salt,
-            'encrypted_master_key': encrypted_master_key
-        }
-        
-        # Save to disk
-        with open(self.vault_file, 'w') as f:
-            json.dump(self._vault_config, f)
-        
-        self._is_initialized = True
-        return True
+        try:
+            print("Creating secure vault...")
+            # Initialize the vault if not already done
+            if not os.path.exists(self.vault_dir):
+                os.makedirs(self.vault_dir, exist_ok=True)
+                
+            # Generate a vault salt for key derivation
+            vault_salt = truefa_crypto.generate_salt()
+            
+            # Store the salt in the vault metadata
+            with open(os.path.join(self.vault_dir, "vault.meta"), "w") as f:
+                f.write(json.dumps({
+                    "salt": vault_salt,
+                    "version": "1.0",
+                    "created": datetime.now().isoformat()
+                }))
+                
+            # If master password provided, set up master key encryption
+            if master_password:
+                # Generate a salt for the master key
+                master_salt = truefa_crypto.generate_salt()
+                
+                # Derive the master key
+                master_key = truefa_crypto.derive_master_key(master_password, master_salt)
+                
+                # Encrypt the master key with the vault key
+                encrypted_master_key = truefa_crypto.encrypt_master_key(master_key)
+                
+                # Store the master key metadata
+                with open(os.path.join(self.vault_dir, "master.meta"), "w") as f:
+                    f.write(json.dumps({
+                        "salt": master_salt,
+                        "encrypted_key": encrypted_master_key,
+                        "version": "1.0"
+                    }))
+            
+            # Mark the vault as initialized
+            self._initialized = True
+            
+            # Unlock the vault automatically after creation
+            self.unlock(vault_password)
+            
+            print("Vault created successfully")
+            return True
+        except Exception as e:
+            print(f"Error creating vault: {e}")
+            return False
 
-    def unlock_vault(self, vault_password):
+    def unlock(self, vault_password):
         """
         Unlock the vault with the vault password.
         
         This allows access to the master key which can then be used
         to encrypt/decrypt individual TOTP secrets.
         """
-        if not self._is_initialized or not self._vault_config:
+        if not self._initialized or not self._vault_config:
             return False
         
-        vault_salt = self._vault_config.get('vault_salt')
+        vault_salt = self._vault_config.get('salt')
         if not vault_salt:
             return False
         
@@ -408,7 +436,11 @@ class SecureVault:
         
         try:
             # Decrypt the master key
-            encrypted_master_key = self._vault_config.get('encrypted_master_key')
+            encrypted_master_key = None
+            with open(os.path.join(self.vault_dir, "master.meta"), 'r') as f:
+                master_config = json.load(f)
+                encrypted_master_key = master_config.get('encrypted_key')
+            
             if not encrypted_master_key:
                 return None
             
@@ -425,14 +457,14 @@ class SecureVault:
             print(f"Error getting master key: {e}")
             return None
 
-    def lock_vault(self):
+    def lock(self):
         """Lock the vault, clearing all sensitive data from memory."""
         truefa_crypto.lock_vault()
         return True
 
     def change_vault_password(self, current_password, new_password):
         """Change the vault password."""
-        if not self.unlock_vault(current_password):
+        if not self.unlock(current_password):
             return False
         
         # Get the current master key
@@ -445,15 +477,22 @@ class SecureVault:
         master_key.clear()
         
         # Generate a new vault key and encrypt the master key with it
-        vault_salt = truefa_crypto.create_vault(new_password)
+        vault_salt = truefa_crypto.generate_salt()
         encrypted_master_key = truefa_crypto.encrypt_master_key(master_key_str)
         
         # Update and save configuration
-        self._vault_config['vault_salt'] = vault_salt
-        self._vault_config['encrypted_master_key'] = encrypted_master_key
+        with open(os.path.join(self.vault_dir, "vault.meta"), "w") as f:
+            f.write(json.dumps({
+                "salt": vault_salt,
+                "version": "1.0",
+                "created": datetime.now().isoformat()
+            }))
         
-        with open(self.vault_file, 'w') as f:
-            json.dump(self._vault_config, f)
+        with open(os.path.join(self.vault_dir, "master.meta"), "w") as f:
+            f.write(json.dumps({
+                "encrypted_key": encrypted_master_key,
+                "version": "1.0"
+            }))
         
         return True
 
@@ -470,11 +509,15 @@ class SecureVault:
         Note: This doesn't re-encrypt existing secrets, which would need to be
         handled separately in the application.
         """
-        if not self.unlock_vault(vault_password):
+        if not self.unlock(vault_password):
             return False, "Incorrect vault password"
         
         # Verify current master password
-        master_salt = self._vault_config.get('master_salt')
+        master_salt = None
+        with open(os.path.join(self.vault_dir, "master.meta"), 'r') as f:
+            master_config = json.load(f)
+            master_salt = master_config.get('salt')
+        
         if not master_salt:
             return False, "Vault configuration corrupted"
         
@@ -492,11 +535,12 @@ class SecureVault:
             encrypted_master_key = truefa_crypto.encrypt_master_key(new_master_key)
             
             # Update and save configuration
-            self._vault_config['master_salt'] = new_master_salt
-            self._vault_config['encrypted_master_key'] = encrypted_master_key
-            
-            with open(self.vault_file, 'w') as f:
-                json.dump(self._vault_config, f)
+            with open(os.path.join(self.vault_dir, "master.meta"), "w") as f:
+                f.write(json.dumps({
+                    "salt": new_master_salt,
+                    "encrypted_key": encrypted_master_key,
+                    "version": "1.0"
+                }))
             
             return True, "Master password changed successfully"
         except Exception as e:
