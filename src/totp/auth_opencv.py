@@ -27,6 +27,8 @@ import subprocess
 from ..security.secure_string import SecureString
 from ..security.secure_storage import SecureStorage
 import base64
+import datetime
+import traceback
 
 class TwoFactorAuth:
     """
@@ -227,83 +229,71 @@ class TwoFactorAuth:
             # Clean up the path
             image_path = image_path.strip().strip("'").strip('"')
             
-            # Convert to Path object for secure path manipulation
-            path = Path(image_path)
+            # Debug the path
+            print(f"DEBUG: Raw image path: {image_path}")
             
-            # If path is relative, assume it's relative to images_dir
-            if not path.is_absolute():
-                path = Path(self.images_dir) / path
+            # Convert to Path object for safer operations
+            path_obj = Path(image_path)
             
-            # Resolve path
-            resolved_path = path.resolve()
+            # Try several options to find the image
+            potential_paths = [
+                path_obj,                                       # As provided
+                Path(os.getcwd()) / path_obj,                   # Relative to CWD
+                Path(self.images_dir) / path_obj.name,          # In images dir
+                Path('assets') / path_obj.name,                 # In assets dir
+                Path(os.getcwd()) / 'assets' / path_obj.name,   # In CWD/assets
+            ]
             
-            # Verify file exists and is actually a file
-            if not resolved_path.exists() or not resolved_path.is_file():
-                return None
+            for potential_path in potential_paths:
+                print(f"DEBUG: Trying path: {potential_path}")
+                if potential_path.exists() and potential_path.is_file():
+                    # Make sure it's a valid image file based on extension
+                    if potential_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+                        print(f"DEBUG: Found valid image at: {potential_path}")
+                        return potential_path
             
-            return resolved_path
+            # If we get here, we didn't find a valid image
+            return None
             
-        except Exception:
+        except Exception as e:
+            print(f"DEBUG: Path validation error: {str(e)}")
             return None
 
     def generate_totp(self, secret=None):
-        """
-        Generate TOTP code from a secret.
-        
-        Args:
-            secret: Optional SecureString containing the TOTP secret.
-                   If None, uses the instance's current secret.
-                   
-        Returns:
-            tuple: (str: Current TOTP code or None if failed,
-                   int: Seconds until code expires or error message)
-                   
-        Security:
-        - Uses PyOTP library for secure TOTP generation
-        - Handles Base32 normalization and validation
-        - Returns generic error messages
-        """
-        # Use instance secret if none provided
-        secret = secret or self.secret
-        
+        """Generate TOTP code from a secret"""
+        if secret is None:
+            secret = self.secret
+            
         if not secret:
-            return None, "No secret key available"
-        
+            return None, 0
+            
         try:
-            # Get the secure string value temporarily
-            secret_value = str(secret)
+            # Extract the string from the SecureString and properly encode it for TOTP
+            secret_str = str(secret)
             
-            # Normalize the secret for better compatibility
-            # Try to make the input more lenient by converting to uppercase and removing non-Base32 chars
-            # Base32 only allows A-Z and 2-7
-            normalized_value = ''.join(c for c in secret_value.upper() if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+            # Debug the secret to check for issues
+            print(f"DEBUG: Secret length: {len(secret_str)}")
+            print(f"DEBUG: Secret (for testing only): {secret_str}")
             
-            if not normalized_value:
-                return None, "Secret contains no valid Base32 characters"
-                
-            # Force proper Base32 padding
-            # Base32 padding is applied in blocks of 8 characters
-            padding_length = (8 - (len(normalized_value) % 8)) % 8
-            normalized_value += '=' * padding_length
+            # Normalize the Base32 secret
+            # Remove spaces and make uppercase
+            secret_str = secret_str.replace(' ', '').upper()
             
-            # Generate the code using pyotp
-            try:
-                totp = pyotp.TOTP(normalized_value)
-                code = totp.now()
-                
-                # Get the remaining seconds
-                remaining = 30 - (int(time.time()) % 30)
-                
-                return code, remaining
-            except Exception as e:
-                # If there's still an error, it's likely an invalid Base32 format
-                # But don't clear the secret, just return the error
-                print(f"Warning: {str(e)}")
-                return None, f"Invalid TOTP secret format: {str(e)}"
-                
+            # Ensure only valid Base32 characters (A-Z, 2-7)
+            secret_str = ''.join(c for c in secret_str if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+            
+            # Generate TOTP with proper secret
+            totp = pyotp.TOTP(secret_str)
+            
+            # Get the current TOTP and the remaining time
+            code = totp.now()
+            remaining = totp.interval - datetime.datetime.now().timestamp() % totp.interval
+            
+            return code, int(remaining)
         except Exception as e:
-            print(f"Error generating TOTP code: {str(e)}")
-            return None, f"Error generating 2FA code: {str(e)}"
+            print(f"Warning: {str(e)}")
+            traceback.print_exc()  # For debugging
+            return None, 0
 
     def continuous_generate(self, callback=None):
         """
