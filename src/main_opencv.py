@@ -54,33 +54,44 @@ def main():
                 print("Secret key successfully extracted from QR code!")
                 
                 # Generate a code immediately to verify
-                code, remaining = auth.generate_totp()
+                code, remaining_or_error = auth.generate_totp()
                 if code:
-                    print(f"Current code: {code} (expires in {remaining}s)")
+                    print(f"Current code: {code} (expires in {remaining_or_error}s)")
                 else:
-                    print("Invalid secret key format. Please try again.")
-                    auth.cleanup()
+                    print(f"Error: {remaining_or_error}")
+                    if "Invalid TOTP secret format" not in remaining_or_error and "Error generating 2FA code" not in remaining_or_error:
+                        auth.cleanup()
             
             elif choice == '2':
                 # Auto-cleanup before new secret
                 if auth.secret:
                     auth.cleanup()
                 
+                print("\nNote: Secret keys must be Base32 encoded (A-Z, 2-7)")
+                print("If you're entering a test key, try 'ABCDEFGHIJKLMNOP'")
+                
                 secret_key = input("Enter your secret key: ")
                 if not secret_key.strip():
                     print("Secret key cannot be empty.")
+                    continue
+                
+                # Convert to uppercase and validate characters
+                secret_key = secret_key.upper()
+                if not any(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567' for c in secret_key):
+                    print("Error: Secret key must contain at least one valid Base32 character (A-Z, 2-7)")
                     continue
                 
                 auth.secret = SecureString(secret_key)
                 print("Secret key successfully saved!")
                 
                 # Generate a code immediately to verify
-                code, remaining = auth.generate_totp()
+                code, remaining_or_error = auth.generate_totp()
                 if code:
-                    print(f"Current code: {code} (expires in {remaining}s)")
+                    print(f"Current code: {code} (expires in {remaining_or_error}s)")
                 else:
-                    print("Invalid secret key format. Please try again.")
-                    auth.cleanup()
+                    print(f"Error: {remaining_or_error}")
+                    if "Invalid TOTP secret format" not in remaining_or_error and "Error generating 2FA code" not in remaining_or_error:
+                        auth.cleanup()
             
             elif choice == '3':
                 if not auth.secret:
