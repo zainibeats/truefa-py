@@ -308,6 +308,7 @@ class SecureVault:
         # Vault state
         self._initialized = False
         self._master_key = None
+        self._is_unlocked = False
         
         # Load vault configuration if it exists
         self._load_vault_config()
@@ -333,7 +334,7 @@ class SecureVault:
 
     def is_unlocked(self):
         """Check if the vault is currently unlocked."""
-        return truefa_crypto.is_vault_unlocked()
+        return self._is_unlocked
 
     def create_vault(self, vault_password, master_password=None):
         """
@@ -403,21 +404,38 @@ class SecureVault:
         """
         Unlock the vault with the vault password.
         
-        This allows access to the master key which can then be used
+        This decrypts the master key with the vault password, which can then be used
         to encrypt/decrypt individual TOTP secrets.
         """
-        if not self._initialized or not self._vault_config:
+        if not self._initialized:
+            print("Vault not initialized")
             return False
         
-        vault_salt = self._vault_config.get('salt')
-        if not vault_salt:
-            return False
-        
-        # Unlock the vault (derives and caches vault key)
         try:
-            truefa_crypto.unlock_vault(vault_password, vault_salt)
-            return True
-        except Exception:
+            # Read the vault metadata
+            with open(os.path.join(self.vault_dir, "vault.meta"), "r") as f:
+                vault_meta = json.load(f)
+                vault_salt = vault_meta.get('salt')
+            
+            if not vault_salt:
+                print("Invalid vault metadata: missing salt")
+                return False
+            
+            # Unlock the vault using the vault key
+            unlocked = truefa_crypto.unlock_vault(vault_password, vault_salt)
+            
+            if unlocked:
+                self._is_unlocked = True
+                return True
+            else:
+                print("Failed to unlock vault")
+                return False
+                
+        except FileNotFoundError:
+            print(f"Vault metadata not found at {self.vault_dir}")
+            return False
+        except Exception as e:
+            print(f"Error unlocking vault: {e}")
             return False
 
     def get_master_key(self):
@@ -460,6 +478,7 @@ class SecureVault:
     def lock(self):
         """Lock the vault, clearing all sensitive data from memory."""
         truefa_crypto.lock_vault()
+        self._is_unlocked = False
         return True
 
     def change_vault_password(self, current_password, new_password):
