@@ -356,14 +356,24 @@ class SecureVault:
             print("Creating secure vault...")
             # Initialize the vault directories
             try:
-                # Ensure the parent directories exist first (.truefa)
-                parent_dir = os.path.dirname(self.vault_dir)
-                if not os.path.exists(parent_dir):
-                    os.makedirs(parent_dir, exist_ok=True)
+                # Ensure the vault directory exists with proper permissions
+                Path(self.vault_dir).mkdir(parents=True, exist_ok=True)
+                
+                # Try to set secure permissions on the vault directory
+                try:
+                    os.chmod(self.vault_dir, 0o700)
+                except Exception as perm_error:
+                    print(f"Warning: Could not set permissions on vault directory: {perm_error}")
                     
-                # Then create the vault directory
-                if not os.path.exists(self.vault_dir):
-                    os.makedirs(self.vault_dir, exist_ok=True)
+                # Verify the vault directory is writable
+                test_file = os.path.join(self.vault_dir, ".test")
+                try:
+                    with open(test_file, 'w') as f:
+                        f.write('test')
+                    os.remove(test_file)
+                except Exception as e:
+                    print(f"Error: Vault directory is not writable: {e}")
+                    return False
             except Exception as e:
                 print(f"Error creating vault directories: {e}")
                 return False
@@ -372,12 +382,17 @@ class SecureVault:
             vault_salt = truefa_crypto.generate_salt()
             
             # Store the salt in the vault metadata
-            with open(os.path.join(self.vault_dir, "vault.meta"), "w") as f:
-                f.write(json.dumps({
-                    "salt": vault_salt,
-                    "version": "1.0",
-                    "created": datetime.now().isoformat()
-                }))
+            vault_meta_path = os.path.join(self.vault_dir, "vault.meta")
+            try:
+                with open(vault_meta_path, "w") as f:
+                    f.write(json.dumps({
+                        "salt": vault_salt,
+                        "version": "1.0",
+                        "created": datetime.now().isoformat()
+                    }))
+            except Exception as write_error:
+                print(f"Error writing vault metadata: {write_error}")
+                return False
                 
             # If master password provided, set up master key encryption
             if master_password:
@@ -391,12 +406,17 @@ class SecureVault:
                 encrypted_master_key = truefa_crypto.encrypt_master_key(master_key)
                 
                 # Store the master key metadata
-                with open(os.path.join(self.vault_dir, "master.meta"), "w") as f:
-                    f.write(json.dumps({
-                        "salt": master_salt,
-                        "encrypted_key": encrypted_master_key,
-                        "version": "1.0"
-                    }))
+                master_meta_path = os.path.join(self.vault_dir, "master.meta")
+                try:
+                    with open(master_meta_path, "w") as f:
+                        f.write(json.dumps({
+                            "salt": master_salt,
+                            "encrypted_key": encrypted_master_key,
+                            "version": "1.0"
+                        }))
+                except Exception as write_error:
+                    print(f"Error writing master key metadata: {write_error}")
+                    return False
             
             # Mark the vault as initialized
             self._initialized = True
