@@ -43,32 +43,27 @@ class SecureStorage:
     - GPG-based secret export
     """
     
-    def __init__(self):
+    def __init__(self, storage_path=None):
         """
-        Initialize secure storage.
+        Initialize the secure storage with a specified path.
         
-        Sets up:
-        - Storage directories with secure permissions
-        - Secure vault initialization
-        - Master password state
-        - Key derivation parameters
-        
-        Security:
-        - Creates directories with 0700 permissions
-        - Validates storage directory writability
-        - Loads existing master password securely
+        Args:
+            storage_path (str, optional): Path to use for storing secrets.
+                Defaults to ~/.truefa
         """
-        self.salt = None
+        self.storage_path = storage_path or os.path.join(os.path.expanduser("~"), ".truefa")
+        
+        # Initialize the vault
+        self.vault = SecureVault(self.storage_path)
+        
+        # State variables
         self.key = None
-        self.master_hash = None
         self._is_unlocked = False
-        self.storage_path = os.path.expanduser('~/.truefa')
-        self.exports_path = os.path.join(self.storage_path, 'exports')
-        os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
-        os.makedirs(self.exports_path, mode=0o700, exist_ok=True)
         
-        # Initialize the secure vault
-        self.vault = SecureVault(storage_path=self.storage_path)
+        # Set up storage directories with secure permissions
+        os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
+        self.exports_path = os.path.join(self.storage_path, 'exports')
+        os.makedirs(self.exports_path, mode=0o700, exist_ok=True)
         
         # Set secure permissions
         try:
