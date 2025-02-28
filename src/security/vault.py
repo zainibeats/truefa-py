@@ -13,6 +13,12 @@ from .secure_string import SecureString
 # Import our Rust crypto module with proper fallbacks
 try:
     import truefa_crypto
+    from truefa_crypto import (
+        secure_random_bytes, is_vault_unlocked, vault_exists, 
+        create_vault, unlock_vault, lock_vault, generate_salt,
+        derive_master_key, encrypt_master_key, decrypt_master_key,
+        verify_signature
+    )
     print("Successfully imported truefa_crypto module")
 except ImportError as e:
     print(f"WARNING: Failed to import truefa_crypto: {str(e)}")
@@ -131,8 +137,7 @@ except ImportError as e:
                 salt.encode('utf-8'),
                 100000
             )
-            self._master_key = base64.b64encode(key).decode('utf-8')
-            return self._master_key
+            return base64.b64encode(key).decode('utf-8')
             
         def encrypt_master_key(self, master_key):
             """Encrypt the master key with the vault key."""
@@ -145,10 +150,51 @@ except ImportError as e:
             print(f"DUMMY CALL: decrypt_master_key(({encrypted_key},), {{}})")
             # For fallback, we'll just return the encrypted key since we don't have the vault key
             return encrypted_key
+            
+        def verify_signature(self, message, signature, public_key):
+            """Verify a digital signature using the Rust crypto library."""
+            print(f"DUMMY CALL: verify_signature((), {{}})")
+            # For fallback, we'll just return True for now
+            return True
     
     # Create instance of dummy module 
     truefa_crypto = _DummyModule()
-    print("Created fallback truefa_crypto module")
+    
+    # Also define the individual functions at module scope for direct import
+    def create_vault(password):
+        return truefa_crypto.create_vault(password)
+        
+    def unlock_vault(password, salt):
+        return truefa_crypto.unlock_vault(password, salt)
+        
+    def lock_vault():
+        return truefa_crypto.lock_vault()
+        
+    def is_vault_unlocked():
+        return truefa_crypto.is_vault_unlocked()
+        
+    def vault_exists():
+        return truefa_crypto.vault_exists()
+        
+    def generate_salt():
+        return truefa_crypto.generate_salt()
+        
+    def derive_master_key(password, salt):
+        return truefa_crypto.derive_master_key(password, salt)
+        
+    def encrypt_master_key(master_key):
+        return truefa_crypto.encrypt_master_key(master_key)
+        
+    def decrypt_master_key(encrypted_key):
+        return truefa_crypto.decrypt_master_key(encrypted_key)
+        
+    def secure_random_bytes(size):
+        return truefa_crypto.secure_random_bytes(size)
+        
+    def verify_signature(message, signature, public_key):
+        return truefa_crypto.verify_signature(message, signature, public_key)
+    
+    print("Created fallback truefa_crypto module with function proxies")
 
 class SecureVault:
     """
