@@ -63,6 +63,24 @@ run_opencv.bat          # With QR scanning
 python -m src.main
 ```
 
+## Recent Improvements
+
+### Enhanced Security Architecture
+- **Robust Fallback Design**: The application now gracefully falls back to Python implementations when the Rust library cannot be loaded or when specific functions are missing.
+- **Advanced Vault System**: Implemented a secure storage vault with proper envelope encryption for additional security.
+- **Improved Error Handling**: Better error messages and debugging output throughout the application.
+
+### Fixed Issues
+- Resolved PyInstaller packaging issues
+- Fixed TOTP generation and QR code scanning
+- Ensured resource files are correctly packaged with the executable
+- Enhanced file path handling for better cross-platform support
+
+### Development
+- Added automated tests for critical functionality 
+- Improved build scripts with better validation and error reporting
+- Enhanced code structure for better maintainability
+
 ## Basic Usage
 
 1. Launch TrueFA using your chosen installation method
