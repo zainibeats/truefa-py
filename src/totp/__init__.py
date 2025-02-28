@@ -2,6 +2,7 @@
 TOTP-related modules for TrueFA
 """
 
-from .auth import TwoFactorAuth
+# Import the OpenCV-based implementation instead of the pyzbar-based one
+from .auth_opencv import TwoFactorAuth
 
 __all__ = ['TwoFactorAuth'] 
