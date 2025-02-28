@@ -386,6 +386,8 @@ class TwoFactorAuth:
                 self.storage.vault.create_vault(vault_password, master_password)
                 self.storage.vault.unlock_vault(vault_password)
                 self.is_vault_mode = True
+                # Set storage to unlocked state
+                self.storage._unlock()
                 print("Vault created and unlocked successfully.")
             except Exception as e:
                 return f"Failed to create vault: {str(e)}"
@@ -400,6 +402,8 @@ class TwoFactorAuth:
             try:
                 if not self.storage.vault.unlock_vault(vault_password):
                     return "Incorrect vault password"
+                # Set storage to unlocked state
+                self.storage._unlock()
                 print("Vault unlocked successfully.")
             except Exception as e:
                 return f"Failed to unlock vault: {str(e)}"
