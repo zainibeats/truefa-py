@@ -1,5 +1,12 @@
 # TrueFA Changelog
 
+## Version 0.2.1 - 2025-02-28
+
+### Fixed
+- Resolved issue with saving secrets for the first time by properly prompting for vault and master passwords
+- Improved error handling in the secure storage implementation
+- Fixed the OpenCV edition to properly handle vault creation
+
 ## Version 0.2.0 - 2025-02-28
 
 ### Added
