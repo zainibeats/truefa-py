@@ -197,6 +197,33 @@ try:
                 
                 # Set up the function signatures
                 try:
+                    # Check for the core functions we need
+                    required_functions = [
+                        'secure_random_bytes',
+                        'create_vault',
+                        'unlock_vault',
+                        'is_vault_unlocked',
+                        'lock_vault',
+                        'generate_salt',
+                        'derive_master_key',
+                        'encrypt_master_key',
+                        'decrypt_master_key',
+                        'create_secure_string',
+                        'verify_signature'
+                    ]
+                    
+                    # Verify that all required functions exist
+                    missing_functions = []
+                    for func_name in required_functions:
+                        if not hasattr(_lib, func_name):
+                            missing_functions.append(func_name)
+                    
+                    if missing_functions:
+                        print(f"Error loading DLL {dll_path}: functions {', '.join(missing_functions)} not found")
+                        continue
+                    
+                    # If we get here, all functions exist, so set up their signatures
+                    
                     # Override the fallback functions with the DLL functions
                     
                     # Create secure_random_bytes function with proper signature
