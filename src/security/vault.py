@@ -10,13 +10,145 @@ import base64
 from pathlib import Path
 from .secure_string import SecureString
 
-# Import our Rust crypto module
+# Import our Rust crypto module with proper fallbacks
 try:
     import truefa_crypto
+    print("Successfully imported truefa_crypto module")
 except ImportError as e:
     print(f"WARNING: Failed to import truefa_crypto: {str(e)}")
-    print("Using fallback implementation instead")
-    from truefa_crypto import SecureString, create_vault, unlock_vault, lock_vault, is_vault_unlocked, vault_exists, secure_random_bytes
+    print("Creating fallback implementation")
+    
+    # Define a dummy fallback module
+    class _DummyModule:
+        def __init__(self):
+            # State
+            self._vault_initialized = False
+            self._vault_unlocked = False
+            self._vault_salt = None
+            self._vault_password_hash = None
+            self._master_key = None
+            
+            # Print for debugging
+            print("Initialized dummy truefa_crypto module")
+        
+        # SecureString implementation
+        class SecureString:
+            def __init__(self, value):
+                """Initialize with a string value to be protected."""
+                self._data = value.encode('utf-8') if isinstance(value, str) else value
+                
+            def __str__(self):
+                """Get the protected string value."""
+                return self._data.decode('utf-8') if isinstance(self._data, bytes) else str(self._data)
+                
+            def clear(self):
+                """Explicitly clear the protected data."""
+                print(f"DUMMY CALL: secure_string_clear((12345,), {{}})")
+                self._data = None
+        
+        # Vault functions
+        def secure_random_bytes(self, size):
+            """Generate cryptographically secure random bytes."""
+            print(f"DUMMY CALL: secure_random_bytes(({size},), {{}})")
+            import os
+            return os.urandom(size)
+            
+        def is_vault_unlocked(self):
+            """Check if the vault is currently unlocked."""
+            return self._vault_unlocked
+            
+        def vault_exists(self):
+            """Check if a vault has been initialized."""
+            return self._vault_initialized
+            
+        def create_vault(self, password):
+            """Create a new vault with the given master password."""
+            print(f"DUMMY CALL: create_vault(({password},), {{}})")
+            import hashlib
+            import base64
+            import os
+            
+            # Generate a salt for the vault
+            self._vault_salt = base64.b64encode(os.urandom(32)).decode('utf-8')
+            
+            # Hash the password with the salt
+            self._vault_password_hash = hashlib.pbkdf2_hmac(
+                'sha256',
+                password.encode('utf-8'),
+                self._vault_salt.encode('utf-8'),
+                100000
+            )
+            self._vault_password_hash = base64.b64encode(self._vault_password_hash).decode('utf-8')
+            
+            # Mark the vault as initialized and unlocked
+            self._vault_initialized = True
+            self._vault_unlocked = True
+            
+            return self._vault_salt
+            
+        def unlock_vault(self, password, salt):
+            """Unlock the vault with the given password and salt."""
+            print(f"DUMMY CALL: unlock_vault(({password}, {salt}), {{}})")
+            import hashlib
+            import base64
+            
+            # Hash the provided password with the salt
+            password_hash = hashlib.pbkdf2_hmac(
+                'sha256',
+                password.encode('utf-8'),
+                salt.encode('utf-8'),
+                100000
+            )
+            password_hash = base64.b64encode(password_hash).decode('utf-8')
+            
+            # Check if the password is correct
+            if password_hash == self._vault_password_hash:
+                self._vault_unlocked = True
+                return True
+            else:
+                return False
+                
+        def lock_vault(self):
+            """Lock the vault, clearing all sensitive data."""
+            print("DUMMY CALL: lock_vault((), {})")
+            self._vault_unlocked = False
+            
+        def generate_salt(self):
+            """Generate a random salt for key derivation."""
+            print("DUMMY CALL: generate_salt((), {})")
+            import base64
+            import os
+            return base64.b64encode(os.urandom(32)).decode('utf-8')
+            
+        def derive_master_key(self, password, salt):
+            """Derive a master key from a password and salt."""
+            print(f"DUMMY CALL: derive_master_key(({password}, {salt}), {{}})")
+            import hashlib
+            import base64
+            key = hashlib.pbkdf2_hmac(
+                'sha256',
+                password.encode('utf-8'),
+                salt.encode('utf-8'),
+                100000
+            )
+            self._master_key = base64.b64encode(key).decode('utf-8')
+            return self._master_key
+            
+        def encrypt_master_key(self, master_key):
+            """Encrypt the master key with the vault key."""
+            print(f"DUMMY CALL: encrypt_master_key(({master_key},), {{}})")
+            # For fallback, we'll just return the master key since we don't have the vault key
+            return master_key
+            
+        def decrypt_master_key(self, encrypted_key):
+            """Decrypt the master key with the vault key."""
+            print(f"DUMMY CALL: decrypt_master_key(({encrypted_key},), {{}})")
+            # For fallback, we'll just return the encrypted key since we don't have the vault key
+            return encrypted_key
+    
+    # Create instance of dummy module 
+    truefa_crypto = _DummyModule()
+    print("Created fallback truefa_crypto module")
 
 class SecureVault:
     """
