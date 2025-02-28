@@ -113,12 +113,14 @@ class SecureStorage:
 
     def _unlock(self):
         """
-        Set the storage to unlocked state.
-        
-        Security:
-        - Only sets state, does not handle keys
+        Unlock the storage and prepare it for use.
         """
         self._is_unlocked = True
+        
+        # Try to use the vault's master key if available
+        if self.vault and self.vault.is_initialized() and self.vault.is_unlocked():
+            if self._handle_master_key_from_vault():
+                return
 
     def _lock(self):
         """
@@ -257,12 +259,53 @@ class SecureStorage:
         )
         self.key = kdf.derive(password.encode())
 
+    def _handle_master_key_from_vault(self):
+        """
+        Helper method to safely get and process the master key from the vault.
+        
+        Returns:
+            bool: True if the key was successfully obtained and set
+        """
+        if not self.vault.is_initialized() or not self.vault.is_unlocked():
+            return False
+            
+        try:
+            master_key = self.vault.get_master_key()
+            if not master_key:
+                return False
+                
+            key_str = master_key.get()
+            if not key_str:
+                master_key.clear()
+                return False
+                
+            # Make sure we have proper padding for base64
+            try:
+                # Add padding if needed
+                if isinstance(key_str, str):
+                    # Sometimes the padding isn't applied correctly, make sure we have it
+                    if len(key_str) % 4 != 0:
+                        padding = 4 - (len(key_str) % 4)
+                        key_str = key_str + ('=' * padding)
+                
+                # Decode the key
+                self.key = base64.b64decode(key_str.encode())
+                master_key.clear()
+                return True
+            except Exception as e:
+                print(f"Warning: Failed to process vault key: {e}")
+                master_key.clear()
+                return False
+        except Exception as e:
+            print(f"Warning: Failed to get vault key: {e}")
+            return False
+
     def encrypt_secret(self, secret, name):
         """
         Encrypt a TOTP secret.
         
         Args:
-            secret: Secret to encrypt
+            secret: Secret to encrypt (string or bytes)
             name: Name to associate with the secret
             
         Returns:
@@ -276,11 +319,11 @@ class SecureStorage:
         """
         # Use vault key if available
         if self.vault.is_initialized() and self.vault.is_unlocked():
-            master_key = self.vault.get_master_key()
-            if master_key and master_key.get():
-                if not self.key:
-                    self.key = base64.b64decode(master_key.get().encode())
-                master_key.clear()
+            if self._handle_master_key_from_vault():
+                pass
+            else:
+                # Generate a random key if needed
+                self.key = secrets.token_bytes(32)
         
         if not self.key:
             raise ValueError("No encryption key set")
@@ -291,13 +334,25 @@ class SecureStorage:
         # Create cipher
         aesgcm = AESGCM(self.key)
         
+        # Ensure secret is in bytes format
+        if isinstance(secret, str):
+            secret_bytes = secret.encode()
+        elif isinstance(secret, bytes):
+            secret_bytes = secret
+        else:
+            secret_bytes = str(secret).encode()
+        
         # Encrypt with authenticated data
         ciphertext = aesgcm.encrypt(
             nonce,
-            secret.encode(),
+            secret_bytes,
             name.encode()
         )
         
+        # Generate salt if not present
+        if not hasattr(self, 'salt') or self.salt is None:
+            self.salt = secrets.token_bytes(16)
+            
         # Combine components for storage
         return base64.b64encode(self.salt + nonce + ciphertext).decode('utf-8')
 
@@ -397,7 +452,7 @@ class SecureStorage:
         
         Args:
             name: Name to associate with the secret
-            secret: Optional SecureString containing the secret (uses current secret if None)
+            secret: Optional SecureString or string containing the secret (uses current secret if None)
             password: Optional password for encryption (uses current key if None)
             
         Returns:
@@ -434,8 +489,17 @@ class SecureStorage:
                 # No secret provided, try to use current secret
                 return "No secret provided"
                 
+            # Check if secret is a SecureString object or a regular string
+            secret_data = None
+            if hasattr(secret, 'get') and callable(getattr(secret, 'get')):
+                # It's a SecureString object
+                secret_data = secret.get()
+            else:
+                # It's a regular string
+                secret_data = str(secret)
+                
             # Encrypt the secret
-            encrypted = self.encrypt_secret(secret.get(), name)
+            encrypted = self.encrypt_secret(secret_data, name)
             
             # Save to file
             secret_path = os.path.join(self.storage_path, f"{name}.enc")
