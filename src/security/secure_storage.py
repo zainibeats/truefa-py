@@ -274,27 +274,32 @@ class SecureStorage:
         self._unlock()
         return True
 
-    def derive_key(self, password):
+    def derive_key(self, password, salt=None):
         """
-        Derive encryption key from password.
+        Derive an encryption key from a password and salt
         
         Args:
-            password: Password to derive key from
-            
-        Security:
-        - Uses Scrypt with strong parameters
-        - Generates new salt if needed
+            password (str): Password to derive key from
+            salt (bytes, optional): Salt to use for key derivation.
+                If None, a new salt will be generated
+                
+        Returns:
+            bytes: Derived key
         """
-        if not self.salt:
-            self.salt = secrets.token_bytes(16)
-        kdf = Scrypt(
-            salt=self.salt,
-            length=32,
-            n=2**14,
-            r=8,
-            p=1,
+        if not salt:
+            # Generate a secure random salt
+            salt = os.urandom(32)
+        
+        # Use PBKDF2 to derive a key
+        import hashlib
+        key = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode('utf-8'),
+            salt,
+            100000  # 100,000 iterations
         )
-        self.key = kdf.derive(password.encode())
+        
+        return key
 
     def _handle_master_key_from_vault(self):
         """
