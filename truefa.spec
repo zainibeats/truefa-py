@@ -4,9 +4,9 @@
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[('truefa_crypto/truefa_crypto.dll', 'truefa_crypto')],
-    datas=[('C:\\Users\\dontb\\Documents\\repos\\truefa-py\\images', 'images')],
-    hiddenimports=['cryptography', 'pyotp', 'qrcode', 'PIL', 'PIL._tkinter_finder', 'PIL.ImageFilter', 'pillow', 'cv2', 'numpy'],
+    binaries=[('truefa_crypto\\truefa_crypto.dll', 'truefa_crypto'), ('truefa_crypto\\truefa_crypto.dll', '.')],
+    datas=[('truefa_crypto', 'truefa_crypto'), ('C:\\Users\\dontb\\Documents\\repos\\truefa-py\\images', 'images')],
+    hiddenimports=['cryptography', 'pyotp', 'qrcode', 'PIL', 'PIL._tkinter_finder', 'PIL.ImageFilter', 'pillow', 'cv2', 'numpy', 'truefa_crypto'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
