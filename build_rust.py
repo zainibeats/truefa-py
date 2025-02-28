@@ -73,6 +73,46 @@ def build_rust_module():
             print(f"Cargo build failed:\n{result.stderr}")
             return False
         
+        # Verify the DLL was created and contains the expected functions
+        dll_path = os.path.join("target", "release", "truefa_crypto.dll")
+        if os.path.exists(dll_path):
+            print(f"DLL built successfully at: {os.path.abspath(dll_path)}")
+            print("Checking exported functions...")
+            try:
+                # Try to load the DLL using ctypes
+                import ctypes
+                lib = ctypes.CDLL(dll_path)
+                
+                # Check for key functions
+                required_functions = [
+                    'secure_random_bytes',
+                    'create_vault',
+                    'unlock_vault',
+                    'is_vault_unlocked',
+                    'lock_vault',
+                    'generate_salt',
+                    'derive_master_key',
+                    'encrypt_master_key',
+                    'decrypt_master_key',
+                    'create_secure_string',
+                    'verify_signature'
+                ]
+                
+                missing = []
+                for func in required_functions:
+                    if not hasattr(lib, func):
+                        missing.append(func)
+                
+                if missing:
+                    print(f"WARNING: The following functions are missing from the DLL: {', '.join(missing)}")
+                    print("This may cause issues when loading the library at runtime.")
+                else:
+                    print("All required functions are present in the DLL.")
+            except Exception as e:
+                print(f"Error checking DLL: {e}")
+        else:
+            print(f"WARNING: DLL not found at expected location: {os.path.abspath(dll_path)}")
+            
         print("Rust module built successfully")
         return True
     except Exception as e:
