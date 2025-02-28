@@ -16,14 +16,29 @@ Key Features:
 """
 
 import os
+import sys
 import json
 import base64
 import secrets
-import platform
+import tempfile
 import subprocess
+from datetime import datetime
 from pathlib import Path
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+try:
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+    from cryptography.hazmat.backends import default_backend
+    HAS_SCRYPT = True
+except ImportError:
+    HAS_SCRYPT = False
+
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+
 from .secure_string import SecureString
 from .vault import SecureVault
 
@@ -91,20 +106,8 @@ class SecureStorage:
 
     @property
     def is_unlocked(self):
-        """
-        Check if storage is unlocked and ready for operations.
-        
-        Returns:
-            bool: True if storage is unlocked and keys are available
-            
-        Security:
-        - Checks both vault and legacy unlock states
-        - Verifies key availability
-        """
-        if self.vault.is_initialized():
-            return self.vault.is_unlocked() and (self._is_unlocked or self.key is not None)
-        else:
-            return self._is_unlocked and self.key is not None
+        """Check if the storage is unlocked."""
+        return self._is_unlocked
         
     def create_vault(self, vault_password, master_password):
         """
@@ -214,14 +217,25 @@ class SecureStorage:
         if not self.master_hash or not self.salt:
             return False
         try:
-            kdf = Scrypt(
-                salt=self.salt,
-                length=32,
-                n=2**14,
-                r=8,
-                p=1,
-            )
-            kdf.verify(password.encode(), self.master_hash)
+            if HAS_SCRYPT:
+                kdf = Scrypt(
+                    salt=self.salt,
+                    length=32,
+                    n=2**14,
+                    r=8,
+                    p=1,
+                )
+                kdf.verify(password.encode(), self.master_hash)
+            else:
+                import hashlib
+                key = hashlib.pbkdf2_hmac(
+                    'sha256',
+                    password.encode('utf-8'),
+                    self.salt,
+                    100000  # 100,000 iterations
+                )
+                if key != self.master_hash:
+                    return False
             self.derive_key(password)
             self._unlock()
             return True
@@ -252,14 +266,23 @@ class SecureStorage:
                 
         # Legacy master password setup
         self.salt = secrets.token_bytes(16)
-        kdf = Scrypt(
-            salt=self.salt,
-            length=32,
-            n=2**14,
-            r=8,
-            p=1,
-        )
-        self.master_hash = kdf.derive(password.encode())
+        if HAS_SCRYPT:
+            kdf = Scrypt(
+                salt=self.salt,
+                length=32,
+                n=2**14,
+                r=8,
+                p=1,
+            )
+            self.master_hash = kdf.derive(password.encode())
+        else:
+            import hashlib
+            self.master_hash = hashlib.pbkdf2_hmac(
+                'sha256',
+                password.encode('utf-8'),
+                self.salt,
+                100000  # 100,000 iterations
+            )
         
         # Save master password hash
         data = {
@@ -290,14 +313,23 @@ class SecureStorage:
             # Generate a secure random salt
             salt = os.urandom(32)
         
-        # Use PBKDF2 to derive a key
-        import hashlib
-        key = hashlib.pbkdf2_hmac(
-            'sha256',
-            password.encode('utf-8'),
-            salt,
-            100000  # 100,000 iterations
-        )
+        if HAS_SCRYPT:
+            kdf = Scrypt(
+                salt=salt,
+                length=32,
+                n=2**14,
+                r=8,
+                p=1,
+            )
+            key = kdf.derive(password.encode())
+        else:
+            import hashlib
+            key = hashlib.pbkdf2_hmac(
+                'sha256',
+                password.encode('utf-8'),
+                salt,
+                100000  # 100,000 iterations
+            )
         
         return key
 
@@ -374,7 +406,17 @@ class SecureStorage:
         nonce = secrets.token_bytes(12)
         
         # Create cipher
-        aesgcm = AESGCM(self.key)
+        if HAS_CRYPTO:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            aesgcm = AESGCM(self.key)
+        else:
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            cipher = Cipher(
+                algorithms.AES(self.key),
+                modes.GCM(nonce),
+                backend=default_backend()
+            )
+            aesgcm = cipher.encryptor()
         
         # Ensure secret is in bytes format
         if isinstance(secret, str):
@@ -385,11 +427,14 @@ class SecureStorage:
             secret_bytes = str(secret).encode()
         
         # Encrypt with authenticated data
-        ciphertext = aesgcm.encrypt(
-            nonce,
-            secret_bytes,
-            name.encode()
-        )
+        if HAS_CRYPTO:
+            ciphertext = aesgcm.encrypt(
+                nonce,
+                secret_bytes,
+                name.encode()
+            )
+        else:
+            ciphertext = aesgcm.update(secret_bytes) + aesgcm.finalize()
         
         # Generate salt if not present
         if not hasattr(self, 'salt') or self.salt is None:
@@ -425,12 +470,23 @@ class SecureStorage:
             ciphertext = data[28:]
             
             # Decrypt with authentication
-            aesgcm = AESGCM(self.key)
-            plaintext = aesgcm.decrypt(
-                nonce,
-                ciphertext,
-                name.encode()
-            )
+            if HAS_CRYPTO:
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                aesgcm = AESGCM(self.key)
+                plaintext = aesgcm.decrypt(
+                    nonce,
+                    ciphertext,
+                    name.encode()
+                )
+            else:
+                from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                cipher = Cipher(
+                    algorithms.AES(self.key),
+                    modes.GCM(nonce),
+                    backend=default_backend()
+                )
+                decryptor = cipher.decryptor()
+                plaintext = decryptor.update(ciphertext) + decryptor.finalize()
             
             return plaintext.decode('utf-8')
         except Exception:
