@@ -110,31 +110,73 @@ class SecureStorage:
             return self.vault.is_unlocked() and (self._is_unlocked or self.key is not None)
         else:
             return self._is_unlocked and self.key is not None
-
-    def _unlock(self):
-        """
-        Unlock the storage and prepare it for use.
-        """
-        self._is_unlocked = True
         
-        # Try to use the vault's master key if available
-        if self.vault and self.vault.is_initialized() and self.vault.is_unlocked():
-            if self._handle_master_key_from_vault():
-                return
+    def create_vault(self, vault_password, master_password):
+        """
+        Create a new secure vault for storing TOTP secrets.
+        
+        Args:
+            vault_password: Password to unlock the vault
+            master_password: Password to encrypt individual secrets
+            
+        Returns:
+            bool: True if successful, False if failed
+            
+        Security:
+        - Uses secure key derivation for both passwords
+        - Uses envelope encryption for layered security
+        """
+        try:
+            success = self.vault.create_vault(vault_password, master_password)
+            if success:
+                self._is_unlocked = True
+                print("Secure vault created successfully")
+            return success
+        except Exception as e:
+            print(f"Error creating vault: {str(e)}")
+            return False
+
+    def unlock(self, password=None):
+        """
+        Unlock secure storage with the provided password.
+        
+        If the vault is initialized, it will attempt to unlock the vault.
+        Otherwise, it will use the password to decrypt legacy secrets.
+        
+        Args:
+            password: Password to unlock storage
+            
+        Returns:
+            bool: True if unlock successful, False otherwise
+        """
+        # Clear any existing key
+        self.key = None
+        self._is_unlocked = False
+        
+        # First try to unlock vault if initialized
+        if self.vault.is_initialized():
+            if self.vault.unlock(password):
+                self._is_unlocked = True
+                return True
+        
+        # Fall back to legacy mode
+        if password:
+            self.key = self.derive_key(password)
+            if self.key:
+                self._is_unlocked = True
+                return True
+        
+        return False
 
     def _lock(self):
         """
-        Lock storage and clear sensitive data.
-        
-        Security:
-        - Clears encryption key from memory
-        - Resets unlock state
-        - Locks vault if initialized
+        Lock the storage and clear sensitive data from memory.
         """
-        self._is_unlocked = False
-        self.key = None
         if self.vault.is_initialized():
-            self.vault.lock_vault()
+            self.vault.lock()
+        
+        self.key = None
+        self._is_unlocked = False
 
     def has_master_password(self):
         """
