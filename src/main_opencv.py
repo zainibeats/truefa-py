@@ -6,6 +6,7 @@ import sys
 import time
 import os
 from pathlib import Path
+import urllib.parse
 
 from src.security.secure_storage import SecureStorage
 from src.security.secure_string import SecureString
@@ -19,169 +20,188 @@ def main():
     try:
         # Print the images directory location
         print(f"\nNote: Place your QR code images in: {auth.images_dir}")
-        print("You can use either the full path or just the filename if it's in the images directory")
+        print("You can use either the full path or just the filename if it's in the images directory\n")
         
+        # Initialize the vault and secure storage
+        vault_path = Path.home() / ".truefa" / "vault.data"
+        vault_path.parent.mkdir(parents=True, exist_ok=True)
+        secure_storage = SecureStorage()
+        
+        # Main application loop
         while True:
-            # Auto-cleanup of old secrets (e.g., after 5 minutes)
-            if auth.secret and auth.secret.age() > 300:  # 5 minutes
-                print("\nAuto-clearing old secret for security...")
-                auth.cleanup()
-
+            # Display menu
             print("\n=== TrueFA (OpenCV Edition) ===")
             print("1. Load QR code from image")
             print("2. Enter secret key manually")
             print("3. Save current secret")
-            print("4. Load saved secret") 
+            print("4. Load saved secret")
             print("5. Export secrets")
             print("6. Clear screen")
             print("7. Exit")
             
-            choice = input("\nEnter your choice (1-7): ")
-            
-            if choice == '1':
-                # Auto-cleanup before new secret
-                if auth.secret:
-                    auth.cleanup()
+            try:
+                # Improved input handling for stdin
+                choice = input("\nEnter your choice (1-7): ").strip()
+                # Debug the input
+                print(f"DEBUG: Received input choice: '{choice}'")
                 
-                image_path = input("Enter the path to the QR code image: ")
-                secret, error = auth.extract_secret_from_qr(image_path)
-                
-                if error:
-                    print(f"Error: {error}")
-                    continue
-                
-                auth.secret = secret
-                print("Secret key successfully extracted from QR code!")
-                
-                # Generate a code immediately to verify
-                code, remaining_or_error = auth.generate_totp()
-                if code:
-                    print(f"Current code: {code} (expires in {remaining_or_error}s)")
-                else:
-                    print(f"Error: {remaining_or_error}")
-                    if "Invalid TOTP secret format" not in remaining_or_error and "Error generating 2FA code" not in remaining_or_error:
-                        auth.cleanup()
-            
-            elif choice == '2':
-                # Auto-cleanup before new secret
-                if auth.secret:
-                    auth.cleanup()
-                
-                print("\nNote: Secret keys must be Base32 encoded (A-Z, 2-7)")
-                print("If you're entering a test key, try 'ABCDEFGHIJKLMNOP'")
-                
-                secret_key = input("Enter your secret key: ")
-                if not secret_key.strip():
-                    print("Secret key cannot be empty.")
-                    continue
-                
-                # Convert to uppercase and validate characters
-                secret_key = secret_key.upper()
-                if not any(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567' for c in secret_key):
-                    print("Error: Secret key must contain at least one valid Base32 character (A-Z, 2-7)")
-                    continue
-                
-                auth.secret = SecureString(secret_key)
-                print("Secret key successfully saved!")
-                
-                # Generate a code immediately to verify
-                code, remaining_or_error = auth.generate_totp()
-                if code:
-                    print(f"Current code: {code} (expires in {remaining_or_error}s)")
-                else:
-                    print(f"Error: {remaining_or_error}")
-                    if "Invalid TOTP secret format" not in remaining_or_error and "Error generating 2FA code" not in remaining_or_error:
-                        auth.cleanup()
-            
-            elif choice == '3':
-                if not auth.secret:
-                    print("No secret key available to save.")
-                    continue
-                
-                name = input("Enter a name for this secret: ")
-                if not name.strip():
-                    print("Name cannot be empty.")
-                    continue
-                
-                error = auth.save_secret(name)
-                if error:
-                    print(f"Error: {error}")
-                else:
-                    print(f"Secret '{name}' saved successfully!")
-            
-            elif choice == '4':
-                # Show available secrets
-                saved_secrets = auth.list_saved_secrets()
-                
-                if not saved_secrets:
-                    print("No saved secrets found.")
-                    continue
-                
-                print("\nAvailable secrets:")
-                for i, name in enumerate(saved_secrets, 1):
-                    print(f"{i}. {name}")
-                
-                choice = input("\nEnter the number of the secret to load: ")
-                try:
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(saved_secrets):
-                        name = saved_secrets[idx]
-                        error = auth.load_secret(name)
+                if choice in ["1", "2", "3", "4", "5", "6", "7"]:
+                    if choice == "7":
+                        print("Exiting TrueFA. Goodbye!")
+                        break
                         
+                    elif choice == "6":
+                        # Clear the screen
+                        os.system('cls' if os.name == 'nt' else 'clear')
+                        continue
+                    
+                    elif choice == "1":
+                        # Handle QR code loading
+                        image_path = input("Enter image path or filename: ")
+                        secret, error = auth.extract_secret_from_qr(image_path)
                         if error:
                             print(f"Error: {error}")
                         else:
-                            print(f"Secret '{name}' loaded successfully!")
-                            
-                            # Generate a code immediately
+                            # Generate a code immediately to verify
                             code, remaining = auth.generate_totp()
                             if code:
                                 print(f"Current code: {code} (expires in {remaining}s)")
-                    else:
-                        print("Invalid selection.")
-                except ValueError:
-                    print("Please enter a valid number.")
-            
-            elif choice == '5':
-                export_path = input("Enter the export file path: ")
-                if not export_path.strip():
-                    print("Export path cannot be empty.")
-                    continue
-                
-                result = auth.export_secrets(export_path)
-                print(result)
-            
-            elif choice == '6':
-                clear_screen()
-            
-            elif choice == '7':
-                auth.cleanup()
-                print("Exiting securely...")
+                            else:
+                                print("Failed to generate TOTP code")
+                    
+                    elif choice == "2":
+                        # Handle manual secret entry
+                        secret_key = input("Enter TOTP secret (base32): ")
+                        issuer = input("Enter issuer name (optional): ")
+                        account = input("Enter account name (optional): ")
+                        
+                        secret_key = secret_key.upper().strip()
+                        auth.secret = SecureString(secret_key)
+                        
+                        # Set the issuer and account if provided
+                        if issuer or account:
+                            auth.issuer = issuer
+                            auth.account = account
+                        
+                        # Generate a code immediately to verify
+                        code, remaining = auth.generate_totp()
+                        if code:
+                            print(f"Current code: {code} (expires in {remaining}s)")
+                        else:
+                            print("Failed to generate TOTP code")
+                    
+                    elif choice == "3":
+                        # Handle save
+                        if not auth.secret:
+                            print("No secret to save. Please load a QR code or enter a secret first.")
+                            continue
+                            
+                        name = input("Enter a name for this secret: ")
+                        password = input("Enter encryption password: ")
+                        master_key = secure_storage.create_vault(password)
+                        if master_key:
+                            secret_data = {
+                                "secret": auth.secret.get_raw_value() if auth.secret else "",
+                                "issuer": getattr(auth, "issuer", ""),
+                                "account": getattr(auth, "account", "")
+                            }
+                            secure_storage.save_secret(name, secret_data)
+                            print(f"Secret '{name}' saved successfully.")
+                        else:
+                            print("Failed to create or unlock vault.")
+                    
+                    elif choice == "4":
+                        # Handle load
+                        if not secure_storage.is_initialized():
+                            print("No vault found. Please save a secret first.")
+                            continue
+                            
+                        password = input("Enter encryption password: ")
+                        if secure_storage.unlock_vault(password):
+                            secrets = secure_storage.list_secrets()
+                            if not secrets:
+                                print("No saved secrets found.")
+                                continue
+                                
+                            print("\nAvailable secrets:")
+                            for i, name in enumerate(secrets, 1):
+                                print(f"{i}. {name}")
+                                
+                            selection = input("\nEnter number to load: ")
+                            try:
+                                idx = int(selection) - 1
+                                if 0 <= idx < len(secrets):
+                                    secret_data = secure_storage.load_secret(secrets[idx])
+                                    if secret_data:
+                                        auth.secret = SecureString(secret_data.get("secret", ""))
+                                        auth.issuer = secret_data.get("issuer", "")
+                                        auth.account = secret_data.get("account", "")
+                                        
+                                        code, remaining = auth.generate_totp()
+                                        if code:
+                                            print(f"Loaded secret for: {auth.issuer or 'Unknown'} ({auth.account or 'Unknown'})")
+                                            print(f"Current code: {code} (expires in {remaining}s)")
+                                        else:
+                                            print("Failed to generate TOTP code with the loaded secret.")
+                                    else:
+                                        print("Failed to decrypt secret.")
+                                else:
+                                    print("Invalid selection.")
+                            except ValueError:
+                                print("Invalid input. Please enter a number.")
+                        else:
+                            print("Failed to unlock vault. Incorrect password?")
+                    
+                    elif choice == "5":
+                        # Handle export
+                        if not auth.secret:
+                            print("No secret to export. Please load a QR code or enter a secret first.")
+                            continue
+                            
+                        print("\nWarning: Exporting secrets can be insecure. Only do this if you understand the risks.")
+                        confirm = input("Type 'CONFIRM' to export the current secret: ")
+                        if confirm == "CONFIRM":
+                            export_data = {
+                                "secret": auth.secret.get_raw_value() if auth.secret else "",
+                                "issuer": getattr(auth, "issuer", ""),
+                                "account": getattr(auth, "account", "")
+                            }
+                            print("\nExported secret (KEEP THIS SECURE):")
+                            print(f"Secret: {export_data['secret']}")
+                            print(f"Issuer: {export_data['issuer']}")
+                            print(f"Account: {export_data['account']}")
+                            
+                            if export_data['secret']:
+                                label = export_data['account']
+                                if export_data['issuer']:
+                                    label = f"{export_data['issuer']}:{label}"
+                                
+                                uri = f"otpauth://totp/{urllib.parse.quote(label)}?secret={export_data['secret']}"
+                                if export_data['issuer']:
+                                    uri += f"&issuer={urllib.parse.quote(export_data['issuer'])}"
+                                
+                                print("\nOTPAuth URI:")
+                                print(uri)
+                        else:
+                            print("Export cancelled.")
+                    
+                else:
+                    print("Invalid choice. Please enter a number between 1 and 7.")
+                    
+            except EOFError:
+                print("\nInput error detected. Exiting.")
                 break
-            
-            elif choice.lower() == 'g':
-                if not auth.secret:
-                    print("No secret key available. Please enter a secret first.")
-                    continue
+            except KeyboardInterrupt:
+                print("\nOperation cancelled. Exiting.")
+                break
+            except Exception as e:
+                print(f"An error occurred: {str(e)}")
                 
-                print("\nGenerating codes. Press Ctrl+C to stop.")
-                try:
-                    auth.continuous_generate()
-                except KeyboardInterrupt:
-                    pass
-            
-            else:
-                print("Invalid choice. Please try again.")
-                
-    except KeyboardInterrupt:
-        # Handle Ctrl+C
-        auth.cleanup()
-        print("\nExiting securely...")
     except Exception as e:
-        # Handle other exceptions
+        print(f"Application error: {str(e)}")
+    finally:
+        # Clean up and secure memory before exit
         auth.cleanup()
-        print(f"\nAn error occurred: {e}")
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
