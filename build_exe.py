@@ -80,6 +80,10 @@ def build_executable():
             print(f"Found Rust DLL at: {rust_dll_path}")
             break
     
+    if not rust_dll_path:
+        print("ERROR: Rust DLL not found! Run build_rust.py first.")
+        return False
+            
     # Create the PyInstaller command
     pyinstaller_cmd = [
         'main.py',  # The main script to be converted to an executable
@@ -101,22 +105,23 @@ def build_executable():
         '--hidden-import=pillow',
         '--hidden-import=cv2',
         '--hidden-import=numpy',
+        '--hidden-import=truefa_crypto',
     ])
     
-    # Add DLL as binary if found
-    if rust_dll_path:
-        # Create destination directory in dist if not exists
-        dll_dest_dir = Path("truefa_crypto")
-        if not dll_dest_dir.exists():
-            dll_dest_dir.mkdir(parents=True, exist_ok=True)
+    # Add the entire truefa_crypto module folder
+    module_dir = Path("truefa_crypto")
+    if module_dir.exists() and module_dir.is_dir():
+        # Add the entire module directory
+        pyinstaller_cmd.append(f'--add-data={module_dir}{os.pathsep}{module_dir}')
         
-        # Copy DLL to the destination
-        dll_dest = dll_dest_dir / "truefa_crypto.dll"
-        if rust_dll_path != dll_dest:
-            shutil.copy2(rust_dll_path, dll_dest)
-        
-        # Add the DLL to the spec
-        pyinstaller_cmd.append(f'--add-binary=truefa_crypto/truefa_crypto.dll;truefa_crypto')
+        # Also explicitly add the DLL
+        dll_path = module_dir / "truefa_crypto.dll"
+        if dll_path.exists():
+            pyinstaller_cmd.append(f'--add-binary={dll_path}{os.pathsep}{module_dir}')
+    
+    # Also add the Rust DLL directly
+    if rust_dll_path and rust_dll_path.exists():
+        pyinstaller_cmd.append(f'--add-binary={rust_dll_path}{os.pathsep}.')
     
     # Add images directory if it exists
     images_dir = os.path.join(os.getcwd(), 'images')
