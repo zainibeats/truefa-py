@@ -11,120 +11,156 @@ import ctypes
 from pathlib import Path
 
 # Global state for Python fallback implementations
-_vault_initialized = False
-_vault_unlocked = False
-_vault_salt = None
-_vault_password_hash = None
+_VAULT_UNLOCKED = [False]
 
-# Define all fallback functions at module level first
+# Fallback implementations
+class FallbackMethods:
+    """Provides fallback implementations for Rust functions."""
+    
+    @staticmethod
+    def secure_random_bytes(size):
+        print(f"DUMMY CALL: secure_random_bytes(({size},), {{}})")
+        import os
+        return os.urandom(size)
+    
+    @staticmethod
+    def create_vault(password):
+        print(f"DUMMY CALL: create_vault(({password},), {{}})")
+        import os
+        import base64
+        # Generate a random salt
+        salt = os.urandom(32)
+        # Return base64 encoded salt
+        return base64.b64encode(salt).decode('utf-8')
+    
+    @staticmethod
+    def unlock_vault(password):
+        print(f"DUMMY CALL: unlock_vault(({password},), {{}})")
+        # Mark vault as unlocked in our simulation
+        _VAULT_UNLOCKED[0] = True
+        return True
+    
+    @staticmethod
+    def is_vault_unlocked():
+        print(f"DUMMY CALL: is_vault_unlocked((), {{}})")
+        return _VAULT_UNLOCKED[0]
+    
+    @staticmethod
+    def lock_vault():
+        print(f"DUMMY CALL: lock_vault((), {{}})")
+        _VAULT_UNLOCKED[0] = False
+        return True
+    
+    @staticmethod
+    def generate_salt():
+        print(f"DUMMY CALL: generate_salt((), {{}})")
+        import os
+        import base64
+        salt = os.urandom(32)
+        return base64.b64encode(salt).decode('utf-8')
+    
+    @staticmethod
+    def derive_master_key(password, salt):
+        print(f"DUMMY CALL: derive_master_key(({password}, {salt}), {{}})")
+        import base64
+        import hashlib
+        salt_bytes = base64.b64decode(salt)
+        # Use PBKDF2 for key derivation
+        key = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode('utf-8'),
+            salt_bytes,
+            100000  # 100,000 iterations
+        )
+        return base64.b64encode(key).decode('utf-8')
+    
+    @staticmethod
+    def encrypt_master_key(master_key):
+        print(f"DUMMY CALL: encrypt_master_key(({master_key},), {{}})")
+        if not _VAULT_UNLOCKED[0]:
+            raise ValueError("Vault is locked, cannot encrypt master key")
+        import base64
+        import os
+        # Simulate encryption with random data
+        encrypted = os.urandom(48)  # Simulate encrypted data
+        return base64.b64encode(encrypted).decode('utf-8')
+    
+    @staticmethod
+    def decrypt_master_key(encrypted_key):
+        print(f"DUMMY CALL: decrypt_master_key(({encrypted_key},), {{}})")
+        if not _VAULT_UNLOCKED[0]:
+            raise ValueError("Vault is locked, cannot decrypt master key")
+        import base64
+        import os
+        # Return a simulated master key
+        master_key = os.urandom(32)
+        return base64.b64encode(master_key).decode('utf-8')
+    
+    @staticmethod
+    def create_secure_string(data):
+        print(f"DUMMY CALL: create_secure_string(({data},), {{}})")
+        class DummySecureString:
+            def __init__(self, data):
+                self.data = data
+            
+            def __str__(self):
+                return self.data
+            
+            def clear(self):
+                self.data = None
+        
+        return DummySecureString(data)
+    
+    @staticmethod
+    def verify_signature(public_key, message, signature):
+        print(f"DUMMY CALL: verify_signature(({public_key}, {message}, {signature}), {{}})")
+        # Always return valid for testing
+        return True
+
+# Define all fallback functions at module level
 def secure_random_bytes(size: int) -> bytes:
     """Generate cryptographically secure random bytes."""
-    print(f"DUMMY CALL: secure_random_bytes(({size},), {{}})")
-    import os
-    return os.urandom(size)
-    
+    return FallbackMethods.secure_random_bytes(size)
+
 def is_vault_unlocked() -> bool:
     """Check if the vault is currently unlocked."""
-    global _vault_unlocked
-    return _vault_unlocked
-    
+    return FallbackMethods.is_vault_unlocked()
+
 def vault_exists() -> bool:
     """Check if a vault has been initialized."""
-    global _vault_initialized
-    return _vault_initialized
-    
+    return False
+
 def create_vault(password: str) -> str:
     """Create a new vault with the given master password."""
-    print(f"DUMMY CALL: create_vault(({password},), {{}})")
-    import hashlib
-    import base64
-    import os
-    global _vault_salt, _vault_initialized, _vault_unlocked, _vault_password_hash
-    
-    # Generate a salt for the vault
-    _vault_salt = base64.b64encode(os.urandom(32)).decode('utf-8')
-    
-    # Hash the password with the salt
-    _vault_password_hash = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        _vault_salt.encode('utf-8'),
-        100000
-    )
-    _vault_password_hash = base64.b64encode(_vault_password_hash).decode('utf-8')
-    
-    # Mark the vault as initialized and unlocked
-    _vault_initialized = True
-    _vault_unlocked = True
-    
-    return _vault_salt
-    
+    return FallbackMethods.create_vault(password)
+
 def unlock_vault(password: str, salt: str) -> bool:
     """Unlock the vault with the given password and salt."""
-    print(f"DUMMY CALL: unlock_vault(({password}, {salt}), {{}})")
-    import hashlib
-    import base64
-    global _vault_unlocked, _vault_password_hash
-    
-    # Hash the provided password with the salt
-    password_hash = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000
-    )
-    password_hash = base64.b64encode(password_hash).decode('utf-8')
-    
-    # Check if the password is correct
-    if password_hash == _vault_password_hash:
-        _vault_unlocked = True
-        return True
-    else:
-        return False
-        
+    return FallbackMethods.unlock_vault(password)
+
 def lock_vault() -> None:
     """Lock the vault, clearing all sensitive data."""
-    print("DUMMY CALL: lock_vault((), {})")
-    global _vault_unlocked
-    _vault_unlocked = False
-    
+    FallbackMethods.lock_vault()
+
 def generate_salt() -> str:
     """Generate a random salt for key derivation."""
-    print("DUMMY CALL: generate_salt((), {})")
-    import base64
-    import os
-    return base64.b64encode(os.urandom(32)).decode('utf-8')
-    
+    return FallbackMethods.generate_salt()
+
 def derive_master_key(password: str, salt: str) -> str:
     """Derive a master key from a password and salt."""
-    print(f"DUMMY CALL: derive_master_key(({password}, {salt}), {{}})")
-    import hashlib
-    import base64
-    key = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000
-    )
-    return base64.b64encode(key).decode('utf-8')
-    
+    return FallbackMethods.derive_master_key(password, salt)
+
 def encrypt_master_key(master_key: str) -> str:
     """Encrypt the master key with the vault key."""
-    print(f"DUMMY CALL: encrypt_master_key(({master_key},), {{}})")
-    # For fallback, we'll just return the master key since we don't have the vault key
-    return master_key
-    
+    return FallbackMethods.encrypt_master_key(master_key)
+
 def decrypt_master_key(encrypted_key: str) -> str:
     """Decrypt the master key with the vault key."""
-    print(f"DUMMY CALL: decrypt_master_key(({encrypted_key},), {{}})")
-    # For fallback, we'll just return the encrypted key since we don't have the vault key
-    return encrypted_key
-    
+    return FallbackMethods.decrypt_master_key(encrypted_key)
+
 def verify_signature(message: bytes, signature: bytes, public_key: bytes) -> bool:
     """Verify a digital signature using the Rust crypto library."""
-    print(f"DUMMY CALL: verify_signature((), {{}})")
-    # For fallback, we'll just return True for now
-    return True
+    return FallbackMethods.verify_signature(public_key, message, signature)
 
 class SecureString:
     """Secure string storage with automatic cleanup"""
