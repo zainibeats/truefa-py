@@ -98,8 +98,30 @@ def main():
                             
                         name = input("Enter a name for this secret: ")
                         password = input("Enter encryption password: ")
-                        master_key = secure_storage.create_vault(password)
-                        if master_key:
+                        
+                        # First-time vault setup when a master password is needed
+                        if not secure_storage.vault.is_initialized():
+                            master_password = input("Enter master password (this encrypts individual secrets): ")
+                            if not master_password:
+                                print("Master password cannot be empty!")
+                                continue
+                                
+                            confirm_master = input("Confirm master password: ")
+                            if master_password != confirm_master:
+                                print("Master passwords don't match. Try again.")
+                                continue
+                                
+                            # Create the vault with both passwords
+                            if not secure_storage.create_vault(password, master_password):
+                                print("Failed to create vault!")
+                                continue
+                                
+                            print("Vault created successfully!")
+                        elif not secure_storage.unlock(password):
+                            print("Failed to unlock vault with the provided password.")
+                            continue
+                                                
+                        try:
                             secret_data = {
                                 "secret": auth.secret.get_raw_value() if auth.secret else "",
                                 "issuer": getattr(auth, "issuer", ""),
@@ -107,8 +129,8 @@ def main():
                             }
                             secure_storage.save_secret(name, secret_data)
                             print(f"Secret '{name}' saved successfully.")
-                        else:
-                            print("Failed to create or unlock vault.")
+                        except Exception as e:
+                            print(f"An error occurred: {e}")
                     
                     elif choice == "4":
                         # Handle load
