@@ -19,68 +19,94 @@ import sys
 from pathlib import Path
 
 def check_rust_installed():
-    """
-    Check if Rust toolchain is installed and available.
+    """Check if Rust toolchain is installed"""
+    rust_path = os.path.expanduser("~/.cargo/bin/rustc")
+    windows_rust_path = os.path.expanduser("~\\.cargo\\bin\\rustc.exe")
     
-    Returns:
-        bool: True if Rust is installed, False otherwise
-    """
-    try:
-        subprocess.run(["rustc", "--version"], check=True, capture_output=True)
+    if os.path.exists(rust_path) or os.path.exists(windows_rust_path):
+        print("Rust is installed")
         return True
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
+    else:
+        # Try to run rustc directly
+        try:
+            subprocess.run(
+                ["rustc", "--version"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                check=True
+            )
+            print("Rust is installed")
+            return True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            print("Error: Rust is not installed. Please install Rust from https://rustup.rs/")
+            return False
 
 def build_rust_module():
     """
-    Build the Rust crypto module and set up Python bindings.
-    
-    This function:
-    1. Verifies Rust installation
-    2. Builds the Rust library in release mode
-    3. Calls build_module.py to create proper Python bindings
+    Build the Rust library module.
     
     Returns:
-        bool: True if build succeeds, False otherwise
+        bool: True if build successful, False otherwise
     """
-    # Get the directory of this script
-    script_dir = Path(__file__).parent
-    rust_dir = script_dir / "rust_crypto"
+    print("Building Rust module...")
     
-    # Check if Rust is installed
-    if not check_rust_installed():
-        print("Error: Rust is not installed. Please install Rust from https://rustup.rs/")
+    # Get the appropriate cargo path
+    cargo_path = "cargo"
+    windows_cargo_path = os.path.expanduser("~\\.cargo\\bin\\cargo.exe")
+    if os.path.exists(windows_cargo_path):
+        cargo_path = windows_cargo_path
+    
+    try:
+        # Change to the directory containing the Rust code
+        os.chdir("rust_crypto")
+        
+        # Run cargo build in release mode
+        build_cmd = [cargo_path, "build", "--release"]
+        result = subprocess.run(
+            build_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            print(f"Cargo build failed:\n{result.stderr}")
+            return False
+        
+        print("Rust module built successfully")
+        return True
+    except Exception as e:
+        print(f"Error building Rust module: {e}")
         return False
-    
-    # Build the Rust library
-    print("Building Rust crypto module...")
-    os.chdir(rust_dir)
-    
-    result = subprocess.run(["cargo", "build", "--release"], check=False)
-    if result.returncode != 0:
-        print("Error: Failed to build Rust crypto module")
-        return False
-    
-    print("Rust module built successfully")
-    
-    # Make sure the build_module.py script exists
-    if not (script_dir / "build_module.py").exists():
-        print("Error: build_module.py not found")
-        return False
-    
-    # Run the build_module.py script to create a proper Python module
-    os.chdir(script_dir)
-    result = subprocess.run([sys.executable, "build_module.py"], check=False)
-    if result.returncode != 0:
-        print("Error: Failed to create Python module")
-        return False
-    
-    print("Python module created successfully")
-    return True
+    finally:
+        # Return to the original directory
+        os.chdir("..")
 
 if __name__ == "__main__":
+    if not check_rust_installed():
+        print("Build failed")
+        sys.exit(1)
+    
     if build_rust_module():
-        print("Build successful")
+        # Run the build_module.py script to create a proper Python module
+        print("Building Python module...")
+        try:
+            result = subprocess.run(
+                [sys.executable, "build_module.py"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"Failed to build Python module:\n{result.stderr}")
+                print("Build failed")
+                sys.exit(1)
+            print("Python module built successfully")
+            print("Build completed successfully")
+        except Exception as e:
+            print(f"Error building Python module: {e}")
+            print("Build failed")
+            sys.exit(1)
     else:
         print("Build failed")
         sys.exit(1)
