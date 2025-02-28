@@ -180,7 +180,24 @@ class TwoFactorAuth:
                     params = dict(urllib.parse.parse_qsl(parsed.query))
                     
                     if 'secret' in params:
-                        return SecureString(params['secret']), None
+                        # Normalize the secret to ensure it's valid base32
+                        secret = params['secret']
+                        # Remove any non-Base32 characters and convert to uppercase
+                        secret = ''.join(c for c in secret.upper() if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+                        
+                        # Force proper Base32 padding
+                        # Base32 padding is applied in blocks of 8 characters
+                        padding_length = (8 - (len(secret) % 8)) % 8
+                        secret += '=' * padding_length
+                        
+                        # Try to verify the secret is valid by creating a TOTP
+                        try:
+                            totp = pyotp.TOTP(secret)
+                            # If this doesn't raise an exception, the secret is valid
+                            totp.now()
+                            return SecureString(secret), None
+                        except Exception as e:
+                            return None, f"Invalid TOTP secret format: {str(e)}"
                 
                 return None, "No valid otpauth URL found in QR code"
             else:
@@ -239,15 +256,15 @@ class TwoFactorAuth:
         Returns:
             tuple: (str: Current TOTP code or None if failed,
                    int: Seconds until code expires or error message)
-            
+                   
         Security:
-        - Validates secret format
-        - Safely handles secret access
-        - Returns None instead of raising exceptions
+        - Uses PyOTP library for secure TOTP generation
+        - Handles Base32 normalization and validation
+        - Returns generic error messages
         """
-        if secret is None:
-            secret = self.secret
-            
+        # Use instance secret if none provided
+        secret = secret or self.secret
+        
         if not secret:
             return None, "No secret key available"
         
@@ -279,9 +296,12 @@ class TwoFactorAuth:
                 return code, remaining
             except Exception as e:
                 # If there's still an error, it's likely an invalid Base32 format
+                # But don't clear the secret, just return the error
+                print(f"Warning: {str(e)}")
                 return None, f"Invalid TOTP secret format: {str(e)}"
                 
         except Exception as e:
+            print(f"Error generating TOTP code: {str(e)}")
             return None, f"Error generating 2FA code: {str(e)}"
 
     def continuous_generate(self, callback=None):
@@ -345,6 +365,44 @@ class TwoFactorAuth:
         """
         if not self.secret:
             return "No secret available to save"
+            
+        # Check if vault is not initialized
+        if not self.storage.vault.is_initialized():
+            # We need to create the vault first
+            print("\nThis is the first time saving a secret. You need to set up a vault password.")
+            vault_password = input("Enter a vault password to secure your secrets: ")
+            if not vault_password:
+                return "Vault password cannot be empty"
+                
+            confirm_password = input("Confirm vault password: ")
+            if vault_password != confirm_password:
+                return "Passwords do not match"
+                
+            # Master password can be the same for simplicity
+            master_password = vault_password
+            
+            # Initialize the vault
+            try:
+                self.storage.vault.create_vault(vault_password, master_password)
+                self.storage.vault.unlock_vault(vault_password)
+                self.is_vault_mode = True
+                print("Vault created and unlocked successfully.")
+            except Exception as e:
+                return f"Failed to create vault: {str(e)}"
+        # Check if vault is initialized but locked
+        elif self.storage.vault.is_initialized() and not self.storage.vault.is_unlocked():
+            # We need to unlock the vault
+            print("\nVault is locked. Please unlock it to save your secret.")
+            vault_password = input("Enter your vault password: ")
+            if not vault_password:
+                return "Vault password cannot be empty"
+                
+            try:
+                if not self.storage.vault.unlock_vault(vault_password):
+                    return "Incorrect vault password"
+                print("Vault unlocked successfully.")
+            except Exception as e:
+                return f"Failed to unlock vault: {str(e)}"
         
         try:
             return self.storage.save_secret(name, self.secret, password)  # Return any error from the storage layer
