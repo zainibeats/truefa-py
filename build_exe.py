@@ -85,7 +85,7 @@ def build_executable():
         'main.py',  # The main script to be converted to an executable
         '--name=truefa',  # Name of the output executable
         '--onefile',  # Create a single executable
-        '--windowed',  # Do not show the console window
+        # '--windowed',  # Removed to show the console window
         '--clean',  # Clean PyInstaller cache before building
         '--log-level=WARN',  # Set log level to reduce output noise
     ]
