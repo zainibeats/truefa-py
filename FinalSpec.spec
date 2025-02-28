@@ -63,38 +63,18 @@ a = Analysis(
 # Create the PYZ archive
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# Create the console executable
-exe_console = EXE(
+# Create the executable
+exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name='TrueFA_Console',
-    debug=False,  # Set to False for final release
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    console=True,  # Use console mode for CLI app
-    icon=icon_path,  # Include icon
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)
-
-# Create the windowed executable (no console)
-exe_window = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name='TrueFA',
+    name='truefa',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,  # No console window
+    console=True,  # Use console mode for better debugging
     icon=icon_path,  # Include icon
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -103,26 +83,14 @@ exe_window = EXE(
     entitlements_file=None,
 )
 
-# Create the COLLECT object to bundle everything for console version
-coll_console = COLLECT(
-    exe_console,
+# Create the COLLECT object to bundle everything
+coll = COLLECT(
+    exe,
     a.binaries,
     a.zipfiles,
     a.datas,
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='TrueFA_Console',
-)
-
-# Create the COLLECT object to bundle everything for windowed version
-coll_window = COLLECT(
-    exe_window,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name='TrueFA',
+    name='truefa',
 )
