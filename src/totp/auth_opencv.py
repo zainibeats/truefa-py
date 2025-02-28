@@ -55,7 +55,6 @@ class TwoFactorAuth:
         - OpenCV installation check
         """
         self.secret = None
-        self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
         self.is_generating = False
         self.storage = SecureStorage()
         self.is_vault_mode = self.storage.vault.is_initialized()
@@ -63,6 +62,20 @@ class TwoFactorAuth:
         # Register signal handlers for secure cleanup
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+        
+        # Determine the executable directory for resource paths
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            app_dir = os.path.dirname(sys.executable)
+            bundle_dir = getattr(sys, '_MEIPASS', app_dir)
+            print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
+            # Set images directory relative to the executable
+            self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
+        else:
+            # Running in normal Python environment
+            self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
+        
+        print(f"You can use either the full path or just the filename if it's in the images directory")
         
         # Create images directory if needed
         if not os.path.exists(self.images_dir):
@@ -222,7 +235,7 @@ class TwoFactorAuth:
         Args:
             secret: Optional SecureString containing the TOTP secret.
                    If None, uses the instance's current secret.
-            
+                   
         Returns:
             tuple: (str: Current TOTP code or None if failed,
                    int: Seconds until code expires or error message)
@@ -242,20 +255,34 @@ class TwoFactorAuth:
             # Get the secure string value temporarily
             secret_value = str(secret)
             
-            # Base32 validation
-            if not re.match(r'^[A-Z2-7]+=*$', secret_value):
-                return None, "Invalid secret format (must be base32-encoded)"
+            # Normalize the secret for better compatibility
+            # Try to make the input more lenient by converting to uppercase and removing non-Base32 chars
+            # Base32 only allows A-Z and 2-7
+            normalized_value = ''.join(c for c in secret_value.upper() if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+            
+            if not normalized_value:
+                return None, "Secret contains no valid Base32 characters"
+                
+            # Force proper Base32 padding
+            # Base32 padding is applied in blocks of 8 characters
+            padding_length = (8 - (len(normalized_value) % 8)) % 8
+            normalized_value += '=' * padding_length
             
             # Generate the code using pyotp
-            totp = pyotp.TOTP(secret_value)
-            code = totp.now()
-            
-            # Get the remaining seconds
-            remaining = 30 - (int(time.time()) % 30)
-            
-            return code, remaining
+            try:
+                totp = pyotp.TOTP(normalized_value)
+                code = totp.now()
+                
+                # Get the remaining seconds
+                remaining = 30 - (int(time.time()) % 30)
+                
+                return code, remaining
+            except Exception as e:
+                # If there's still an error, it's likely an invalid Base32 format
+                return None, f"Invalid TOTP secret format: {str(e)}"
+                
         except Exception as e:
-            return None, "Error generating 2FA code"
+            return None, f"Error generating 2FA code: {str(e)}"
 
     def continuous_generate(self, callback=None):
         """
@@ -320,11 +347,10 @@ class TwoFactorAuth:
             return "No secret available to save"
         
         try:
-            self.storage.save_secret(name, self.secret, password)
-            return None  # No error
+            return self.storage.save_secret(name, self.secret, password)  # Return any error from the storage layer
         except Exception as e:
-            return f"Failed to save secret: {e}"
-            
+            return f"Failed to save secret: {str(e)}"
+
     def load_secret(self, name, password=None):
         """
         Load a saved secret.
