@@ -665,3 +665,120 @@ class SecureStorage:
             if os.path.exists(temp_export):
                 os.remove(temp_export)
             return False
+
+    def save_encrypted(self, data, path):
+        """
+        Save encrypted data to the specified path
+        
+        Args:
+            data (str): Data to encrypt
+            path (str): Path to save encrypted data
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.is_unlocked:
+            raise ValueError("Storage must be unlocked before saving encrypted data")
+        
+        try:
+            # Get encryption key
+            encryption_key = None
+            if self.vault.is_initialized() and self.vault.is_unlocked():
+                # Get master key from vault
+                master_key = self.vault.get_master_key()
+                if master_key:
+                    encryption_key = master_key
+            else:
+                # Use legacy key
+                encryption_key = self.key
+            
+            if not encryption_key:
+                raise ValueError("No encryption key available")
+            
+            # Generate random IV
+            iv = os.urandom(16)
+            
+            # Create cipher
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+            
+            cipher = Cipher(
+                algorithms.AES(encryption_key),
+                modes.GCM(iv),
+                backend=default_backend()
+            )
+            encryptor = cipher.encryptor()
+            
+            # Encrypt data
+            data_bytes = data.encode('utf-8')
+            ciphertext = encryptor.update(data_bytes) + encryptor.finalize()
+            
+            # Get tag
+            tag = encryptor.tag
+            
+            # Write to file: IV + Tag + Ciphertext
+            with open(path, 'wb') as f:
+                f.write(iv)
+                f.write(tag)
+                f.write(ciphertext)
+            
+            return True
+        except Exception as e:
+            print(f"Error saving encrypted data: {e}")
+            return False
+    
+    def load_encrypted(self, path):
+        """
+        Load and decrypt data from the specified path
+        
+        Args:
+            path (str): Path to encrypted data
+            
+        Returns:
+            str: Decrypted data
+        """
+        if not self.is_unlocked:
+            raise ValueError("Storage must be unlocked before loading encrypted data")
+        
+        try:
+            # Get decryption key
+            decryption_key = None
+            if self.vault.is_initialized() and self.vault.is_unlocked():
+                # Get master key from vault
+                master_key = self.vault.get_master_key()
+                if master_key:
+                    decryption_key = master_key
+            else:
+                # Use legacy key
+                decryption_key = self.key
+            
+            if not decryption_key:
+                raise ValueError("No decryption key available")
+            
+            # Read from file
+            with open(path, 'rb') as f:
+                data = f.read()
+            
+            # Extract IV, Tag, and Ciphertext
+            iv = data[:16]
+            tag = data[16:32]
+            ciphertext = data[32:]
+            
+            # Create cipher
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+            
+            cipher = Cipher(
+                algorithms.AES(decryption_key),
+                modes.GCM(iv, tag),
+                backend=default_backend()
+            )
+            decryptor = cipher.decryptor()
+            
+            # Decrypt data
+            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+            
+            return plaintext.decode('utf-8')
+        except Exception as e:
+            print(f"Error loading encrypted data: {e}")
+            return None
