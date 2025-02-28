@@ -34,6 +34,11 @@ node_modules/
 
 # Production files
 ez-release/
+build/
+pyinstaller/
+dist/
+ez-release/
+*.exe
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
