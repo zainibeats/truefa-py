@@ -2,32 +2,28 @@
 
 A secure two-factor authentication code generator with support for QR code scanning and encrypted storage.
 
-## Features
+A secure two-factor authentication code generator with Rust-powered cryptography, QR code scanning, and encrypted storage.
 
-- **Enhanced Security with Rust Cryptography** - Critical security operations handled by Rust
-- **Vault-Based Envelope Encryption** - Two-layer encryption for maximum protection
-- Secure memory handling for sensitive data
-- QR code scanning support
-- Encrypted storage of TOTP secrets
-- Stateless operation mode (no master password required for viewing codes on fresh install)
-- Cross-platform support
+## Key Features
 
-## Installation
+- **Rust-Based Security**: Critical cryptographic operations in Rust
+- **Secure Memory Handling**: Protected memory with automatic cleanup
+- **Vault Encryption**: Two-layer envelope encryption for TOTP secrets
+- **QR Code Support**: OpenCV-based QR code scanning
+- **Flexible Operation**: Use with or without persistent storage
+- **Cross-Platform**: Windows, Linux, and macOS support
 
-### Option 1: Docker (Recommended)
+## Installation & Usage
 
-1. Clone the repository:
+Choose one of these three methods to run TrueFA:
+
+### 1. Windows Executable (Recommended for Windows Users)
+Download the latest release from our [releases page](https://github.com/zainibeats/truefa-py/releases) and run `TrueFA.exe`.
+
+### 2. Docker Container (Recommended for Linux/macOS)
 ```bash
-git clone https://github.com/zainibeats/truefa.git
-cd truefa
-```
-
-2. Build and run with Docker:
-```bash
-# Build the Docker image
+# Build and run with Docker
 docker build -t truefa .
-
-# Run the container
 docker run -it --name truefa \
   -v "${PWD}/images:/app/images" \
   -v "${PWD}/.truefa:/app/.truefa" \
@@ -45,85 +41,53 @@ docker run -it --name truefa `
 docker start -ai truefa
 ```
 
-### Option 2: Direct Installation
-
-**Prerequisites:**
+### 3. From Source
+Prerequisites:
 - Python 3.8+
-- [Rust and Cargo](https://rustup.rs/)
-- ZBar (for QR code scanning)
-- GPG (for export functionality)
+- Rust and Cargo
+- GPG (optional, for secret export)
 
-#### Windows Prerequisites
-
-1. Install ZBar: [ZBar Windows Binaries](https://sourceforge.net/projects/zbar/files/zbar/0.10/zbar-0.10-setup.exe/download)
-2. Install GPG: [GPG4Win](https://www.gpg4win.org/download.html)
-
-#### Linux/macOS Prerequisites
-
-- Ubuntu/Debian: `sudo apt-get install libzbar0 zbar-tools gpg`
-- macOS: `brew install zbar gpg`
-
-#### Installation Steps
-
-1. Clone the repository and install dependencies:
 ```bash
-git clone https://github.com/zainibeats/truefa.git
-cd truefa
+# Clone and setup
+git clone https://github.com/zainibeats/truefa-py.git
+cd truefa-py
 pip install -r requirements.txt
-```
-
-2. Build the Rust crypto module and run:
-```bash
 python build_rust.py
+
+# Run on Windows
+run_truefa.bat           # Main launcher (recommended)
+run_direct_simple.bat    # Without QR scanning
+run_opencv.bat          # With QR scanning
+
+# Run on Linux/macOS
 python -m src.main
 ```
 
-## Usage
+## Basic Usage
 
-### Basic Usage
-
-1. Place QR code images in the `images` directory
-2. Run the application (via Docker or directly)
-3. Use the interactive menu to:
-   - Load QR codes from images
+1. Launch TrueFA using your chosen installation method
+2. Choose your operation mode:
+   - Scan QR codes from images
    - Enter TOTP secrets manually
-   - Save/load secrets securely
-   - Export secrets (saved to Downloads folder)
+   - Save/load encrypted secrets
+   - Export secrets (requires GPG)
 
-### Stateless Operation
+## Security Features
 
-By default, TrueFA operates in stateless mode:
-- Scan QR codes or enter secrets without setting a master password
-- No data is saved unless explicitly chosen
-- Saved secrets are encrypted with your master password
+- **Envelope Encryption**: Dual-layer protection with vault and master keys
+- **Memory Safety**: Rust-based secure memory handling
+- **Zero Trust**: Stateless operation by default
+- **Secure Storage**: AES-GCM encryption with Scrypt key derivation
 
-## Security Architecture
+## Documentation
 
-TrueFA implements a high-security architecture:
+- [QR Code Guide](QR_CODE_GUIDE.md)
+- [Runner Scripts](README_RUNNERS.md)
 
-- **Envelope Encryption** - Two-layer encryption with vault password (outer) and master key (inner)
-- **Rust-Based Memory Safety** - Critical cryptographic operations implemented in Rust
-- **AES-GCM encryption** with Scrypt key derivation
-- **Secure memory handling** with page locking and memory zeroization
+## Contributing
 
-## Project Structure
-
-```
-truefa/
-├── src/               # Core application code
-│   ├── security/      # Security-related modules
-│   ├── totp/          # TOTP-related functionality
-│   ├── utils/         # Utility functions
-│   └── main.py        # Main application entry point
-├── images/            # Directory for QR code images
-├── .truefa/           # Secure storage directory
-├── Dockerfile         # Docker configuration
-├── requirements.txt   # Python dependencies
-├── build_rust.py      # Rust module build script
-├── build_module.py    # Python module build script
-└── README.md          # This file
-```
+This project is under active development. Issues and pull requests are welcome.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+MIT License - See [LICENSE](LICENSE) for details.
