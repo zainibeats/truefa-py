@@ -322,3 +322,65 @@ fn truefa_crypto(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     
     Ok(())
 }
+
+// Export functions with C linkage for DLL loading
+#[no_mangle]
+pub extern "C" fn c_secure_random_bytes(size: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
+    match secure_random_bytes(size) {
+        Ok(bytes) => {
+            unsafe {
+                if bytes.len() <= *out_len {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                    *out_len = bytes.len();
+                    true
+                } else {
+                    false
+                }
+            }
+        },
+        Err(_) => false
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn c_create_vault(password_ptr: *const u8, password_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
+    let password = unsafe {
+        let slice = std::slice::from_raw_parts(password_ptr, password_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false
+        }
+    };
+    
+    match create_vault(password) {
+        Ok(salt) => {
+            let salt_bytes = salt.as_bytes();
+            unsafe {
+                if salt_bytes.len() <= *out_len {
+                    std::ptr::copy_nonoverlapping(salt_bytes.as_ptr(), out_ptr, salt_bytes.len());
+                    *out_len = salt_bytes.len();
+                    true
+                } else {
+                    false
+                }
+            }
+        },
+        Err(_) => false
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn c_is_vault_unlocked() -> bool {
+    match is_vault_unlocked() {
+        Ok(unlocked) => unlocked,
+        Err(_) => false
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn c_vault_exists() -> bool {
+    match vault_exists() {
+        Ok(exists) => exists,
+        Err(_) => false
+    }
+}
