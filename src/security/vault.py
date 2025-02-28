@@ -41,11 +41,25 @@ except ImportError as e:
         class SecureString:
             def __init__(self, value):
                 """Initialize with a string value to be protected."""
-                self._data = value.encode('utf-8') if isinstance(value, str) else value
-                
+                if isinstance(value, str):
+                    self._data = value
+                elif isinstance(value, bytes):
+                    try:
+                        self._data = value.decode('utf-8')
+                    except UnicodeDecodeError:
+                        # If can't decode as UTF-8, assume it's already encoded data
+                        import base64
+                        self._data = base64.b64encode(value).decode('utf-8')
+                else:
+                    self._data = str(value)
+                    
             def __str__(self):
                 """Get the protected string value."""
-                return self._data.decode('utf-8') if isinstance(self._data, bytes) else str(self._data)
+                return self._data
+                
+            def get(self):
+                """Get the protected string value."""
+                return self._data
                 
             def clear(self):
                 """Explicitly clear the protected data."""
@@ -142,14 +156,83 @@ except ImportError as e:
         def encrypt_master_key(self, master_key):
             """Encrypt the master key with the vault key."""
             print(f"DUMMY CALL: encrypt_master_key(({master_key},), {{}})")
-            # For fallback, we'll just return the master key since we don't have the vault key
-            return master_key
+            # For a more secure fallback, we'll use AES for encryption
+            import base64
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+            import os
+
+            if not self._vault_unlocked:
+                raise ValueError("Vault is locked, cannot encrypt master key")
+            
+            # Decode the master key from base64
+            try:
+                master_key_bytes = base64.b64decode(master_key)
+            except Exception as e:
+                raise ValueError(f"Invalid master key encoding: {e}")
+            
+            # Generate a random nonce
+            nonce = os.urandom(12)  # 12 bytes for AES-GCM
+            
+            # Use a derived key from the vault password hash as the encryption key
+            # In a real implementation, this would use the vault key
+            encryption_key = base64.b64decode(self._vault_password_hash)[:32]  # Use first 32 bytes
+            
+            # Create cipher
+            algorithm = algorithms.AES(encryption_key)
+            cipher = Cipher(algorithm, modes.GCM(nonce), backend=default_backend())
+            encryptor = cipher.encryptor()
+            
+            # Encrypt
+            ciphertext = encryptor.update(master_key_bytes) + encryptor.finalize()
+            
+            # Combine nonce, ciphertext, and tag for storage
+            result = nonce + ciphertext + encryptor.tag
+            
+            return base64.b64encode(result).decode('utf-8')
             
         def decrypt_master_key(self, encrypted_key):
             """Decrypt the master key with the vault key."""
             print(f"DUMMY CALL: decrypt_master_key(({encrypted_key},), {{}})")
-            # For fallback, we'll just return the encrypted key since we don't have the vault key
-            return encrypted_key
+            # For a more secure fallback, we'll use AES for decryption
+            import base64
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+
+            if not self._vault_unlocked:
+                raise ValueError("Vault is locked, cannot decrypt master key")
+            
+            # Decode the encrypted key from base64
+            try:
+                encrypted_data = base64.b64decode(encrypted_key)
+            except Exception as e:
+                raise ValueError(f"Invalid encrypted key encoding: {e}")
+            
+            # Ensure we have enough data
+            if len(encrypted_data) < 12 + 16:  # nonce + tag minimum
+                raise ValueError("Invalid encrypted key format")
+            
+            # Extract the components
+            nonce = encrypted_data[:12]
+            tag = encrypted_data[-16:]
+            ciphertext = encrypted_data[12:-16]
+            
+            # Use a derived key from the vault password hash as the decryption key
+            # In a real implementation, this would use the vault key
+            decryption_key = base64.b64decode(self._vault_password_hash)[:32]  # Use first 32 bytes
+            
+            # Create cipher
+            algorithm = algorithms.AES(decryption_key)
+            cipher = Cipher(algorithm, modes.GCM(nonce, tag), backend=default_backend())
+            decryptor = cipher.decryptor()
+            
+            # Decrypt
+            try:
+                plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+            except Exception as e:
+                raise ValueError(f"Decryption error: {e}")
+            
+            return base64.b64encode(plaintext).decode('utf-8')
             
         def verify_signature(self, message, signature, public_key):
             """Verify a digital signature using the Rust crypto library."""
@@ -311,19 +394,32 @@ class SecureVault:
 
     def get_master_key(self):
         """
-        Get the decrypted master key for use with secret encryption/decryption.
+        Get the master key (requires vault to be unlocked).
         
-        The vault must be unlocked first using unlock_vault().
+        Returns:
+            SecureString or None: Master key if successful
+            
+        Security:
+        - Verifies vault is unlocked 
+        - Returns None if vault is locked
         """
-        if not self.is_unlocked() or not self._vault_config:
-            return None
-        
-        encrypted_master_key = self._vault_config.get('encrypted_master_key')
-        if not encrypted_master_key:
+        if not self.is_unlocked():
             return None
         
         try:
+            # Decrypt the master key
+            encrypted_master_key = self._vault_config.get('encrypted_master_key')
+            if not encrypted_master_key:
+                return None
+            
             decrypted_master_key = truefa_crypto.decrypt_master_key(encrypted_master_key)
+            
+            # Ensure proper base64 padding
+            if isinstance(decrypted_master_key, str):
+                padding = 4 - (len(decrypted_master_key) % 4) if len(decrypted_master_key) % 4 else 0
+                decrypted_master_key = decrypted_master_key + ('=' * padding)
+            
+            # Create a secure string
             return SecureString(decrypted_master_key)
         except Exception as e:
             print(f"Error getting master key: {e}")
