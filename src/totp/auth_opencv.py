@@ -26,6 +26,7 @@ import urllib.parse
 import subprocess
 from ..security.secure_string import SecureString
 from ..security.secure_storage import SecureStorage
+import base64
 
 class TwoFactorAuth:
     """
@@ -386,8 +387,17 @@ class TwoFactorAuth:
                 self.storage.vault.create_vault(vault_password, master_password)
                 self.storage.vault.unlock_vault(vault_password)
                 self.storage._unlock()
+                
+                # Make sure the key is derived from the vault's master key
+                master_key = self.storage.vault.get_master_key()
+                if master_key and master_key.get():
+                    self.storage.key = base64.b64decode(master_key.get().encode())
+                    master_key.clear()
+                
                 self.is_vault_mode = True
                 print("Vault created and unlocked successfully.")
+                print(f"Vault unlocked state: {self.storage.vault.is_unlocked()}")
+                print(f"Storage unlocked state: {self.storage.is_unlocked}")
             except Exception as e:
                 return f"Failed to create vault: {str(e)}"
         # Check if vault is initialized but locked
@@ -402,7 +412,16 @@ class TwoFactorAuth:
                 if not self.storage.vault.unlock_vault(vault_password):
                     return "Incorrect vault password"
                 self.storage._unlock()
+                
+                # Make sure the key is derived from the vault's master key
+                master_key = self.storage.vault.get_master_key()
+                if master_key and master_key.get():
+                    self.storage.key = base64.b64decode(master_key.get().encode())
+                    master_key.clear()
+                
                 print("Vault unlocked successfully.")
+                print(f"Vault unlocked state: {self.storage.vault.is_unlocked()}")
+                print(f"Storage unlocked state: {self.storage.is_unlocked}")
             except Exception as e:
                 return f"Failed to unlock vault: {str(e)}"
         
