@@ -354,9 +354,19 @@ class SecureVault:
         """
         try:
             print("Creating secure vault...")
-            # Initialize the vault if not already done
-            if not os.path.exists(self.vault_dir):
-                os.makedirs(self.vault_dir, exist_ok=True)
+            # Initialize the vault directories
+            try:
+                # Ensure the parent directories exist first (.truefa)
+                parent_dir = os.path.dirname(self.vault_dir)
+                if not os.path.exists(parent_dir):
+                    os.makedirs(parent_dir, exist_ok=True)
+                    
+                # Then create the vault directory
+                if not os.path.exists(self.vault_dir):
+                    os.makedirs(self.vault_dir, exist_ok=True)
+            except Exception as e:
+                print(f"Error creating vault directories: {e}")
+                return False
                 
             # Generate a vault salt for key derivation
             vault_salt = truefa_crypto.generate_salt()
