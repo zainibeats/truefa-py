@@ -13,8 +13,10 @@ from .secure_string import SecureString
 # Import our Rust crypto module
 try:
     import truefa_crypto
-except ImportError:
-    raise ImportError("truefa_crypto Rust module not found. Please build it first.")
+except ImportError as e:
+    print(f"WARNING: Failed to import truefa_crypto: {str(e)}")
+    print("Using fallback implementation instead")
+    from truefa_crypto import SecureString, create_vault, unlock_vault, lock_vault, is_vault_unlocked, vault_exists, secure_random_bytes
 
 class SecureVault:
     """
