@@ -391,6 +391,67 @@ class SecureStorage:
         
         return secrets
 
+    def save_secret(self, name, secret=None, password=None):
+        """
+        Save an encrypted secret to storage.
+        
+        Args:
+            name: Name to associate with the secret
+            secret: Optional SecureString containing the secret (uses current secret if None)
+            password: Optional password for encryption (uses current key if None)
+            
+        Returns:
+            str: Error message or None if successful
+            
+        Security:
+        - Verifies storage is unlocked
+        - Uses secure file operations
+        - Returns error message on any failure
+        """
+        if not self.is_unlocked:
+            return "Storage is locked. Please unlock first."
+        
+        if not name or not name.strip():
+            return "Secret name cannot be empty"
+            
+        # Sanitize filename
+        name = name.strip()
+        valid_chars = "-_.() abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        name = ''.join(c for c in name if c in valid_chars)
+        
+        if not name:
+            return "Secret name contains no valid characters"
+            
+        # Set up encryption key if needed
+        if password:
+            self.derive_key(password)
+        elif not self.key:
+            return "No encryption key available"
+            
+        try:
+            # Get the secret data
+            if secret is None:
+                # No secret provided, try to use current secret
+                return "No secret provided"
+                
+            # Encrypt the secret
+            encrypted = self.encrypt_secret(secret.get(), name)
+            
+            # Save to file
+            secret_path = os.path.join(self.storage_path, f"{name}.enc")
+            with open(secret_path, 'w') as f:
+                f.write(encrypted)
+                
+            # Set secure permissions
+            try:
+                os.chmod(secret_path, 0o600)
+            except Exception:
+                pass  # Ignore permission errors on platforms that don't support it
+                
+            return None
+        except Exception as e:
+            return f"Failed to save secret: {str(e)}"
+
     def export_secrets(self, export_path, export_password):
         """
         Export secrets as a GPG-encrypted file.
