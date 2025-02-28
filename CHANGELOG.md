@@ -6,6 +6,8 @@
 - Resolved issue with saving secrets for the first time by properly prompting for vault and master passwords
 - Improved error handling in the secure storage implementation
 - Fixed the OpenCV edition to properly handle vault creation
+- Addressed directory creation issue when creating the vault for the first time
+- Enhanced fallback implementation robustness by adding more comprehensive error checks
 
 ## Version 0.2.0 - 2025-02-28
 
