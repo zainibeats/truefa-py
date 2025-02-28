@@ -162,51 +162,72 @@ class TwoFactorAuth:
             # Check OpenCV availability
             try:
                 import cv2
+                print(f"DEBUG: OpenCV version: {cv2.__version__}")
             except ImportError:
                 return None, "OpenCV is required for QR scanning. Please install it with 'pip install opencv-python'"
             
             # Read and process image
+            print(f"DEBUG: Reading image from: {image_path}")
             img = cv2.imread(str(image_path))
             if img is None:
                 return None, f"Could not read image: {image_path}"
+            
+            print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
             
             # Initialize QR Code detector
             detector = cv2.QRCodeDetector()
             
             # Detect and decode
+            print("DEBUG: Attempting to detect and decode QR code...")
             data, bbox, _ = detector.detectAndDecode(img)
+            
+            print(f"DEBUG: QR code data: {data if data else 'None'}")
+            print(f"DEBUG: QR code bounding box: {bbox if bbox is not None else 'None'}")
             
             # Process QR code data
             if data:
+                print(f"DEBUG: Raw QR data: {data}")
                 if data.startswith('otpauth://'):
                     parsed = urllib.parse.urlparse(data)
                     params = dict(urllib.parse.parse_qsl(parsed.query))
                     
+                    print(f"DEBUG: Parsed params: {params}")
+                    
                     if 'secret' in params:
-                        # Normalize the secret to ensure it's valid base32
+                        # Extract and normalize the secret
                         secret = params['secret']
-                        # Remove any non-Base32 characters and convert to uppercase
-                        secret = ''.join(c for c in secret.upper() if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+                        print(f"DEBUG: Raw secret from QR: {secret}")
                         
-                        # Force proper Base32 padding
-                        # Base32 padding is applied in blocks of 8 characters
-                        padding_length = (8 - (len(secret) % 8)) % 8
-                        secret += '=' * padding_length
+                        # Create a secure string from the extracted secret
+                        secure_secret = SecureString(secret)
                         
-                        # Try to verify the secret is valid by creating a TOTP
-                        try:
-                            totp = pyotp.TOTP(secret)
-                            # If this doesn't raise an exception, the secret is valid
-                            totp.now()
-                            return SecureString(secret), None
-                        except Exception as e:
-                            return None, f"Invalid TOTP secret format: {str(e)}"
+                        # Set the issuer and account if available
+                        path = parsed.path
+                        if path.startswith('/'):
+                            path = path[1:]
+                        
+                        if ':' in path:
+                            self.issuer, self.account = path.split(':', 1)
+                        else:
+                            self.account = path
+                            self.issuer = params.get('issuer', '')
+                        
+                        print(f"DEBUG: Parsed issuer: {self.issuer}, account: {self.account}")
+                        
+                        # Store the secret
+                        self.secret = secure_secret
+                        return secure_secret, None
+                    
+                    return None, "No secret parameter found in otpauth URL"
                 
-                return None, "No valid otpauth URL found in QR code"
+                return None, "QR code found but doesn't contain a valid otpauth URL"
             else:
                 return None, "No QR code found in the image"
             
         except Exception as e:
+            print(f"DEBUG: Exception in extract_secret_from_qr: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None, f"Error processing image: {e}"
 
     def _validate_image_path(self, image_path):
