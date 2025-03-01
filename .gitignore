@@ -225,6 +225,9 @@ vault_test.py
 *.swo
 *~
 
+#file version info
+file_version_info.txt
+
 # Environment files
 .env
 .venv
