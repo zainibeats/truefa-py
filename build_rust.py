@@ -85,17 +85,18 @@ def build_rust_module():
                 
                 # Check for key functions
                 required_functions = [
-                    'secure_random_bytes',
-                    'create_vault',
-                    'unlock_vault',
-                    'is_vault_unlocked',
-                    'lock_vault',
-                    'generate_salt',
-                    'derive_master_key',
-                    'encrypt_master_key',
-                    'decrypt_master_key',
-                    'create_secure_string',
-                    'verify_signature'
+                    'c_secure_random_bytes',
+                    'c_create_vault',
+                    'c_unlock_vault',
+                    'c_is_vault_unlocked',
+                    'c_lock_vault',
+                    'c_vault_exists',
+                    'c_generate_salt',
+                    'c_derive_master_key',
+                    'c_encrypt_master_key',
+                    'c_decrypt_master_key',
+                    'c_create_secure_string',
+                    'c_verify_signature'
                 ]
                 
                 missing = []
