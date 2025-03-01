@@ -175,3 +175,92 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Rust build artifacts
+rust_crypto/target/
+**/*.rs.bk
+*.dll
+*.so
+*.dylib
+
+# Build specs (except for main one)
+*.spec
+!truefa.spec
+
+# Test files
+test_*.py
+*_test.py
+inspect_dll.py
+build_and_test.py
+vault_test.py
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.venv
+env/
+venv/
+ENV/
+.python-version
+
+# Backup files
+*.bak
+*.tmp
+*.orig
+
+# Logs
+*.log
+logs/
+debug.log
+
+# Project specific
+.truefa/
+vault.dat
+release/
+
+# Specific build scripts (keep main one)
+build_exe.py 
+build_with_options.py
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# NSIS installer files
+installer.nsi
