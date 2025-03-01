@@ -69,17 +69,31 @@ python -m src.main
 - **Robust Fallback Design**: The application now gracefully falls back to Python implementations when the Rust library cannot be loaded or when specific functions are missing.
 - **Advanced Vault System**: Implemented a secure storage vault with proper envelope encryption for additional security.
 - **Improved Error Handling**: Better error messages and debugging output throughout the application.
+- **Hardened Vault Authentication**: Enhanced password verification using PBKDF2 with constant-time comparison to prevent timing attacks.
+- **Security State Consistency**: Multiple validation layers ensure vault unlock state is correctly tracked to prevent unauthorized access.
+- **Password Hash Storage**: Vault metadata now stores password hashes with secure salting for robust authentication.
+- **Automatic Vault Upgrade**: Legacy vaults are automatically upgraded to include password hashes for better security.
+
+### Security Model
+- **Two-Layer Authentication**: 
+  - Vault password unlocks the vault and verifies against stored hash
+  - Master key is used for encrypting/decrypting individual TOTP secrets
+- **Defense-in-Depth**: Multiple security checks ensure critical operations only proceed when authentication is valid
+- **No Trust Assumptions**: Every authentication step is verified, preventing bugs in one component from compromising security
 
 ### Fixed Issues
 - Resolved PyInstaller packaging issues
 - Fixed TOTP generation and QR code scanning
 - Ensured resource files are correctly packaged with the executable
 - Enhanced file path handling for better cross-platform support
+- Fixed critical authentication issues in the secure vault implementation
+- Eliminated potential for vault state inconsistencies that could lead to unauthorized access
 
 ### Development
 - Added automated tests for critical functionality 
 - Improved build scripts with better validation and error reporting
 - Enhanced code structure for better maintainability
+- Added comprehensive debug logging for security-critical functions
 
 ## Basic Usage
 
@@ -96,6 +110,9 @@ python -m src.main
 - **Memory Safety**: Rust-based secure memory handling
 - **Zero Trust**: Stateless operation by default
 - **Secure Storage**: AES-GCM encryption with Scrypt key derivation
+- **Password Verification**: PBKDF2 with 100,000 iterations and secure salt handling
+- **Secure Comparison**: Constant-time hash comparison prevents timing attacks
+- **Defensive Programming**: Multiple security checks with explicit fail-safe behavior
 
 ## Documentation
 
