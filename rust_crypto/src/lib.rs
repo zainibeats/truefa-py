@@ -324,22 +324,25 @@ fn truefa_crypto(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 }
 
 // Export functions with C linkage for DLL loading
+
 #[no_mangle]
 pub extern "C" fn c_secure_random_bytes(size: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
-    match secure_random_bytes(size) {
-        Ok(bytes) => {
-            unsafe {
-                if bytes.len() <= *out_len {
-                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
-                    *out_len = bytes.len();
-                    true
-                } else {
-                    false
+    Python::with_gil(|_py| {
+        match secure_random_bytes(size) {
+            Ok(bytes) => {
+                unsafe {
+                    if bytes.len() <= size {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                        *out_len = bytes.len();
+                        true
+                    } else {
+                        false
+                    }
                 }
-            }
-        },
-        Err(_) => false
-    }
+            },
+            Err(_) => false,
+        }
+    })
 }
 
 #[no_mangle]
@@ -348,39 +351,226 @@ pub extern "C" fn c_create_vault(password_ptr: *const u8, password_len: usize, o
         let slice = std::slice::from_raw_parts(password_ptr, password_len);
         match std::str::from_utf8(slice) {
             Ok(s) => s,
-            Err(_) => return false
+            Err(_) => return false,
         }
     };
     
-    match create_vault(password) {
-        Ok(salt) => {
-            let salt_bytes = salt.as_bytes();
-            unsafe {
-                if salt_bytes.len() <= *out_len {
-                    std::ptr::copy_nonoverlapping(salt_bytes.as_ptr(), out_ptr, salt_bytes.len());
-                    *out_len = salt_bytes.len();
-                    true
-                } else {
-                    false
+    Python::with_gil(|_py| {
+        match create_vault(password) {
+            Ok(salt) => {
+                let bytes = salt.as_bytes();
+                unsafe {
+                    if bytes.len() <= *out_len {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                        *out_len = bytes.len();
+                        true
+                    } else {
+                        false
+                    }
                 }
-            }
-        },
-        Err(_) => false
-    }
+            },
+            Err(_) => false,
+        }
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn c_is_vault_unlocked() -> bool {
-    match is_vault_unlocked() {
-        Ok(unlocked) => unlocked,
-        Err(_) => false
-    }
+    Python::with_gil(|_py| {
+        match is_vault_unlocked() {
+            Ok(b) => b,
+            Err(_) => false,
+        }
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn c_vault_exists() -> bool {
-    match vault_exists() {
-        Ok(exists) => exists,
-        Err(_) => false
-    }
+    Python::with_gil(|_py| {
+        match vault_exists() {
+            Ok(b) => b,
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_unlock_vault(password_ptr: *const u8, password_len: usize, salt_ptr: *const u8, salt_len: usize) -> bool {
+    let password = unsafe {
+        let slice = std::slice::from_raw_parts(password_ptr, password_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+    
+    let salt = unsafe {
+        let slice = std::slice::from_raw_parts(salt_ptr, salt_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+    
+    Python::with_gil(|_py| {
+        match unlock_vault(password, salt) {
+            Ok(b) => b,
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_lock_vault() -> bool {
+    Python::with_gil(|_py| {
+        match lock_vault() {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_generate_salt(out_ptr: *mut u8, out_len: *mut usize) -> bool {
+    Python::with_gil(|_py| {
+        match generate_salt() {
+            Ok(salt) => {
+                let bytes = salt.as_bytes();
+                unsafe {
+                    if bytes.len() <= *out_len {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                        *out_len = bytes.len();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_derive_master_key(password_ptr: *const u8, password_len: usize, salt_ptr: *const u8, salt_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
+    let password = unsafe {
+        let slice = std::slice::from_raw_parts(password_ptr, password_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+    
+    let salt = unsafe {
+        let slice = std::slice::from_raw_parts(salt_ptr, salt_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+    
+    Python::with_gil(|_py| {
+        match derive_master_key(password, salt) {
+            Ok(key) => {
+                let bytes = key.as_bytes();
+                unsafe {
+                    if bytes.len() <= *out_len {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                        *out_len = bytes.len();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_encrypt_master_key(key_ptr: *const u8, key_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
+    let key = unsafe {
+        let slice = std::slice::from_raw_parts(key_ptr, key_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+    
+    Python::with_gil(|_py| {
+        match encrypt_master_key(key) {
+            Ok(encrypted) => {
+                let bytes = encrypted.as_bytes();
+                unsafe {
+                    if bytes.len() <= *out_len {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                        *out_len = bytes.len();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_decrypt_master_key(encrypted_ptr: *const u8, encrypted_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
+    let encrypted = unsafe {
+        let slice = std::slice::from_raw_parts(encrypted_ptr, encrypted_len);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+    
+    Python::with_gil(|_py| {
+        match decrypt_master_key(encrypted) {
+            Ok(decrypted) => {
+                let bytes = decrypted.as_bytes();
+                unsafe {
+                    if bytes.len() <= *out_len {
+                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                        *out_len = bytes.len();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+            Err(_) => false,
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_create_secure_string(data_ptr: *const u8, data_len: usize) -> *mut SecureString {
+    let data = unsafe {
+        std::slice::from_raw_parts(data_ptr, data_len)
+    };
+    
+    Python::with_gil(|_py| {
+        match std::str::from_utf8(data) {
+            Ok(s) => {
+                match create_secure_string(s.as_bytes()) {
+                    Ok(secure_string) => {
+                        let boxed = Box::new(secure_string);
+                        Box::into_raw(boxed)
+                    },
+                    Err(_) => std::ptr::null_mut(),
+                }
+            },
+            Err(_) => std::ptr::null_mut(),
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn c_verify_signature(_data_ptr: *const u8, _data_len: usize, _signature_ptr: *const u8, _signature_len: usize) -> bool {
+    // This is a placeholder function for signature verification
+    // In a real implementation, this would verify a cryptographic signature
+    true
 }
