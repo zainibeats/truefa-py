@@ -205,9 +205,11 @@ rust_crypto/target/
 *.so
 *.dylib
 
-# Build specs (except for main one)
+# Build specs (except for the important ones)
 *.spec
 !truefa.spec
+!TrueFA_simple.spec
+!TrueFA_installer.spec
 
 # Test files
 test_*.py
@@ -262,5 +264,5 @@ $RECYCLE.BIN/
 .LSOverride
 ._*
 
-# NSIS installer files
-installer.nsi
+# Include important NSIS installer files
+# installer.nsi
