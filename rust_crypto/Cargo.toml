@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "truefa_crypto"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.18.3", features = ["extension-module", "abi3-py37"] }
