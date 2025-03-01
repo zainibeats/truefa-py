@@ -70,7 +70,7 @@ def main():
                                 # Try to auto-unlock if needed
                                 if not secure_storage.is_unlocked:
                                     master_password = input("Enter your vault master password to save this secret: ")
-                                    if not secure_storage.unlock_vault(master_password):
+                                    if not secure_storage.unlock(master_password):
                                         print("Failed to unlock vault. Secret loaded but not saved.")
                                     else:
                                         # Auto-save with confirmation
@@ -138,7 +138,7 @@ def main():
                             # Try to auto-unlock if needed
                             if not secure_storage.is_unlocked:
                                 master_password = input("Enter your vault master password to save this secret: ")
-                                if not secure_storage.unlock_vault(master_password):
+                                if not secure_storage.unlock(master_password):
                                     print("Failed to unlock vault. Secret loaded but not saved.")
                                 else:
                                     # Auto-save with confirmation
@@ -186,6 +186,14 @@ def main():
                         has_vault = secure_storage.vault.is_initialized()
                         has_current_secret = auth.secret is not None
                         
+                        # Add more debugging in DEBUG mode
+                        debug_mode = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+                        if debug_mode:
+                            print(f"DEBUG: Vault initialized: {has_vault}")
+                            print(f"DEBUG: Has current secret: {has_current_secret}")
+                            print(f"DEBUG: Vault meta path exists: {os.path.exists(secure_storage.vault.vault_meta_path)}")
+                            print(f"DEBUG: Vault directory: {secure_storage.vault.vault_dir}")
+                        
                         if not has_vault and not has_current_secret:
                             print("No secret available. Please load a QR code or enter a secret first.")
                             continue
@@ -194,51 +202,86 @@ def main():
                         if has_vault:
                             if not secure_storage.is_unlocked:
                                 master_password = input("Enter your vault master password: ")
-                                if not secure_storage.unlock_vault(master_password):
-                                    if not has_current_secret:
-                                        print("Failed to unlock vault and no secret is loaded. Cannot proceed.")
-                                        continue
-                                    else:
-                                        print("Failed to unlock vault. Will use currently loaded secret.")
-                                else:
-                                    secrets = secure_storage.list_secrets()
-                                    if secrets:
-                                        print("\nAvailable secrets:")
-                                        for i, name in enumerate(secrets, 1):
-                                            print(f"{i}. {name}")
-                                            
-                                        # Add option for current in-memory secret
-                                        if has_current_secret:
-                                            print(f"{len(secrets) + 1}. Currently loaded secret")
-                                            
-                                        selection = input("\nEnter number to view code: ").strip()
+                                
+                                if not secure_storage.unlock(master_password):
+                                    print("Invalid password for vault")
+                                    if has_current_secret:
+                                        print("Will use currently loaded secret instead.")
+                                        # Generate codes in real-time for the current in-memory secret
+                                        print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
                                         try:
-                                            idx = int(selection) - 1
-                                            if 0 <= idx < len(secrets):
-                                                secret_data = secure_storage.load_secret(secrets[idx])
-                                                if secret_data:
-                                                    auth.secret = SecureString(secret_data.get("secret", ""))
-                                                    auth.issuer = secret_data.get("issuer", "")
-                                                    auth.account = secret_data.get("account", "")
-                                                    print(f"Loaded secret for: {auth.issuer or 'Unknown'} ({auth.account or 'Unknown'})")
-                                                else:
-                                                    print("Failed to decrypt secret.")
-                                                    continue
-                                            elif idx == len(secrets) and has_current_secret:
-                                                # Use currently loaded secret
-                                                print(f"Using currently loaded secret: {getattr(auth, 'issuer', 'Unknown')} ({getattr(auth, 'account', 'Unknown')})")
-                                            else:
-                                                print("Invalid selection.")
-                                                continue
-                                        except ValueError:
-                                            print("Invalid input. Please enter a number.")
-                                            continue
+                                            auth.continuous_generate(debug_mode=debug_mode)
+                                        except KeyboardInterrupt:
+                                            # Handle interruption cleanly by printing a newline and message
+                                            print("\nStopped code generation.")
                                     else:
-                                        if has_current_secret:
-                                            print("No saved secrets found. Using currently loaded secret.")
+                                        print("No secret available. Cannot proceed without valid authentication.")
+                                    continue
+                            
+                            # Double-check that vault is unlocked after authentication
+                            if debug_mode:
+                                print(f"DEBUG: Vault unlocked after authentication: {secure_storage.is_unlocked}")
+                                
+                            # CRITICAL: Only list secrets if the vault was successfully unlocked
+                            if secure_storage.is_unlocked:
+                                # Double verification of vault unlock status
+                                if not secure_storage.vault.is_unlocked():
+                                    print("ERROR: Authentication inconsistency detected. Vault appears unlocked but internal state is invalid.")
+                                    if debug_mode:
+                                        print("DEBUG: This is a serious security issue - forcing vault lock")
+                                    secure_storage._lock()  # Force relocking
+                                    continue
+                                    
+                                secrets = secure_storage.list_secrets()
+                                if secrets:
+                                    print("\nAvailable secrets:")
+                                    for i, name in enumerate(secrets, 1):
+                                        print(f"{i}. {name}")
+                                    
+                                    # Add option for current in-memory secret
+                                    if has_current_secret:
+                                        print(f"{len(secrets) + 1}. Currently loaded secret")
+                                        
+                                    selection = input("\nEnter number to view code: ").strip()
+                                    try:
+                                        idx = int(selection) - 1
+                                        if 0 <= idx < len(secrets):
+                                            secret_data = secure_storage.load_secret(secrets[idx])
+                                            if secret_data:
+                                                auth.secret = SecureString(secret_data.get("secret", ""))
+                                                auth.issuer = secret_data.get("issuer", "")
+                                                auth.account = secret_data.get("account", "")
+                                                print(f"Loaded secret for: {auth.issuer or 'Unknown'} ({auth.account or 'Unknown'})")
+                                            else:
+                                                print("Failed to decrypt secret.")
+                                                continue
+                                        elif idx == len(secrets) and has_current_secret:
+                                            # Use currently loaded secret
+                                            print(f"Using currently loaded secret: {getattr(auth, 'issuer', 'Unknown')} ({getattr(auth, 'account', 'Unknown')})")
                                         else:
-                                            print("No saved secrets found and no secret currently loaded.")
+                                            print("Invalid selection.")
                                             continue
+                                    except ValueError:
+                                        print("Invalid input. Please enter a number.")
+                                        continue
+                                else:
+                                    # No secrets found in vault
+                                    if has_current_secret:
+                                        print("No saved secrets found in vault. Using currently loaded secret.")
+                                    else:
+                                        print("No saved secrets found in vault and no secret currently loaded.")
+                                        continue
+                            else:
+                                # This branch should only execute if something went wrong
+                                # after supposedly successful authentication
+                                print("Error: Vault authentication inconsistency. Please restart the application.")
+                                if has_current_secret:
+                                    print("Using currently loaded secret as fallback.")
+                                else:
+                                    continue
+                        elif has_current_secret:
+                            # No vault but we have a current secret
+                            print("No secure vault found. Using currently loaded secret.")
                         
                         # At this point, either we have a secret from the vault or we're using the in-memory one
                         if auth.secret:
@@ -250,7 +293,7 @@ def main():
                                 auth.continuous_generate(debug_mode=debug_mode)
                             except KeyboardInterrupt:
                                 # Handle interruption cleanly by printing a newline and message
-                                print("\nStopped real-time code generation.")
+                                print("\nStopped code generation.")
                             except Exception as e:
                                 # Log any unexpected errors but continue program execution
                                 print(f"\nError during code generation: {e}")
@@ -290,7 +333,7 @@ def main():
                         elif not secure_storage.is_unlocked:
                             # Vault exists but is locked, prompt for password
                             master_password = input("Enter your vault master password: ")
-                            if not secure_storage.unlock_vault(master_password):
+                            if not secure_storage.unlock(master_password):
                                 print("Failed to unlock vault with the provided password.")
                                 continue
                                                 
