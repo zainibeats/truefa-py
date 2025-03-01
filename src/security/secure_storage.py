@@ -154,10 +154,15 @@ class SecureStorage:
         # First try to unlock vault if initialized
         if self.vault.is_initialized():
             if self.vault.unlock(password):
+                # Only set _is_unlocked to True if vault.unlock succeeds
                 self._is_unlocked = True
                 return True
+            else:
+                # Explicit return False if vault.unlock fails to ensure we don't 
+                # fallback to legacy mode after a failed vault password attempt
+                return False
         
-        # Fall back to legacy mode
+        # Fall back to legacy mode only if no vault exists
         if password:
             self.key = self.derive_key(password)
             if self.key:
@@ -499,7 +504,12 @@ class SecureStorage:
         Returns:
             list: List of secret names (without extensions)
         """
-        if not self.vault.is_initialized() or not self.is_unlocked:
+        if not self.vault.is_initialized():
+            print("No vault initialized. Please create a vault first.")
+            return []
+            
+        if not self.is_unlocked:
+            print("Vault is locked. Please unlock with your master password first.")
             return []
             
         secrets = []
@@ -524,6 +534,10 @@ class SecureStorage:
         Returns:
             dict or None: Loaded secret data if successful, None otherwise
         """
+        if not self.vault.is_initialized():
+            print("No vault initialized. Please create a vault first.")
+            return None
+            
         if not self.is_unlocked:
             print("Storage is locked. Please unlock first.")
             return None
@@ -880,7 +894,12 @@ class SecureStorage:
         Returns:
             list: List of secret names (without extensions)
         """
-        if not self.vault.is_initialized() or not self.is_unlocked:
+        if not self.vault.is_initialized():
+            print("No vault initialized. Please create a vault first.")
+            return []
+            
+        if not self.is_unlocked:
+            print("Vault is locked. Please unlock with your master password first.")
             return []
             
         secrets = []
@@ -905,6 +924,10 @@ class SecureStorage:
         Returns:
             dict or None: Loaded secret data if successful, None otherwise
         """
+        if not self.vault.is_initialized():
+            print("No vault initialized. Please create a vault first.")
+            return None
+            
         if not self.is_unlocked:
             print("Storage is locked. Please unlock first.")
             return None
