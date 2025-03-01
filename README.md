@@ -1,128 +1,127 @@
-# TrueFA
+# TrueFA - True Factor Authentication
 
-A secure two-factor authentication code generator with support for QR code scanning and encrypted storage.
+A secure, Rust-backed two-factor authentication application with enhanced security features.
 
-A secure two-factor authentication code generator with Rust-powered cryptography, QR code scanning, and encrypted storage.
+## Features
 
-## Key Features
+- **Secure Storage**: All secrets are stored using memory protection techniques
+- **Rust Cryptography**: Core security operations implemented in Rust for enhanced security
+- **Two UI Modes**: Console and GUI interfaces available
+- **Portable**: Available as both a standalone executable and installer package
+- **QR Code Support**: Import tokens via camera or image files
+- **Time-Based OTP**: Full TOTP implementation with customizable parameters
 
-- **Rust-Based Security**: Critical cryptographic operations in Rust
-- **Secure Memory Handling**: Protected memory with automatic cleanup
-- **Vault Encryption**: Two-layer envelope encryption for TOTP secrets
-- **QR Code Support**: OpenCV-based QR code scanning
-- **Flexible Operation**: Use with or without persistent storage
-- **Cross-Platform**: Windows, Linux, and macOS support
+## Prerequisites
 
-## Installation & Usage
+To build TrueFA from source, you need:
 
-Choose one of these three methods to run TrueFA:
+- Python 3.10 or later
+- Rust (latest stable version)
+- PyInstaller
+- NSIS (for building Windows installer)
 
-### 1. Windows Executable (Recommended for Windows Users)
-Download the latest release from our [releases page](https://github.com/zainibeats/truefa-py/releases) and run `TrueFA.exe`.
+## Building from Source
 
-### 2. Docker Container (Recommended for Linux/macOS)
-```bash
-# Build and run with Docker
-docker build -t truefa .
-docker run -it --name truefa \
-  -v "${PWD}/images:/app/images" \
-  -v "${PWD}/.truefa:/app/.truefa" \
-  -v "$HOME/Downloads:/home/truefa/Downloads" \
-  truefa
+### Setting up the Environment
 
-# On Windows PowerShell, use:
-docker run -it --name truefa `
-  -v "${PWD}\images:/app/images" `
-  -v "${PWD}\.truefa:/app/.truefa" `
-  -v "$HOME\Downloads:/home/truefa/Downloads" `
-  truefa
+1. Clone the repository
+2. Create a virtual environment:
+   ```
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
 
-# For subsequent runs:
-docker start -ai truefa
+### Building the Rust Cryptography Backend
+
+1. Ensure Rust is installed by checking:
+   ```
+   rustc --version
+   ```
+
+2. Run the build script:
+   ```
+   python secure_build_fix.py
+   ```
+   This script will compile the Rust cryptography module and place the DLL in the correct location.
+
+### Building the Application
+
+There are several ways to build TrueFA:
+
+#### Method 1: Using the build_package.py script
+
+The simplest way to build both the executable and installer:
+
+```
+python build_package.py
 ```
 
-### 3. From Source
-Prerequisites:
-- Python 3.8+
-- Rust and Cargo
-- GPG (optional, for secret export)
+This creates both a portable executable and an installer in the `dist` directory.
 
-```bash
-# Clone and setup
-git clone https://github.com/zainibeats/truefa-py.git
-cd truefa-py
-pip install -r requirements.txt
-python build_rust.py
+#### Method 2: Using PyInstaller directly
 
-# Run on Windows
-run_truefa.bat           # Main launcher (recommended)
-run_direct_simple.bat    # Without QR scanning
-run_opencv.bat          # With QR scanning
+For more control over the build process:
 
-# Run on Linux/macOS
-python -m src.main
+```
+pyinstaller TrueFA_simple.spec
 ```
 
-## Recent Improvements
+#### Method 3: Building the installer manually
 
-### Enhanced Security Architecture
-- **Robust Fallback Design**: The application now gracefully falls back to Python implementations when the Rust library cannot be loaded or when specific functions are missing.
-- **Advanced Vault System**: Implemented a secure storage vault with proper envelope encryption for additional security.
-- **Improved Error Handling**: Better error messages and debugging output throughout the application.
-- **Hardened Vault Authentication**: Enhanced password verification using PBKDF2 with constant-time comparison to prevent timing attacks.
-- **Security State Consistency**: Multiple validation layers ensure vault unlock state is correctly tracked to prevent unauthorized access.
-- **Password Hash Storage**: Vault metadata now stores password hashes with secure salting for robust authentication.
-- **Automatic Vault Upgrade**: Legacy vaults are automatically upgraded to include password hashes for better security.
+```
+pyinstaller TrueFA_installer.spec
+makensis installer.nsi
+```
 
-### Security Model
-- **Two-Layer Authentication**: 
-  - Vault password unlocks the vault and verifies against stored hash
-  - Master key is used for encrypting/decrypting individual TOTP secrets
-- **Defense-in-Depth**: Multiple security checks ensure critical operations only proceed when authentication is valid
-- **No Trust Assumptions**: Every authentication step is verified, preventing bugs in one component from compromising security
+### Build Outputs
 
-### Fixed Issues
-- Resolved PyInstaller packaging issues
-- Fixed TOTP generation and QR code scanning
-- Ensured resource files are correctly packaged with the executable
-- Enhanced file path handling for better cross-platform support
-- Fixed critical authentication issues in the secure vault implementation
-- Eliminated potential for vault state inconsistencies that could lead to unauthorized access
+The build process will place these files in the `dist` directory:
 
-### Development
-- Added automated tests for critical functionality 
-- Improved build scripts with better validation and error reporting
-- Enhanced code structure for better maintainability
-- Added comprehensive debug logging for security-critical functions
+- Portable executable: `TrueFA.exe` or `TrueFA_gui.exe`
+- Installer: `TrueFA_Setup.exe`
 
-## Basic Usage
+## Installation
 
-1. Launch TrueFA using your chosen installation method
-2. Choose your operation mode:
-   - Scan QR codes from images
-   - Enter TOTP secrets manually
-   - Save/load encrypted secrets
-   - Export secrets (requires GPG)
+### Portable Version
 
-## Security Features
+Simply download and run `TrueFA.exe`. No installation required. The application will store its data in the user's AppData folder.
 
-- **Envelope Encryption**: Dual-layer protection with vault and master keys
-- **Memory Safety**: Rust-based secure memory handling
-- **Zero Trust**: Stateless operation by default
-- **Secure Storage**: AES-GCM encryption with Scrypt key derivation
-- **Password Verification**: PBKDF2 with 100,000 iterations and secure salt handling
-- **Secure Comparison**: Constant-time hash comparison prevents timing attacks
-- **Defensive Programming**: Multiple security checks with explicit fail-safe behavior
+### Installer Version
 
-## Documentation
+Run `TrueFA_Setup.exe` and follow the installation wizard. This will:
+- Install TrueFA to the Program Files directory
+- Create start menu shortcuts
+- Add an uninstaller
+- Register the application with Windows
 
-- [QR Code Guide](QR_CODE_GUIDE.md)
-- [Runner Scripts](README_RUNNERS.md)
+## Usage
 
-## Contributing
+### Console Mode
 
-This project is under active development. Issues and pull requests are welcome.
+Run `TrueFA.exe` from the command line to use the text-based interface.
+
+### GUI Mode
+
+Double-click the TrueFA icon to launch the graphical user interface.
+
+## Note on Rust Cryptography Integration
+
+TrueFA uses a hybrid approach for cryptography:
+
+1. **Primary Implementation**: Rust-based cryptography module provides enhanced security through memory protection and Rust's safety guarantees
+2. **Fallback Mechanism**: If the Rust module fails to load, the application will automatically fall back to a pure Python implementation
+
+This design ensures maximum compatibility while prioritizing security when possible.
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+MIT 
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Acknowledgements
+
+- [Add acknowledgements here]
