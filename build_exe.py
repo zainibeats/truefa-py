@@ -67,6 +67,10 @@ def build_executable():
     import shutil
     import tempfile
     
+    # Ensure build directory exists
+    build_dir = Path("build/truefa")
+    build_dir.mkdir(parents=True, exist_ok=True)
+    
     # First, find our Rust DLL
     rust_dll_path = None
     possible_dll_paths = [
@@ -98,35 +102,24 @@ def build_executable():
     pyinstaller_cmd.extend([
         '--hidden-import=cryptography',
         '--hidden-import=pyotp',
-        '--hidden-import=qrcode',
-        '--hidden-import=PIL',
+        '--hidden-import=opencv-python',
+        '--hidden-import=PIL',  # Pillow
+        '--hidden-import=PIL._imagingtk',
         '--hidden-import=PIL._tkinter_finder',
-        '--hidden-import=PIL.ImageFilter',
-        '--hidden-import=pillow',
-        '--hidden-import=cv2',
-        '--hidden-import=numpy',
-        '--hidden-import=truefa_crypto',
     ])
     
-    # Add the entire truefa_crypto module folder
-    module_dir = Path("truefa_crypto")
-    if module_dir.exists() and module_dir.is_dir():
-        # Add the entire module directory
-        pyinstaller_cmd.append(f'--add-data={module_dir}{os.pathsep}{module_dir}')
-        
-        # Also explicitly add the DLL
-        dll_path = module_dir / "truefa_crypto.dll"
-        if dll_path.exists():
-            pyinstaller_cmd.append(f'--add-binary={dll_path}{os.pathsep}{module_dir}')
+    # Add Rust DLL and other data files
+    pyinstaller_cmd.extend([
+        f'--add-data={rust_dll_path}{os.pathsep}.',  # Add Rust DLL to the executable
+        f'--add-data=images{os.pathsep}images',  # Add images directory 
+    ])
     
-    # Also add the Rust DLL directly
-    if rust_dll_path and rust_dll_path.exists():
-        pyinstaller_cmd.append(f'--add-binary={rust_dll_path}{os.pathsep}.')
+    # Create the dist directory and images folder if they don't exist
+    dist_dir = Path("dist")
+    dist_dir.mkdir(exist_ok=True)
     
-    # Add images directory if it exists
-    images_dir = os.path.join(os.getcwd(), 'images')
-    if os.path.exists(images_dir):
-        pyinstaller_cmd.append(f'--add-data={images_dir}{os.pathsep}images')
+    images_dir = dist_dir / "images"
+    images_dir.mkdir(exist_ok=True)
     
     # Run PyInstaller using the subprocess module
     print("Building TrueFA executable...")
