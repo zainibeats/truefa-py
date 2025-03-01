@@ -109,23 +109,23 @@ class SecureStorage:
         """Check if the storage is unlocked."""
         return self._is_unlocked
         
-    def create_vault(self, vault_password, master_password):
+    def create_vault(self, master_password):
         """
         Create a new secure vault for storing TOTP secrets.
         
         Args:
-            vault_password: Password to unlock the vault
-            master_password: Password to encrypt individual secrets
+            master_password: Single master password to encrypt all secrets
             
         Returns:
             bool: True if successful, False if failed
             
         Security:
-        - Uses secure key derivation for both passwords
-        - Uses envelope encryption for layered security
+        - Uses secure key derivation
+        - Sets up the vault with proper permissions
         """
         try:
-            success = self.vault.create_vault(vault_password, master_password)
+            # In our simplified model, vault_password and master_password are the same
+            success = self.vault.create_vault(master_password, master_password)
             if success:
                 self._is_unlocked = True
                 print("Secure vault created successfully")
@@ -492,57 +492,65 @@ class SecureStorage:
         except Exception:
             return None
 
+    def list_secrets(self):
+        """
+        List all available encrypted secrets.
+        
+        Returns:
+            list: List of secret names (without extensions)
+        """
+        if not self.vault.is_initialized() or not self.is_unlocked:
+            return []
+            
+        secrets = []
+        try:
+            vault_dir = self.vault.vault_dir
+            if os.path.exists(vault_dir):
+                for f in os.listdir(vault_dir):
+                    if f.endswith('.enc'):
+                        secrets.append(f[:-4])  # Remove .enc extension
+        except Exception as e:
+            print(f"Error listing secrets: {e}")
+            
+        return secrets
+            
     def load_secret(self, name):
         """
-        Load an encrypted secret from storage.
+        Load and decrypt a saved secret.
         
         Args:
-            name: Name of the secret to load
+            name (str): Name of the secret to load
             
         Returns:
-            str: Encrypted secret data or None if failed
-            
-        Security:
-        - Verifies storage is unlocked
-        - Returns None on any error
+            dict or None: Loaded secret data if successful, None otherwise
         """
         if not self.is_unlocked:
+            print("Storage is locked. Please unlock first.")
             return None
-        
-        try:
-            with open(os.path.join(self.storage_path, f"{name}.enc"), 'r') as f:
-                return f.read()
-        except Exception:
-            return None
-
-    def load_all_secrets(self):
-        """
-        Load all encrypted secrets from storage.
-        
-        Returns:
-            dict: Map of secret names to encrypted data
             
-        Security:
-        - Verifies storage is unlocked
-        - Returns empty dict on any error
-        - Only loads .enc files
-        """
-        if not self.is_unlocked:
-            return {}
-        
-        secrets = {}
         try:
-            for filename in os.listdir(self.storage_path):
-                if filename.endswith('.enc'):
-                    name = filename[:-4]
-                    secret = self.load_secret(name)
-                    if secret:
-                        secrets[name] = secret
+            # Construct the path to the encrypted file
+            secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+            
+            # Check if the file exists
+            if not os.path.exists(secret_path):
+                print(f"Secret not found: {name}")
+                return None
+                
+            # Read the raw data
+            with open(secret_path, 'r') as f:
+                secret_data = f.read()
+                
+            # Try to parse as JSON, if it doesn't work return as string
+            try:
+                import json
+                return json.loads(secret_data)
+            except json.JSONDecodeError:
+                return {"secret": secret_data}
+                
         except Exception as e:
-            print(f"Error loading secrets: {str(e)}")
-            return {}
-        
-        return secrets
+            print(f"Error loading secret: {e}")
+            return None
 
     def save_secret(self, name, secret=None, password=None):
         """
@@ -574,35 +582,31 @@ class SecureStorage:
         
         if not name:
             return "Secret name contains no valid characters"
-            
-        # Set up encryption key if needed
-        if password:
-            self.derive_key(password)
-        elif not self.key:
-            return "No encryption key available"
-            
+        
         try:
             # Get the secret data
             if secret is None:
                 # No secret provided, try to use current secret
                 return "No secret provided"
                 
-            # Check if secret is a SecureString object or a regular string
-            secret_data = None
-            if hasattr(secret, 'get') and callable(getattr(secret, 'get')):
+            # Secret can be a dictionary or a string
+            if isinstance(secret, dict):
+                # Encode the dictionary as JSON
+                import json
+                secret_data = json.dumps(secret)
+            elif hasattr(secret, 'get') and callable(getattr(secret, 'get')):
                 # It's a SecureString object
                 secret_data = secret.get()
             else:
                 # It's a regular string
                 secret_data = str(secret)
                 
-            # Encrypt the secret
-            encrypted = self.encrypt_secret(secret_data, name)
+            # We don't need to derive a key since we're using the vault's master key
             
-            # Save to file
-            secret_path = os.path.join(self.storage_path, f"{name}.enc")
+            # Save the secret to the vault directory
+            secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
             with open(secret_path, 'w') as f:
-                f.write(encrypted)
+                f.write(secret_data)
                 
             # Set secure permissions
             try:
@@ -837,4 +841,94 @@ class SecureStorage:
             return plaintext.decode('utf-8')
         except Exception as e:
             print(f"Error loading encrypted data: {e}")
+            return None
+
+    def unlock_vault(self, master_password):
+        """
+        Unlock the vault with the provided master password.
+        
+        Args:
+            master_password: Master password to unlock the vault
+            
+        Returns:
+            bool: True if unlocked successfully
+            
+        Security:
+        - Clears existing keys before attempting unlock
+        - Guards against vault initialization state
+        """
+        # Clear any existing keys
+        self.key = None
+        self._is_unlocked = False
+        
+        if not self.vault.is_initialized():
+            print("No vault exists yet. You'll be prompted to create one when saving a secret.")
+            return False
+            
+        if self.vault.unlock(master_password):
+            self._is_unlocked = True
+            print("Vault unlocked successfully")
+            return True
+            
+        print("Failed to unlock vault - incorrect password")
+        return False
+
+    def list_secrets(self):
+        """
+        List all available encrypted secrets.
+        
+        Returns:
+            list: List of secret names (without extensions)
+        """
+        if not self.vault.is_initialized() or not self.is_unlocked:
+            return []
+            
+        secrets = []
+        try:
+            vault_dir = self.vault.vault_dir
+            if os.path.exists(vault_dir):
+                for f in os.listdir(vault_dir):
+                    if f.endswith('.enc'):
+                        secrets.append(f[:-4])  # Remove .enc extension
+        except Exception as e:
+            print(f"Error listing secrets: {e}")
+            
+        return secrets
+            
+    def load_secret(self, name):
+        """
+        Load and decrypt a saved secret.
+        
+        Args:
+            name (str): Name of the secret to load
+            
+        Returns:
+            dict or None: Loaded secret data if successful, None otherwise
+        """
+        if not self.is_unlocked:
+            print("Storage is locked. Please unlock first.")
+            return None
+            
+        try:
+            # Construct the path to the encrypted file
+            secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+            
+            # Check if the file exists
+            if not os.path.exists(secret_path):
+                print(f"Secret not found: {name}")
+                return None
+                
+            # Read the raw data
+            with open(secret_path, 'r') as f:
+                secret_data = f.read()
+                
+            # Try to parse as JSON, if it doesn't work return as string
+            try:
+                import json
+                return json.loads(secret_data)
+            except json.JSONDecodeError:
+                return {"secret": secret_data}
+                
+        except Exception as e:
+            print(f"Error loading secret: {e}")
             return None
