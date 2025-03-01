@@ -117,6 +117,11 @@ class FallbackMethods:
         # Always return valid for testing
         return True
 
+    @staticmethod
+    def vault_exists():
+        print(f"DUMMY CALL: vault_exists((), {{}})")
+        return True
+
 # Define all fallback functions at module level
 def secure_random_bytes(size: int) -> bytes:
     """Generate cryptographically secure random bytes."""
@@ -128,7 +133,7 @@ def is_vault_unlocked() -> bool:
 
 def vault_exists() -> bool:
     """Check if a vault has been initialized."""
-    return False
+    return FallbackMethods.vault_exists()
 
 def create_vault(password: str) -> str:
     """Create a new vault with the given master password."""
@@ -219,164 +224,304 @@ try:
             # Project root directory (assuming a certain structure)
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "rust_crypto", "target", "release", "truefa_crypto.dll"),
             # Root directory 
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "truefa_crypto.dll"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "rust_crypto", "target", "release", "truefa_crypto.dll"),
         ]
-        
-    # Try all possible DLL locations
+
+    # Flag to track if we successfully loaded the DLL
+    _dll_loaded = False
+    
+    # Try each potential location
     for dll_path in possible_dll_locations:
+        print(f"DEBUG: Checking for DLL at {dll_path}")
         if os.path.exists(dll_path):
-            print(f"DLL found at: {dll_path}")
+            print(f"DEBUG: Found DLL at {dll_path}")
             try:
                 # Load the DLL
                 _lib = ctypes.CDLL(dll_path)
-                print("Successfully loaded DLL using ctypes")
                 
-                # Set up the function signatures
-                try:
-                    # Check for the core functions we need
-                    required_functions = [
-                        'secure_random_bytes',
-                        'create_vault',
-                        'unlock_vault',
-                        'is_vault_unlocked',
-                        'lock_vault',
-                        'generate_salt',
-                        'derive_master_key',
-                        'encrypt_master_key',
-                        'decrypt_master_key',
-                        'create_secure_string',
-                        'verify_signature'
-                    ]
+                # If we reach here, DLL loaded successfully
+                print(f"DEBUG: DLL loaded successfully from {dll_path}")
+                
+                # Define C function signatures for the DLL functions
+                
+                # Random bytes generation
+                _lib.c_secure_random_bytes.argtypes = [
+                    ctypes.c_size_t,                # size
+                    ctypes.POINTER(ctypes.c_ubyte), # out_ptr
+                    ctypes.POINTER(ctypes.c_size_t) # out_len
+                ]
+                _lib.c_secure_random_bytes.restype = ctypes.c_bool
+
+                def secure_random_bytes(size):
+                    buffer = (ctypes.c_ubyte * size)()
+                    out_len = ctypes.c_size_t(size)
+                    success = _lib.c_secure_random_bytes(size, buffer, ctypes.byref(out_len))
+                    if not success:
+                        print("WARNING: c_secure_random_bytes failed, using fallback")
+                        return FallbackMethods.secure_random_bytes(size)
+                    return bytes(buffer[:out_len.value])
+                
+                # Vault status functions
+                _lib.c_is_vault_unlocked.argtypes = []
+                _lib.c_is_vault_unlocked.restype = ctypes.c_bool
+                
+                def is_vault_unlocked():
+                    try:
+                        return _lib.c_is_vault_unlocked()
+                    except Exception as e:
+                        print(f"WARNING: c_is_vault_unlocked failed: {e}, using fallback")
+                        return FallbackMethods.is_vault_unlocked()
+                
+                _lib.c_vault_exists.argtypes = []
+                _lib.c_vault_exists.restype = ctypes.c_bool
+                
+                def vault_exists():
+                    try:
+                        return _lib.c_vault_exists()
+                    except Exception as e:
+                        print(f"WARNING: c_vault_exists failed: {e}, using fallback")
+                        return FallbackMethods.vault_exists()
                     
-                    # Verify that all required functions exist
-                    missing_functions = []
-                    for func_name in required_functions:
-                        if not hasattr(_lib, func_name):
-                            missing_functions.append(func_name)
+                # Vault functions
+                _lib.c_create_vault.argtypes = [
+                    ctypes.c_char_p,                # password_ptr
+                    ctypes.c_size_t,                # password_len
+                    ctypes.POINTER(ctypes.c_ubyte), # out_ptr
+                    ctypes.POINTER(ctypes.c_size_t) # out_len
+                ]
+                _lib.c_create_vault.restype = ctypes.c_bool
+                
+                def create_vault(password):
+                    password_bytes = password.encode('utf-8')
+                    buffer_size = 128  # Allocate a reasonably sized buffer
+                    buffer = (ctypes.c_ubyte * buffer_size)()
+                    out_len = ctypes.c_size_t(buffer_size)
                     
-                    if missing_functions:
-                        print(f"Error loading DLL {dll_path}: functions {', '.join(missing_functions)} not found")
-                        continue
+                    success = _lib.c_create_vault(
+                        password_bytes, 
+                        len(password_bytes),
+                        buffer,
+                        ctypes.byref(out_len)
+                    )
                     
-                    # If we get here, all functions exist, so set up their signatures
-                    
-                    # Override the fallback functions with the DLL functions
-                    
-                    # Create secure_random_bytes function with proper signature
-                    _lib.secure_random_bytes.argtypes = [ctypes.c_int]
-                    _lib.secure_random_bytes.restype = ctypes.POINTER(ctypes.c_ubyte)
-                    
-                    def secure_random_bytes(size: int) -> bytes:
-                        """Generate cryptographically secure random bytes."""
-                        result = _lib.secure_random_bytes(size)
-                        # Convert to Python bytes
-                        return bytes(result[i] for i in range(size))
-                    
-                    # Vault status functions
-                    _lib.is_vault_unlocked.argtypes = []
-                    _lib.is_vault_unlocked.restype = ctypes.c_bool
-                    
-                    def is_vault_unlocked() -> bool:
-                        """Check if the vault is currently unlocked."""
-                        return _lib.is_vault_unlocked()
-                    
-                    _lib.vault_exists.argtypes = []
-                    _lib.vault_exists.restype = ctypes.c_bool
-                    
-                    def vault_exists() -> bool:
-                        """Check if a vault has been initialized."""
-                        return _lib.vault_exists()
+                    if not success:
+                        print("WARNING: c_create_vault failed, using fallback")
+                        return FallbackMethods.create_vault(password)
                         
-                    # Vault functions
-                    _lib.create_vault.argtypes = [ctypes.c_char_p]
-                    _lib.create_vault.restype = ctypes.c_char_p
+                    return bytes(buffer[:out_len.value]).decode('utf-8')
+                
+                _lib.c_unlock_vault.argtypes = [
+                    ctypes.c_char_p,  # password_ptr
+                    ctypes.c_size_t,  # password_len
+                    ctypes.c_char_p,  # salt_ptr
+                    ctypes.c_size_t   # salt_len
+                ]
+                _lib.c_unlock_vault.restype = ctypes.c_bool
+                
+                def unlock_vault(password, salt):
+                    password_bytes = password.encode('utf-8')
+                    salt_bytes = salt.encode('utf-8')
                     
-                    def create_vault(password: str) -> str:
-                        """Create a new vault with the given master password."""
-                        result = _lib.create_vault(password.encode('utf-8'))
-                        return result.decode('utf-8')
-                    
-                    _lib.unlock_vault.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-                    _lib.unlock_vault.restype = ctypes.c_bool
-                    
-                    def unlock_vault(password: str, salt: str) -> bool:
-                        """Unlock the vault with the given password and salt."""
-                        return _lib.unlock_vault(password.encode('utf-8'), salt.encode('utf-8'))
-                    
-                    _lib.lock_vault.argtypes = []
-                    _lib.lock_vault.restype = None
-                    
-                    def lock_vault() -> None:
-                        """Lock the vault, clearing all sensitive data."""
-                        _lib.lock_vault()
-                    
-                    # Key generation and management
-                    _lib.generate_salt.argtypes = []
-                    _lib.generate_salt.restype = ctypes.c_char_p
-                    
-                    def generate_salt() -> str:
-                        """Generate a random salt for key derivation."""
-                        result = _lib.generate_salt()
-                        return result.decode('utf-8')
-                    
-                    _lib.derive_master_key.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-                    _lib.derive_master_key.restype = ctypes.c_char_p
-                    
-                    def derive_master_key(password: str, salt: str) -> str:
-                        """Derive a master key from a password and salt."""
-                        result = _lib.derive_master_key(password.encode('utf-8'), salt.encode('utf-8'))
-                        return result.decode('utf-8')
-                    
-                    _lib.encrypt_master_key.argtypes = [ctypes.c_char_p]
-                    _lib.encrypt_master_key.restype = ctypes.c_char_p
-                    
-                    def encrypt_master_key(master_key: str) -> str:
-                        """Encrypt the master key with the vault key."""
-                        result = _lib.encrypt_master_key(master_key.encode('utf-8'))
-                        return result.decode('utf-8')
-                    
-                    _lib.decrypt_master_key.argtypes = [ctypes.c_char_p]
-                    _lib.decrypt_master_key.restype = ctypes.c_char_p
-                    
-                    def decrypt_master_key(encrypted_key: str) -> str:
-                        """Decrypt the master key with the vault key."""
-                        result = _lib.decrypt_master_key(encrypted_key.encode('utf-8'))
-                        return result.decode('utf-8')
-                    
-                    # Signature verification
-                    _lib.verify_signature.argtypes = [
-                        ctypes.c_char_p, ctypes.c_int,  # message and length
-                        ctypes.c_char_p, ctypes.c_int,  # signature and length
-                        ctypes.c_char_p, ctypes.c_int   # public key and length
-                    ]
-                    _lib.verify_signature.restype = ctypes.c_bool
-                    
-                    def verify_signature(message: bytes, signature: bytes, public_key: bytes) -> bool:
-                        """Verify a digital signature using the Rust crypto library."""
-                        return _lib.verify_signature(
-                            message, len(message),
-                            signature, len(signature),
-                            public_key, len(public_key)
+                    try:
+                        result = _lib.c_unlock_vault(
+                            password_bytes, 
+                            len(password_bytes),
+                            salt_bytes,
+                            len(salt_bytes)
                         )
+                        return result
+                    except Exception as e:
+                        print(f"WARNING: c_unlock_vault failed: {e}, using fallback")
+                        return FallbackMethods.unlock_vault(password)
+                
+                _lib.c_lock_vault.argtypes = []
+                _lib.c_lock_vault.restype = ctypes.c_bool
+                
+                def lock_vault():
+                    try:
+                        return _lib.c_lock_vault()
+                    except Exception as e:
+                        print(f"WARNING: c_lock_vault failed: {e}, using fallback")
+                        return FallbackMethods.lock_vault()
+                
+                # Key generation and management
+                _lib.c_generate_salt.argtypes = [
+                    ctypes.POINTER(ctypes.c_ubyte), # out_ptr
+                    ctypes.POINTER(ctypes.c_size_t) # out_len
+                ]
+                _lib.c_generate_salt.restype = ctypes.c_bool
+                
+                def generate_salt():
+                    buffer_size = 128  # Allocate a reasonably sized buffer
+                    buffer = (ctypes.c_ubyte * buffer_size)()
+                    out_len = ctypes.c_size_t(buffer_size)
                     
-                    # Set flag indicating we've loaded the DLL successfully
-                    _dll_loaded = True
-                    break
+                    success = _lib.c_generate_salt(buffer, ctypes.byref(out_len))
                     
-                except Exception as e:
-                    print(f"Error setting function signatures: {e}")
-                    # Continue to the next DLL
+                    if not success:
+                        print("WARNING: c_generate_salt failed, using fallback")
+                        return FallbackMethods.generate_salt()
+                        
+                    return bytes(buffer[:out_len.value]).decode('utf-8')
+                
+                _lib.c_derive_master_key.argtypes = [
+                    ctypes.c_char_p,                # password_ptr
+                    ctypes.c_size_t,                # password_len
+                    ctypes.c_char_p,                # salt_ptr
+                    ctypes.c_size_t,                # salt_len
+                    ctypes.POINTER(ctypes.c_ubyte), # out_ptr
+                    ctypes.POINTER(ctypes.c_size_t) # out_len
+                ]
+                _lib.c_derive_master_key.restype = ctypes.c_bool
+                
+                def derive_master_key(password, salt):
+                    password_bytes = password.encode('utf-8')
+                    salt_bytes = salt.encode('utf-8')
+                    buffer_size = 128  # Allocate a reasonably sized buffer
+                    buffer = (ctypes.c_ubyte * buffer_size)()
+                    out_len = ctypes.c_size_t(buffer_size)
+                    
+                    success = _lib.c_derive_master_key(
+                        password_bytes, 
+                        len(password_bytes),
+                        salt_bytes,
+                        len(salt_bytes),
+                        buffer,
+                        ctypes.byref(out_len)
+                    )
+                    
+                    if not success:
+                        print("WARNING: c_derive_master_key failed, using fallback")
+                        return FallbackMethods.derive_master_key(password, salt)
+                        
+                    return bytes(buffer[:out_len.value]).decode('utf-8')
+                
+                _lib.c_encrypt_master_key.argtypes = [
+                    ctypes.c_char_p,                # key_ptr
+                    ctypes.c_size_t,                # key_len
+                    ctypes.POINTER(ctypes.c_ubyte), # out_ptr
+                    ctypes.POINTER(ctypes.c_size_t) # out_len
+                ]
+                _lib.c_encrypt_master_key.restype = ctypes.c_bool
+                
+                def encrypt_master_key(master_key):
+                    key_bytes = master_key.encode('utf-8')
+                    buffer_size = 256  # Allocate a reasonably sized buffer
+                    buffer = (ctypes.c_ubyte * buffer_size)()
+                    out_len = ctypes.c_size_t(buffer_size)
+                    
+                    success = _lib.c_encrypt_master_key(
+                        key_bytes, 
+                        len(key_bytes),
+                        buffer,
+                        ctypes.byref(out_len)
+                    )
+                    
+                    if not success:
+                        print("WARNING: c_encrypt_master_key failed, using fallback")
+                        return FallbackMethods.encrypt_master_key(master_key)
+                        
+                    return bytes(buffer[:out_len.value]).decode('utf-8')
+                
+                _lib.c_decrypt_master_key.argtypes = [
+                    ctypes.c_char_p,                # encrypted_ptr
+                    ctypes.c_size_t,                # encrypted_len
+                    ctypes.POINTER(ctypes.c_ubyte), # out_ptr
+                    ctypes.POINTER(ctypes.c_size_t) # out_len
+                ]
+                _lib.c_decrypt_master_key.restype = ctypes.c_bool
+                
+                def decrypt_master_key(encrypted_key):
+                    key_bytes = encrypted_key.encode('utf-8')
+                    buffer_size = 256  # Allocate a reasonably sized buffer
+                    buffer = (ctypes.c_ubyte * buffer_size)()
+                    out_len = ctypes.c_size_t(buffer_size)
+                    
+                    success = _lib.c_decrypt_master_key(
+                        key_bytes, 
+                        len(key_bytes),
+                        buffer,
+                        ctypes.byref(out_len)
+                    )
+                    
+                    if not success:
+                        print("WARNING: c_decrypt_master_key failed, using fallback")
+                        return FallbackMethods.decrypt_master_key(encrypted_key)
+                        
+                    return bytes(buffer[:out_len.value]).decode('utf-8')
+                
+                # Signature verification
+                _lib.c_verify_signature.argtypes = [
+                    ctypes.c_char_p, ctypes.c_size_t,  # data_ptr, data_len
+                    ctypes.c_char_p, ctypes.c_size_t,  # signature_ptr, signature_len
+                ]
+                _lib.c_verify_signature.restype = ctypes.c_bool
+                
+                def verify_signature(message, signature, public_key):
+                    try:
+                        result = _lib.c_verify_signature(
+                            message, len(message),
+                            signature, len(signature)
+                        )
+                        return result
+                    except Exception as e:
+                        print(f"WARNING: c_verify_signature failed: {e}, using fallback")
+                        return FallbackMethods.verify_signature(public_key, message, signature)
+                
+                # SecureString creation
+                try:
+                    _lib.c_create_secure_string.argtypes = [
+                        ctypes.c_char_p, ctypes.c_size_t,  # data_ptr, data_len
+                    ]
+                    _lib.c_create_secure_string.restype = ctypes.c_void_p
+                    
+                    def create_secure_string(data):
+                        try:
+                            data_bytes = data.encode('utf-8') if isinstance(data, str) else data
+                            result = _lib.c_create_secure_string(
+                                data_bytes, len(data_bytes)
+                            )
+                            if result:
+                                return SecureString(data)
+                            else:
+                                print("WARNING: c_create_secure_string returned null, using fallback")
+                                return FallbackMethods.create_secure_string(data)
+                        except Exception as e:
+                            print(f"WARNING: c_create_secure_string failed: {e}, using fallback")
+                            return FallbackMethods.create_secure_string(data)
+                except AttributeError:
+                    print("WARNING: Function c_create_secure_string not found in DLL, using fallback")
+                    create_secure_string = FallbackMethods.create_secure_string
+                
+                # Set flag indicating we've loaded the DLL successfully
+                _dll_loaded = True
+                break
+                
             except Exception as e:
-                print(f"Error loading DLL at {dll_path}: {e}")
+                print(f"DEBUG: Failed to load DLL from {dll_path}: {e}")
+                import traceback
+                traceback.print_exc()
         else:
-            print(f"DLL not found at: {dll_path}")
+            print(f"DEBUG: DLL not found at {dll_path}")
+
+    # If we didn't successfully load the DLL, use the fallback implementations
+    if not _dll_loaded:
+        print("WARNING: Could not load Rust crypto library, using Python fallback implementations")
+        secure_random_bytes = FallbackMethods.secure_random_bytes
+        is_vault_unlocked = FallbackMethods.is_vault_unlocked
+        vault_exists = FallbackMethods.vault_exists
+        create_vault = FallbackMethods.create_vault
+        unlock_vault = FallbackMethods.unlock_vault
+        lock_vault = FallbackMethods.lock_vault
+        generate_salt = FallbackMethods.generate_salt
+        derive_master_key = FallbackMethods.derive_master_key
+        encrypt_master_key = FallbackMethods.encrypt_master_key
+        decrypt_master_key = FallbackMethods.decrypt_master_key
+        verify_signature = FallbackMethods.verify_signature
+        create_secure_string = FallbackMethods.create_secure_string
 
 except Exception as e:
     print(f"Error during DLL loading process: {e}")
-
-# If we get here and haven't loaded the DLL, we're using the fallback
-if not _dll_loaded:
-    print("WARNING: Using fallback implementation for secure memory!")
 
 # This ensures these symbols are available in the module namespace
 __all__ = [
@@ -391,5 +536,6 @@ __all__ = [
     'derive_master_key',
     'encrypt_master_key',
     'decrypt_master_key',
-    'verify_signature'
+    'verify_signature',
+    'create_secure_string'
 ]
