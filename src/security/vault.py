@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from .secure_string import SecureString
 from datetime import datetime
+import secrets
 
 # Import our Rust crypto module with proper fallbacks
 try:
@@ -33,12 +34,61 @@ except ImportError as e:
             # State
             self._vault_initialized = False
             self._vault_unlocked = False
+            
+            # Set up paths
+            self.storage_path = os.path.expanduser('~/.truefa')
+            self.vault_dir = os.path.join(self.storage_path, '.vault')
+            self._vault_meta_file = os.path.join(self.vault_dir, 'vault.meta')
+            
             self._vault_salt = None
             self._vault_password_hash = None
             self._master_key = None
             
+            # Ensure directories exist
+            try:
+                os.makedirs(self.vault_dir, exist_ok=True)
+            except Exception as e:
+                print(f"Error creating vault directory: {e}")
+                
+            # Load vault state if it exists
+            self._load_vault_state()
+            
             # Print for debugging
             print("Initialized dummy truefa_crypto module")
+            
+        def _load_vault_state(self):
+            """Load vault state from disk if it exists."""
+            if os.path.exists(self._vault_meta_file):
+                try:
+                    with open(self._vault_meta_file, 'r') as f:
+                        metadata = json.load(f)
+                        self._vault_salt = metadata.get('salt')
+                        self._vault_password_hash_b64 = metadata.get('password_hash')
+                        if self._vault_salt and self._vault_password_hash_b64:
+                            import base64
+                            self._vault_password_hash = base64.b64decode(self._vault_password_hash_b64)
+                            self._vault_initialized = True
+                except Exception as e:
+                    print(f"Error loading vault state: {e}")
+            
+        def _save_vault_state(self):
+            """Save vault state to disk."""
+            try:
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(self._vault_meta_file), exist_ok=True)
+                
+                import base64
+                # Save the vault state
+                with open(self._vault_meta_file, 'w') as f:
+                    metadata = {
+                        'salt': self._vault_salt,
+                        'password_hash': base64.b64encode(self._vault_password_hash).decode('utf-8'),
+                        'version': '1.0',
+                        'created': datetime.now().isoformat()
+                    }
+                    json.dump(metadata, f)
+            except Exception as e:
+                print(f"Error saving vault state: {e}")
         
         # SecureString implementation
         class SecureString:
@@ -74,13 +124,45 @@ except ImportError as e:
             import os
             return os.urandom(size)
             
-        def is_vault_unlocked(self):
-            """Check if the vault is currently unlocked."""
+        def is_unlocked(self):
+            """Return true if the vault is unlocked, false otherwise."""
+            # Don't rely just on _vault_unlocked flag
+            # Also check if the vault is properly initialized
+            if not self._vault_initialized or not os.path.exists(self._vault_meta_file):
+                # If the vault isn't properly initialized, it should never be considered unlocked
+                self._vault_unlocked = False
+                return False
+                
             return self._vault_unlocked
             
         def vault_exists(self):
             """Check if a vault has been initialized."""
-            return self._vault_initialized
+            # First check if we have the initialization flag
+            if hasattr(self, '_vault_initialized') and self._vault_initialized:
+                return True
+                
+            # For debugging
+            import os
+            if hasattr(self, '_vault_meta_file'):
+                meta_file = self._vault_meta_file
+                print(f"DEBUG: Checking meta file at {meta_file}")
+                meta_exists = os.path.exists(meta_file)
+                print(f"DEBUG: Meta file exists: {meta_exists}")
+                return meta_exists
+            
+            # If we don't have the attribute, use the default location
+            # from the parent class if possible
+            if hasattr(self, 'vault_dir'):
+                meta_path = os.path.join(self.vault_dir, "vault.meta")
+                print(f"DEBUG: Checking meta file at {meta_path}")
+                meta_exists = os.path.exists(meta_path)
+                print(f"DEBUG: Meta file exists: {meta_exists}")
+                return meta_exists
+            
+            # At this point, we can't determine if the vault exists
+            # Always returning True for debug purposes
+            print("DEBUG: Could not determine vault existence, defaulting to True")
+            return True
             
         def create_vault(self, password):
             """Create a new vault with the given master password."""
@@ -103,15 +185,87 @@ except ImportError as e:
             self._vault_initialized = True
             self._vault_unlocked = True
             
+            # Save the vault state to disk
+            self._save_vault_state()
+            
             return True
             
-        def unlock_vault(self, password, salt):
+        def unlock_vault(self, password, salt=None):
             """Unlock the vault with the given password and salt."""
             import hashlib
             import base64
+            import secrets
+            from datetime import datetime
             
-            # For dummy implementation, always unlock and return success
+            if not password:
+                print("ERROR: Empty password not allowed")
+                return False
+            
+            # We need to properly check if the vault is initialized by looking for the vault.meta file
+            self._vault_meta_file = os.path.join(self.vault_dir, "vault.meta")
+            
+            if not os.path.exists(self._vault_meta_file):
+                print("Vault not initialized - vault.meta not found")
+                return False
+                
+            # Load vault state from metadata file
+            try:
+                with open(self._vault_meta_file, 'r') as f:
+                    meta_data = json.load(f)
+                    stored_salt = meta_data.get('salt')
+                    stored_hash_b64 = meta_data.get('password_hash')
+                    
+                    if not stored_salt:
+                        print("No salt found in vault metadata")
+                        return False
+                        
+                    # Set the initialized flag to True since we have valid metadata
+                    self._vault_initialized = True
+                    
+                    if stored_hash_b64:
+                        # Convert stored hash from base64
+                        stored_hash = base64.b64decode(stored_hash_b64)
+                        
+                        # Use the salt that was provided if it's not None, otherwise use stored salt
+                        use_salt = salt if salt is not None else stored_salt
+                        
+                        # Verify the provided password against the stored hash
+                        test_hash = hashlib.pbkdf2_hmac(
+                            'sha256',
+                            password.encode('utf-8'),
+                            use_salt.encode('utf-8'),
+                            100000  # Same iterations as in create_vault
+                        )
+                        
+                        # Secure comparison to avoid timing attacks
+                        if not secrets.compare_digest(test_hash, stored_hash):
+                            print("Incorrect password")
+                            # Log failed attempt (in a real system, you might want to limit attempts)
+                            print(f"WARNING: Failed vault authentication attempt at {datetime.now().isoformat()}")
+                            return False
+                    else:
+                        # Legacy format without password hash
+                        # Store the hash now for future use
+                        test_hash = hashlib.pbkdf2_hmac(
+                            'sha256',
+                            password.encode('utf-8'),
+                            stored_salt.encode('utf-8'),
+                            100000
+                        )
+                        
+                        # Update metadata with hash for future logins
+                        meta_data['password_hash'] = base64.b64encode(test_hash).decode('utf-8')
+                        with open(self._vault_meta_file, 'w') as f:
+                            json.dump(meta_data, f)
+                        
+                        print("Vault metadata upgraded with password hash for better security")
+            except Exception as e:
+                print(f"Error reading vault metadata: {e}")
+                return False
+                    
+            # Only if password is verified, unlock the vault
             self._vault_unlocked = True
+            self._vault_salt = stored_salt
             return True
             
         def lock_vault(self):
@@ -204,7 +358,7 @@ except ImportError as e:
     def create_vault(password):
         return truefa_crypto.create_vault(password)
         
-    def unlock_vault(password, salt):
+    def unlock_vault(password, salt=None):
         return truefa_crypto.unlock_vault(password, salt)
         
     def lock_vault():
@@ -342,18 +496,27 @@ class SecureVault:
             # Generate a vault salt for key derivation
             vault_salt = truefa_crypto.generate_salt()
             
-            # Store the salt in the vault metadata
-            try:
-                with open(self.vault_meta_path, "w") as f:
-                    f.write(json.dumps({
-                        "salt": vault_salt,
-                        "version": "1.0",
-                        "created": datetime.now().isoformat()
-                    }))
-            except Exception as write_error:
-                print(f"Error writing vault metadata: {write_error}")
-                return False
-                
+            # Derive a password hash using PBKDF2 for vault password verification
+            import hashlib
+            import base64
+            
+            # Use PBKDF2 with SHA-256 to generate password hash
+            password_hash = hashlib.pbkdf2_hmac(
+                'sha256',
+                vault_password.encode('utf-8'),
+                vault_salt.encode('utf-8'),
+                100000  # Number of iterations
+            )
+            
+            # Store both salt and password hash in vault metadata
+            with open(self.vault_meta_path, "w") as f:
+                f.write(json.dumps({
+                    "salt": vault_salt,
+                    "password_hash": base64.b64encode(password_hash).decode('utf-8'),
+                    "version": "1.0",
+                    "created": datetime.now().isoformat()
+                }))
+            
             # If master password provided, set up master key encryption
             if master_password:
                 # Generate a salt for the master key
@@ -398,12 +561,7 @@ class SecureVault:
             bool: True if vault is unlocked, False otherwise
         """
         try:
-            # For dummy implementation, set vault as unlocked and return true
-            if _USING_DUMMY:
-                self._is_unlocked = True
-                return True
-                
-            # Get the stored salt
+            # Get the stored salt and password hash
             if not os.path.exists(self.vault_meta_path):
                 print(f"Vault metadata not found at: {self.vault_meta_path}")
                 return False
@@ -412,12 +570,47 @@ class SecureVault:
                 with open(self.vault_meta_path, 'r') as f:
                     meta_data = json.load(f)
                     vault_salt = meta_data.get('salt')
+                    stored_hash_b64 = meta_data.get('password_hash')
+                    
+                    if not vault_salt:
+                        print("Vault salt not found in metadata")
+                        return False
+                        
+                    if not stored_hash_b64:
+                        print("Password hash not found in metadata - vault needs upgrade")
+                        # For backwards compatibility, fall back to the old unlock method
+                        if not truefa_crypto.unlock_vault(password, vault_salt):
+                            print("Invalid password for vault")
+                            return False
+                    else:
+                        # Verify the password hash
+                        import hashlib
+                        import base64
+                        import secrets
+                        
+                        # Compute the hash with the provided password and stored salt
+                        computed_hash = hashlib.pbkdf2_hmac(
+                            'sha256',
+                            password.encode('utf-8'),
+                            vault_salt.encode('utf-8'),
+                            100000  # Same number of iterations as in create_vault
+                        )
+                        
+                        # Decode the stored hash
+                        stored_hash = base64.b64decode(stored_hash_b64)
+                        
+                        # Compare using constant-time comparison
+                        if not secrets.compare_digest(computed_hash, stored_hash):
+                            print("Invalid password for vault")
+                            return False
             except Exception as e:
                 print(f"Failed to read vault metadata: {str(e)}")
                 return False
                 
-            # Try to unlock using the stored salt
+            # If we got here, either the password hash matched or we're using the fallback method
             if not truefa_crypto.unlock_vault(password, vault_salt):
+                # This should not happen if the hash already matched, but just in case
+                print("Invalid password for vault")
                 return False
                 
             self._is_unlocked = True
