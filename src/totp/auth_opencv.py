@@ -280,49 +280,57 @@ class TwoFactorAuth:
             print(f"DEBUG: Path validation error: {str(e)}")
             return None
 
-    def generate_totp(self, secret=None):
+    def generate_totp(self, secret=None, return_remaining=True):
         """Generate TOTP code from a secret"""
         if secret is None:
             secret = self.secret
             
         if not secret:
-            return None, 0
+            return None, 0 if return_remaining else None
             
         try:
             # Extract the string from the SecureString and properly encode it for TOTP
-            secret_str = str(secret)
+            raw_value = secret.get_raw_value()
             
-            # Debug the secret to check for issues
-            print(f"DEBUG: Secret length: {len(secret_str)}")
-            print(f"DEBUG: Secret (for testing only): {secret_str}")
-            
-            # Normalize the Base32 secret
-            # Remove spaces and make uppercase
-            secret_str = secret_str.replace(' ', '').upper()
-            
-            # Ensure only valid Base32 characters (A-Z, 2-7)
-            secret_str = ''.join(c for c in secret_str if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+            # Debug print
+            if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
+                # Don't create a new line for debug outputs during continuous generation
+                if self.is_generating:
+                    sys.stdout.write("\r")  # Move cursor to beginning of line
+                
+                print(f"DEBUG: Secret length: {len(raw_value)}", end="")
+                print(f" | Secret (for testing only): {raw_value}", end="")
+                
+                # Only add newline if not in continuous generation mode
+                if not self.is_generating:
+                    print()  # Add newline
             
             # Generate TOTP with proper secret
-            totp = pyotp.TOTP(secret_str)
-            
-            # Get the current TOTP and the remaining time
+            totp = pyotp.TOTP(base64.b32encode(raw_value.encode('utf-8')).decode('utf-8'))
             code = totp.now()
-            remaining = totp.interval - datetime.datetime.now().timestamp() % totp.interval
             
-            return code, int(remaining)
+            if return_remaining:
+                # Calculate time remaining until next code - more accurate calculation
+                now = time.time()
+                step = 30  # Default TOTP step is 30 seconds
+                remaining = int(step - (now % step))
+                return code, remaining
+            
+            return code
         except Exception as e:
-            print(f"Warning: {str(e)}")
-            traceback.print_exc()  # For debugging
-            return None, 0
+            if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
+                print(f"ERROR: Failed to generate TOTP code: {e}")
+                traceback.print_exc()
+            return None, 0 if return_remaining else None
 
-    def continuous_generate(self, callback=None):
+    def continuous_generate(self, callback=None, debug_mode=False):
         """
         Generate TOTP codes continuously.
         
         Args:
             callback: Optional function to call with each new code.
                      If None, prints codes to stdout.
+            debug_mode: If True, shows debug output on the same line as the code.
                      
         The callback function receives two arguments:
         - code: The current TOTP code
@@ -338,17 +346,27 @@ class TwoFactorAuth:
             return
         
         self.is_generating = True
+        last_code = None
         
         try:
+            print("\nPress Ctrl+C to return to the main menu")
+            print(f"Generating codes for: {self.issuer or 'Unknown'} ({self.account or 'Unknown'})")
+            print("-" * 40)
+            
             while self.is_generating:
                 code, remaining = self.generate_totp()
                 
                 if code:
+                    # Update the display on every iteration
                     if callback:
                         callback(code, remaining)
                     else:
-                        # Default display
-                        print(f"\rCode: {code} (Expires in: {remaining}s)", end="")
+                        # Enhanced display with progress bar
+                        progress = "#" * (int(remaining / 3)) + "-" * (10 - int(remaining / 3))
+                        if debug_mode:
+                            print(f"\rCode: {code} | Expires in: {remaining:2d}s [{progress}] | DEBUG: Secret length: {len(self.secret.get_raw_value())} | Secret (for testing only): {self.secret.get_raw_value()}", end="")
+                        else:
+                            print(f"\rCode: {code} | Expires in: {remaining:2d}s [{progress}]", end="")
                         sys.stdout.flush()
                 
                 # Sleep for a short time to avoid CPU usage
