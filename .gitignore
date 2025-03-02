@@ -208,7 +208,7 @@ rust_crypto/target/
 # Build specs (except for the important ones)
 *.spec
 !truefa.spec
-!TrueFA_simple.spec
+!TrueFA_Py.spec
 !TrueFA_installer.spec
 
 # Test files
