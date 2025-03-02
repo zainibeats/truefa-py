@@ -31,6 +31,8 @@ qrtest.png
 .master
 dist-electron/
 node_modules/
+check_dll.py
+vault_test.py
 
 # Production files
 ez-release/
