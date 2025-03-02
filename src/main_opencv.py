@@ -9,6 +9,14 @@ from pathlib import Path
 import urllib.parse
 import traceback
 
+# Import our configuration
+try:
+    from config import DATA_DIR, VAULT_FILE
+except ImportError:
+    # Create a minimal config if the module isn't found
+    DATA_DIR = os.path.join(os.path.expanduser("~"), ".truefa")
+    VAULT_FILE = os.path.join(DATA_DIR, "vault.dat")
+
 from src.security.secure_storage import SecureStorage
 from src.security.secure_string import SecureString
 from src.totp.auth_opencv import TwoFactorAuth
@@ -24,9 +32,10 @@ def main():
         print("You can use either the full path or just the filename if it's in the images directory\n")
         
         # Initialize the vault and secure storage
-        vault_path = Path.home() / ".truefa" / "vault.data"
+        # Use the configured data directory from config module
+        vault_path = Path(VAULT_FILE)
         vault_path.parent.mkdir(parents=True, exist_ok=True)
-        secure_storage = SecureStorage()
+        secure_storage = SecureStorage(storage_path=DATA_DIR)
         
         # Main application loop
         while True:
