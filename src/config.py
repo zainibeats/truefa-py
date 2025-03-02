@@ -2,6 +2,7 @@ import os
 import sys
 import platform
 from pathlib import Path
+import subprocess
 
 # Application information
 APP_NAME = "TrueFA"
@@ -28,15 +29,73 @@ def get_data_directory():
     os.makedirs(data_dir, exist_ok=True)
     return data_dir
 
+# Get secure directory with restricted permissions for cryptographic materials
+def get_secure_data_directory():
+    """
+    Get a directory with restricted permissions for sensitive cryptographic data
+    This uses platform-specific mechanisms to create a more secure storage location
+    """
+    if platform.system() == "Windows":
+        # On Windows, we'll use %LOCALAPPDATA% with restricted ACLs
+        # This is better than APPDATA because it's not synced and can have stricter permissions
+        base_dir = os.environ.get('LOCALAPPDATA')
+        if not base_dir:
+            base_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local')
+        
+        secure_dir = os.path.join(base_dir, APP_NAME, "Secure")
+        
+        # Create the secure directory if it doesn't exist
+        os.makedirs(secure_dir, exist_ok=True)
+        
+        # Apply restrictive ACLs to the secure directory
+        # This will restrict access to only the owner account
+        try:
+            # Use icacls to set permissions (Windows-specific)
+            # This denies access to everyone except the owner
+            subprocess.run([
+                "icacls", 
+                secure_dir, 
+                "/inheritance:r",  # Remove inherited permissions
+                "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Grant full control to owner
+                "/deny", f"*S-1-1-0:(OI)(CI)(DE,DC)",  # Deny everyone delete/change permissions
+            ], check=False, capture_output=True)
+        except Exception as e:
+            print(f"Warning: Could not set secure permissions: {e}")
+    
+    elif platform.system() == "Darwin":
+        # On macOS, we use a protected directory with restricted permissions
+        secure_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', f"{APP_NAME}_Secure")
+        os.makedirs(secure_dir, exist_ok=True)
+        # Set macOS permissions (700 = owner only)
+        try:
+            os.chmod(secure_dir, 0o700)
+        except Exception as e:
+            print(f"Warning: Could not set secure permissions: {e}")
+    
+    else:
+        # Linux/Unix: Create a hidden directory with restricted permissions
+        secure_dir = os.path.join(os.path.expanduser('~'), f".{APP_NAME.lower()}_secure")
+        os.makedirs(secure_dir, exist_ok=True)
+        # Set Linux permissions (700 = owner only)
+        try:
+            os.chmod(secure_dir, 0o700)
+        except Exception as e:
+            print(f"Warning: Could not set secure permissions: {e}")
+    
+    return secure_dir
+
 # Application directories
 DATA_DIR = get_data_directory()
+SECURE_DATA_DIR = get_secure_data_directory()
 VAULT_FILE = os.path.join(DATA_DIR, "vault.dat")
+VAULT_CRYPTO_DIR = os.path.join(SECURE_DATA_DIR, "crypto")
 EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
 TEMP_DIR = os.path.join(DATA_DIR, "temp")
 
 # Create necessary directories
 os.makedirs(EXPORTS_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(VAULT_CRYPTO_DIR, exist_ok=True)
 
 # Crypto configuration
 USE_RUST_CRYPTO = True  # Set to False to force Python implementation
@@ -69,4 +128,4 @@ def get_dll_path():
 CRYPTO_LIB_PATH = get_dll_path()
 
 # Debug mode (set to False for production)
-DEBUG = False 
+DEBUG = False
