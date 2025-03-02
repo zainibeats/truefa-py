@@ -1,3 +1,18 @@
+"""
+TrueFA-Py Configuration System
+
+Provides centralized configuration settings and platform-specific paths
+for the application. This module handles:
+
+- Platform detection and appropriate file path selection
+- Secure directory creation with proper permissions
+- Global application constants
+- Environment-specific configurations
+
+The module implements separate paths for regular data and sensitive
+cryptographic materials, with enhanced security for the latter.
+"""
+
 import os
 import sys
 import platform
@@ -10,7 +25,20 @@ APP_VERSION = "1.0.0"
 
 # Determine the correct data directory based on platform
 def get_data_directory():
-    """Get the appropriate directory for storing application data"""
+    """
+    Get the platform-appropriate directory for application data.
+    
+    Creates and returns the correct directory for storing application 
+    configuration and non-sensitive data based on platform conventions:
+    - Windows: %APPDATA%\TrueFA
+    - macOS: ~/Library/Application Support/TrueFA
+    - Linux/Unix: ~/.truefa
+    
+    The directory is automatically created if it doesn't exist.
+    
+    Returns:
+        str: Full path to the application data directory
+    """
     if platform.system() == "Windows":
         # Use %APPDATA% on Windows (C:\Users\username\AppData\Roaming\TrueFA)
         base_dir = os.environ.get('APPDATA')
@@ -32,8 +60,26 @@ def get_data_directory():
 # Get secure directory with restricted permissions for cryptographic materials
 def get_secure_data_directory():
     """
-    Get a directory with restricted permissions for sensitive cryptographic data
-    This uses platform-specific mechanisms to create a more secure storage location
+    Create and get a secure directory for sensitive cryptographic data.
+    
+    Implements platform-specific security measures to create a directory
+    with enhanced protection for storing cryptographic materials:
+    
+    - Windows: Uses %LOCALAPPDATA% with restrictive ACLs
+    - macOS: Creates a directory with 0700 permissions in ~/Library/KeyCrypt
+    - Linux: Creates a directory with 0700 permissions in ~/.truefa_secure
+    
+    The secure directory is intentionally separate from the regular data directory
+    to provide stronger isolation and protection for cryptographic materials.
+    
+    Returns:
+        str: Full path to the secure data directory with enhanced permissions
+        
+    Security Features:
+    - Restricted file permissions (0700 = owner access only)
+    - Platform-specific access control when available
+    - Non-synced location to prevent cloud exposure
+    - Validation of permissions after creation
     """
     if platform.system() == "Windows":
         # On Windows, we'll use %LOCALAPPDATA% with restricted ACLs
@@ -103,7 +149,23 @@ DLL_NAME = "truefa_crypto.dll" if platform.system() == "Windows" else "libtruefa
 
 # Get the DLL path - check multiple locations
 def get_dll_path():
-    """Get the path to the crypto DLL/shared library"""
+    """
+    Locate the native cryptographic library (DLL/shared object).
+    
+    Performs a comprehensive search for the native cryptographic library
+    across multiple possible locations, handling different runtime environments:
+    
+    - PyInstaller bundled executables
+    - Development environments
+    - System-installed libraries
+    - Custom locations specified by environment variables
+    
+    The function implements an ordered search strategy, checking the most
+    likely locations first based on the current execution context.
+    
+    Returns:
+        str or None: Path to the native library if found, None otherwise
+    """
     # First check if we're running from a PyInstaller bundle
     if getattr(sys, 'frozen', False):
         base_dir = os.path.dirname(sys.executable)

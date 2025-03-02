@@ -1,18 +1,27 @@
 """
-Secure Storage Module for TOTP Secrets
+Secure Storage System for TOTP Secrets
 
-This module provides secure storage functionality for TOTP secrets using
-a combination of envelope encryption and secure memory handling. It supports
-both a legacy single-password mode and a more secure vault-based mode with
-two-layer encryption.
+Provides robust cryptographic storage for sensitive TOTP authentication secrets
+using advanced security techniques:
 
-Key Features:
-- Two-layer envelope encryption in vault mode
-- Scrypt-based key derivation
-- AES-GCM authenticated encryption
-- Secure memory handling with zeroization
-- GPG-based secret export
-- Secure file permissions
+Core Security Features:
+- Envelope encryption with two distinct keys (vault password and master key)
+- Strong key derivation using Scrypt (with PBKDF2 fallback)
+- Authenticated encryption using AES-GCM with integrity verification
+- Memory protection with automatic zeroization of sensitive data
+- Secure atomic file operations to prevent data corruption
+- GPG-compatible encrypted exports with recipient management
+
+Operational Modes:
+- Legacy Mode: Direct password-based encryption (single-factor)
+- Vault Mode: Two-layer encryption with separate vault and master passwords
+  allowing password rotation without re-encrypting all secrets
+
+Implementation Notes:
+- All cryptographic operations use industry-standard algorithms
+- Leverages the Python cryptography package for core operations
+- Handles secure temporary files with automatic cleanup
+- Implements secure file permissions on all storage files
 """
 
 import os
@@ -25,11 +34,11 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-# Import our configuration
+# Import configuration with fallback mechanism
 try:
     from ..config import DATA_DIR, EXPORTS_DIR
 except ImportError:
-    # Create a minimal config if the module isn't found
+    # Create a minimal configuration if the module isn't found
     DATA_DIR = os.path.join(os.path.expanduser("~"), ".truefa")
     EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
 
@@ -52,18 +61,30 @@ from .vault import SecureVault
 
 class SecureStorage:
     """
-    Secure storage implementation for TOTP secrets.
+    Secure Storage Implementation for TOTP Secrets
     
-    This class provides two storage modes:
-    1. Legacy Mode: Single master password for all secrets
-    2. Vault Mode: Two-layer encryption with vault and master passwords
+    Provides a comprehensive cryptographic storage system for sensitive TOTP 
+    authentication secrets with two operational modes:
     
-    Features:
-    - Secure key derivation using Scrypt
-    - Authenticated encryption using AES-GCM
-    - Automatic key cleanup
-    - Secure file permissions
-    - GPG-based secret export
+    1. Legacy Mode: Direct password-based encryption where a single master 
+       password protects all secrets (simpler but less flexible)
+    
+    2. Vault Mode: Two-layer envelope encryption where:
+       - Vault password decrypts the master key
+       - Master key encrypts individual secrets
+       - Allows password changes without re-encrypting all secrets
+    
+    Security Features:
+    - Strong key derivation using Scrypt (with PBKDF2 fallback)
+    - Authenticated encryption using AES-GCM with automatic nonce management
+    - Memory protection with SecureString and automatic zeroization
+    - Atomic file operations to prevent data corruption
+    - Secure file permissions (0o600) on all storage files
+    - GPG-compatible encrypted exports for backup and transfer
+    
+    This class seamlessly integrates with the SecureVault for master key 
+    management and implements a complete secret lifecycle (create, read, 
+    update, delete, export, import).
     """
     
     def __init__(self, storage_path=None):
@@ -389,20 +410,35 @@ class SecureStorage:
 
     def encrypt_secret(self, secret, name):
         """
-        Encrypt a TOTP secret.
+        Encrypt a TOTP secret using authenticated encryption.
+        
+        Encrypts the provided secret with either the vault-based master key
+        or a directly provided key, using AES-GCM for authenticated encryption.
+        The method automatically determines the appropriate encryption key
+        based on whether vault mode is active and unlocked.
         
         Args:
-            secret: Secret to encrypt (string or bytes)
-            name: Name to associate with the secret
-            
+            secret (str/SecureString/bytes): TOTP secret to encrypt
+                The secret will be encoded to bytes if it's a string
+            name (str): Identifier for the secret
+                Used both as a storage reference and as authenticated data
+        
         Returns:
-            str: Base64-encoded encrypted data
+            str: Base64-encoded encrypted data including:
+                - Random nonce (12 bytes)
+                - Encrypted secret (variable length)
+                - Authentication tag (16 bytes)
+            None: If encryption fails
             
-        Security:
-        - Uses AES-GCM authenticated encryption
-        - Includes name in authentication data
-        - Uses random nonce
-        - Supports vault-based encryption
+        Security Features:
+            - Uses AES-GCM with 256-bit key for authenticated encryption
+            - Includes name in authentication data to prevent swapping attacks
+            - Generates a cryptographically secure random nonce for each encryption
+            - Automatically uses the vault master key when available
+            - Handles various input formats securely
+            
+        The encrypted result is encoded to base64 for safe storage in 
+        text-based formats and includes all data needed for decryption.
         """
         # Use vault key if available
         if self.vault.is_initialized() and self.vault.is_unlocked():

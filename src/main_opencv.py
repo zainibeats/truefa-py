@@ -1,5 +1,22 @@
 """
-Modified main module for TrueFA that uses OpenCV instead of pyzbar for QR scanning
+TrueFA-Py: TOTP Authenticator Application (OpenCV Edition)
+
+A robust and secure Two-Factor Authentication (2FA) application that 
+implements Time-based One-Time Password (TOTP) authentication according 
+to RFC 6238. This version uses OpenCV for QR code scanning instead of pyzbar.
+
+Key Features:
+- Secure extraction and storage of TOTP secrets from QR codes
+- Vault-based encryption for protecting authentication secrets
+- Memory-safe handling of sensitive data
+- Command-line interface with intuitive navigation
+- Secure export and backup capabilities
+
+Security Implementation:
+- Envelope encryption with a master key protected by a vault password
+- Automatic memory sanitization after use
+- Platform-specific secure storage with appropriate permissions
+- Protection against common memory disclosure vulnerabilities
 """
 
 import sys
@@ -23,7 +40,19 @@ from src.totp.auth_opencv import TwoFactorAuth
 from src.utils.screen import clear_screen
 
 def main():
-    """Main application entry point and UI loop"""
+    """
+    Main application entry point and interactive command loop.
+    
+    Provides a menu-driven interface for:
+    - Loading TOTP secrets from QR code images (using OpenCV)
+    - Manually entering TOTP secrets
+    - Generating and displaying current TOTP codes
+    - Managing the secure vault for secret storage
+    - Exporting secrets for backup
+    
+    The function handles graceful startup, secure operation, and
+    proper cleanup of sensitive data on exit.
+    """
     auth = TwoFactorAuth()
     
     try:

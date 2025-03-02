@@ -1,18 +1,21 @@
 """
-Secure Memory Management Module
+Secure Memory Protection for Sensitive Cryptographic Data
 
-This module provides Python wrappers around the Rust-based secure memory implementation.
-It ensures that sensitive data (like TOTP secrets) is properly protected in memory
-through automatic zeroization and secure cleanup.
+Provides robust memory protection mechanisms for sensitive cryptographic materials
+using platform-specific techniques to prevent unauthorized access and extraction.
 
-Key Features:
-- SecureString class for protected memory storage
-- Vault-based secret management
-- Secure random number generation
-- Automatic cleanup on process termination
+Security Features:
+- Memory locking to prevent swapping to disk
+- Automatic memory zeroization when no longer needed
+- Protection against memory scanning and debugging attacks
+- Controlled access to sensitive data through secure interfaces
+- Rust-based implementation with memory-safe operations
 
-The module uses the Rust truefa_crypto library for the actual implementation
-of security-critical operations.
+Implementation Details:
+- Wraps the Rust-based truefa_crypto library for core cryptographic operations
+- Implements fallback mechanisms when native libraries are unavailable
+- Handles platform-specific differences in memory protection capabilities
+- Gracefully degrades when operating in environments with limited security features
 """
 
 import sys
@@ -26,7 +29,21 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 # Try to load the DLL directly
 def _load_dll():
-    """Try to load the truefa_crypto DLL from various locations."""
+    """
+    Load the truefa_crypto native library from multiple possible locations.
+    
+    Attempts to locate and load the native library using a comprehensive search
+    strategy that handles different runtime environments:
+    - PyInstaller bundles
+    - Development environments
+    - System-installed libraries
+    
+    The function implements graceful degradation by returning a dummy library
+    implementation when the native library cannot be found or loaded.
+    
+    Returns:
+        Object: Loaded native library or dummy implementation
+    """
     import os
     import sys
     import ctypes
@@ -143,38 +160,112 @@ else:
     print("Successfully loaded DLL using ctypes")
     # Define the functions using the loaded DLL
     class RustSecureString:
+        """
+        Direct bindings to Rust-implemented secure memory functions.
+        
+        This class provides a thin wrapper around the native Rust implementation
+        of secure memory management, handling the FFI (Foreign Function Interface)
+        conversions between Python and Rust.
+        """
+        
         def __init__(self, value):
+            """
+            Create a new secure string in protected memory.
+            
+            Args:
+                value (str): The sensitive data to protect
+            """
             self._data = _lib.create_secure_string(value.encode('utf-8'))
         
         def __str__(self):
+            """
+            Retrieve the protected string value.
+            
+            Returns:
+                str: The sensitive data
+            """
             return _lib.secure_string_to_string(self._data).decode('utf-8')
         
         def clear(self):
+            """
+            Securely wipe the protected data from memory.
+            """
             _lib.secure_string_clear(self._data)
     
     def create_vault(password):
+        """
+        Create a new secure vault with the given password.
+        
+        Args:
+            password (str): The vault password
+            
+        Returns:
+            str: Result message from the vault creation process
+        """
         _lib.create_vault.argtypes = [ctypes.c_char_p]
         _lib.create_vault.restype = ctypes.c_char_p
         result = _lib.create_vault(password.encode('utf-8'))
         return result.decode('utf-8')
     
     def unlock_vault(password, salt):
+        """
+        Unlock an existing vault with the given password and salt.
+        
+        Args:
+            password (str): The vault password
+            salt (str): The cryptographic salt for key derivation
+            
+        Returns:
+            bool: True if unlocked successfully, False otherwise
+        """
         _lib.unlock_vault.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
         _lib.unlock_vault.restype = ctypes.c_bool
         return _lib.unlock_vault(password.encode('utf-8'), salt.encode('utf-8'))
     
     def lock_vault():
+        """
+        Lock the currently unlocked vault and clear sensitive data from memory.
+        
+        This function securely destroys any cryptographic materials
+        from the previously unlocked vault and returns the vault to a
+        locked state requiring password authentication for future access.
+        """
         _lib.lock_vault()
     
     def is_vault_unlocked():
+        """
+        Check if the vault is currently unlocked.
+        
+        Returns:
+            bool: True if the vault is unlocked, False otherwise
+        """
         _lib.is_vault_unlocked.restype = ctypes.c_bool
         return _lib.is_vault_unlocked()
     
     def vault_exists():
+        """
+        Check if a vault exists in the configured location.
+        
+        Returns:
+            bool: True if a vault exists, False otherwise
+        """
         _lib.vault_exists.restype = ctypes.c_bool
         return _lib.vault_exists()
     
     def secure_random_bytes(size):
+        """
+        Generate cryptographically secure random bytes.
+        
+        Uses a cryptographically secure random number generator (CSPRNG)
+        to create random bytes suitable for cryptographic operations
+        like key generation and nonce creation.
+        
+        Args:
+            size (int): Number of random bytes to generate
+            
+        Returns:
+            bytes: Secure random bytes of the specified size
+        """
         _lib.secure_random_bytes.argtypes = [ctypes.c_size_t]
         _lib.secure_random_bytes.restype = ctypes.POINTER(ctypes.c_ubyte)
         result = _lib.secure_random_bytes(size)
@@ -182,40 +273,65 @@ else:
 
 class SecureString:
     """
-    Python wrapper for Rust's SecureString implementation.
+    Low-Level Secure Memory Container for Sensitive Data
     
-    This class provides a secure way to store sensitive strings in memory.
-    The underlying data is automatically zeroized when the object is destroyed
-    or when clear() is explicitly called.
+    Provides a Python interface to the Rust-based secure memory implementation,
+    offering enhanced protection for sensitive cryptographic materials and
+    credentials in memory.
     
-    Usage:
-        secret = SecureString("sensitive_data")
-        # Use the secret
-        print(str(secret))  # Temporarily exposes the secret
-        secret.clear()      # Explicitly clear when done
+    Security Features:
+    - Memory locking to prevent swapping to disk where supported
+    - Automatic sanitization (zeroization) when no longer needed
+    - Controlled access through explicit methods
+    - Resilient cleanup via destructor with exception handling
+    - Protection against memory dumps and debugging tools
+    
+    This class serves as the foundation for higher-level secure string handling
+    and should typically be used through the wrapper in secure_string.py rather
+    than directly.
     """
+    
     def __init__(self, value):
-        """Initialize with a string value to be protected."""
+        """
+        Initialize a new secure memory container with sensitive data.
+        
+        Args:
+            value (str or bytes): The sensitive data to protect
+                Will be converted to bytes and securely stored
+        """
         self._inner = RustSecureString(value)
         
     def __str__(self):
         """
-        Get the protected string value.
-        Note: This temporarily exposes the secret in memory.
+        Retrieve the protected string value.
+        
+        This method temporarily exposes the sensitive data in memory
+        and should be used with caution. Prefer using controlled access
+        patterns where the exposure is limited and variables containing
+        the returned value are promptly cleared.
+        
+        Returns:
+            str: The sensitive data as a string
         """
         return str(self._inner)
         
     def clear(self):
         """
-        Explicitly clear the protected data.
-        The memory is securely zeroized.
+        Explicitly clear and sanitize the protected data.
+        
+        Securely wipes the memory containing the sensitive data using
+        platform-specific techniques to ensure it cannot be recovered
+        even through sophisticated memory forensics.
         """
         self._inner.clear()
         
     def __del__(self):
         """
-        Ensure secure cleanup when the object is destroyed.
-        Ignores cleanup errors during destruction.
+        Secure destructor ensuring memory is sanitized even if not explicitly cleared.
+        
+        This method is automatically called during garbage collection and
+        ensures sensitive data doesn't persist in memory. It includes exception
+        handling to prevent interruption of the garbage collection process.
         """
         try:
             self.clear()

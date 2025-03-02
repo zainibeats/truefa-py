@@ -1,127 +1,190 @@
-# TrueFA - True Factor Authentication
+# TrueFA-Py - Secure TOTP Authenticator
 
-A secure, Rust-backed two-factor authentication application with enhanced security features.
+TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built with Python and Rust. It provides a robust command-line interface for managing TOTP (Time-based One-Time Password) authentication codes while keeping your security tokens encrypted and stored locally in a secure vault.
 
 ## Features
 
-- **Secure Storage**: All secrets are stored using memory protection techniques
-- **Rust Cryptography**: Core security operations implemented in Rust for enhanced security
-- **Two UI Modes**: Console and GUI interfaces available
-- **Portable**: Available as both a standalone executable and installer package
-- **QR Code Support**: Import tokens via camera or image files
-- **Time-Based OTP**: Full TOTP implementation with customizable parameters
+- 🔑 Encrypted local vault with master password
+- 📷 QR code scanning from image files
+- 🔐 Two-layer security architecture with envelope encryption
+- 🛡️ Native Rust crypto module with Python fallback mechanisms
+- 🖥️ Portable executable with no installation required
+- 🔄 Robust error handling and path validation
+- 🔍 Multiple vault location detection capabilities
+- 📥 Save and retrieve TOTP secrets
+- 🔢 Generate time-based authentication codes
 
 ## Prerequisites
 
-To build TrueFA from source, you need:
+To build TrueFA-Py from source, you need:
 
 - Python 3.10 or later
 - Rust (latest stable version)
-- PyInstaller
+- PyInstaller for building executables
 - NSIS (for building Windows installer)
 
-## Building from Source
+## Development
 
 ### Setting up the Environment
 
-1. Clone the repository
-2. Create a virtual environment:
-   ```
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
-   ```
+```powershell
+# Clone the repository
+git clone https://github.com/zainibeats/truefa-py.git
+cd truefa-py
+
+# Create a virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r requirements.txt
+```
 
 ### Building the Rust Cryptography Backend
 
-1. Ensure Rust is installed by checking:
-   ```
-   rustc --version
-   ```
+```powershell
+# Check Rust installation
+rustc --version
 
-2. Run the build script:
-   ```
-   python secure_build_fix.py
-   ```
-   This script will compile the Rust cryptography module and place the DLL in the correct location.
+# Build the Rust module
+python secure_build_fix.py
+```
 
 ### Building the Application
 
-There are several ways to build TrueFA:
+```powershell
+# Simple build
+python -m PyInstaller TrueFA_simple.spec
 
-#### Method 1: Using the build_package.py script
-
-The simplest way to build both the executable and installer:
-
-```
+# Complete package build
 python build_package.py
 ```
 
-This creates both a portable executable and an installer in the `dist` directory.
-
-#### Method 2: Using PyInstaller directly
-
-For more control over the build process:
+### Project Structure
 
 ```
-pyinstaller TrueFA_Py.spec
+truefa-py/
+├── rust_crypto/           # Rust native crypto module
+│   ├── src/               # Rust source code
+│   ├── Cargo.toml         # Rust dependencies
+│   └── build.py           # Build script
+├── src/                   # Python application source
+│   ├── config/            # Application configuration
+│   ├── security/          # Security implementation
+│   │   ├── vault.py       # Secure vault implementation
+│   │   └── secure_string.py # Secure string handling
+│   ├── truefa_crypto/     # Crypto module with fallbacks
+│   │   ├── __init__.py    # Module initialization
+│   │   └── fallback.py    # Python fallback implementations
+│   ├── ui/                # User interface components
+│   └── totp/              # TOTP implementation
+├── main.py                # Application entry point
+├── TrueFA_Py.spec     # PyInstaller specification
+└── build_package.py       # Package build script
 ```
 
-#### Method 3: Building the installer manually
+## Security Features
 
-```
-pyinstaller TrueFA_installer.spec
-makensis installer.nsi
-```
+### Enhanced Crypto Architecture
+- Native Rust crypto module for high-performance security operations
+- Automatic fallback to Python implementation when native module unavailable
+- Memory-safe implementation with Rust's security guarantees
+- Envelope encryption for enhanced security
 
-### Build Outputs
+### Vault Storage and Security
+- **Primary Vault Location**: `C:\Users\<username>\.truefa\.vault\`
+- **Cryptographic Materials**: `C:\Users\<username>\.truefa\.crypto\`
+- **Vault Metadata**: Stored in `vault.meta` with salt and password verification hash
+- **Fallback Locations**: Multiple path resolution for reliability
 
-The build process will place these files in the `dist` directory:
+### Encryption and Storage
+- AES-256-GCM authenticated encryption (when available)
+- PBKDF2 key derivation with 100,000 iterations and SHA-256
+- Unique salt generation for each vault
+- Secure password verification with constant-time comparison
+- Two-layer security model for enhanced protection
 
-- Portable executable: `TrueFA.exe` or `TrueFA_gui.exe`
-- Installer: `TrueFA_Setup.exe`
+### Path Resolution
+The application will automatically search for your vault in various locations when unlocking:
+1. `C:\Users\<username>\.truefa\.vault\`
+2. `C:\Users\<username>\.truefa_vault\`
+3. `C:\Users\<username>\.truefa_secure\`
+4. Application data directories
+
+## User Guide
+
+### First-Time Setup
+1. Launch TrueFA-Py
+2. When prompted, create a strong master password
+3. This password will be required for all future access to your vault
+
+### Adding Accounts
+1. Select option 1 or 2 from the main menu to add an account
+   - Option 1: Load QR code from image
+   - Option 2: Enter secret key manually
+2. Follow the prompts to enter account details
+3. Use option 3 to save the account to your secure vault
+
+### Viewing Accounts and Codes
+1. Select option 4 from the main menu
+2. Enter your master password when prompted
+3. Choose from the list of available accounts
+4. The current TOTP code will be displayed
+
+### Managing Accounts
+- Use option 5 to export your secrets
+- Use option 6 to clear the screen
+- Use option 7 to exit the application
 
 ## Installation
 
 ### Portable Version
-
-Simply download and run `TrueFA.exe`. No installation required. The application will store its data in the user's AppData folder.
+Simply download and run `TrueFA-Py.exe`. No installation required. The application will store its data in the `.truefa` directory in your user folder.
 
 ### Installer Version
-
-Run `TrueFA_Setup.exe` and follow the installation wizard. This will:
-- Install TrueFA to the Program Files directory
+Run `TrueFA-Py_Setup.exe` and follow the installation wizard. This will:
+- Install TrueFA-Py to the Program Files directory
 - Create start menu shortcuts
 - Add an uninstaller
 - Register the application with Windows
 
-## Usage
+## Technical Architecture
 
-### Console Mode
+### Hybrid Crypto Implementation
+TrueFA-Py uses a hybrid approach to cryptographic operations:
 
-Run `TrueFA.exe` from the command line to use the text-based interface.
+1. **Primary: Rust Native Module**
+   - High-performance, memory-safe cryptographic operations
+   - Bindings to Python via FFI (Foreign Function Interface)
+   - Secure memory management techniques
+   - Optimized for desktop environments
 
-### GUI Mode
+2. **Fallback: Pure Python Implementation**
+   - Automatic fallback when native module is unavailable
+   - Compatible with all platforms
+   - Maintains security principles while sacrificing some performance
+   - Ensures application functionality in all environments
 
-Double-click the TrueFA icon to launch the graphical user interface.
+### Vault Implementation
+The secure vault uses a two-layer security model:
+1. **Vault Password** - Unlocks the vault and decrypts the master key
+2. **Master Key** - Encrypts/decrypts individual TOTP secrets
 
-## Note on Rust Cryptography Integration
+This envelope encryption approach ensures that even if one layer is compromised, your secrets remain protected by the other layer.
 
-TrueFA uses a hybrid approach for cryptography:
+## Troubleshooting
 
-1. **Primary Implementation**: Rust-based cryptography module provides enhanced security through memory protection and Rust's safety guarantees
-2. **Fallback Mechanism**: If the Rust module fails to load, the application will automatically fall back to a pure Python implementation
+If you encounter issues with vault access:
 
-This design ensures maximum compatibility while prioritizing security when possible.
+1. **Vault Not Found**: The application will look in multiple locations for your vault. If you've moved your vault, try pointing to the new location.
+2. **Password Problems**: If you've forgotten your password, there is no recovery mechanism - this is a security feature.
+3. **Permission Issues**: If you see permissions warnings, make sure you have write access to the `.truefa` directory in your user folder.
 
 ## License
 
-MIT 
+This project is licensed under the MIT License. See the LICENSE file for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull Request. 
 
-## Acknowledgements
-
-- [Add acknowledgements here]

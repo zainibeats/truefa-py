@@ -1,7 +1,16 @@
 """
-Vault implementation using Rust-based cryptography with envelope encryption.
-The vault secures a master key with a vault password, and the master key in turn
-secures individual TOTP secrets.
+Secure Vault Implementation for TrueFA-Py
+
+Provides a robust vault system implementing envelope encryption with Rust-based cryptography.
+The vault secures a master key with a user password, and this master key then encrypts
+individual TOTP secrets. This multi-layered approach enhances security while allowing
+easy password changes without re-encrypting all secrets.
+
+Key features:
+- Envelope encryption (password → master key → individual secrets)
+- Secure in-memory handling of sensitive data
+- Fallback pure-Python implementation when Rust crypto unavailable
+- Automatic vault state management and persistence
 """
 
 import os
@@ -11,29 +20,30 @@ import hashlib
 import time
 from pathlib import Path
 from datetime import datetime
-from .secure_string import SecureString
-from datetime import datetime
 import secrets
+from .secure_string import SecureString
 
-# Import configuration
+# Import configuration with fallback mechanism
 try:
     from ..config import DATA_DIR, VAULT_FILE, SECURE_DATA_DIR, VAULT_CRYPTO_DIR
 except ImportError:
-    # Fallback if config module not available
+    # Define default paths if config module is unavailable
     DATA_DIR = os.path.expanduser('~/.truefa')
     VAULT_FILE = os.path.join(DATA_DIR, "vault.dat")
     SECURE_DATA_DIR = os.path.join(os.path.expanduser('~'), '.truefa_secure')
     VAULT_CRYPTO_DIR = os.path.join(SECURE_DATA_DIR, "crypto")
+    
     # Create secure directories if they don't exist
     os.makedirs(SECURE_DATA_DIR, exist_ok=True)
     os.makedirs(VAULT_CRYPTO_DIR, exist_ok=True)
-    # Try to set secure permissions
+    
+    # Attempt to set secure permissions (0o700 = rwx------)
     try:
         os.chmod(SECURE_DATA_DIR, 0o700)
     except Exception as e:
         print(f"Warning: Could not set secure permissions: {e}")
 
-# Import our Rust crypto module with proper fallbacks
+# Import Rust-based cryptography module with pure-Python fallback
 try:
     import truefa_crypto
     from truefa_crypto import (
@@ -46,7 +56,7 @@ except ImportError as e:
     print(f"WARNING: Failed to import truefa_crypto: {str(e)}")
     print("Creating fallback implementation")
     
-    # Define a dummy fallback module
+    # Define a pure-Python fallback implementation
     class _DummyModule:
         def __init__(self):
             # State
@@ -453,17 +463,36 @@ _USING_DUMMY = True
 
 class SecureVault:
     """
-    Secure vault implementation with envelope encryption.
+    Secure Vault Implementation for TOTP Secret Management
     
-    This implements a two-layer security model:
-    1. Vault password - unlocks the vault and decrypts the master key
-    2. Master key - encrypts/decrypts individual TOTP secrets
+    Implements a two-layer envelope encryption model for maximum security:
+    1. Vault password: Authenticates the user and decrypts the master key
+    2. Master key: Used to encrypt/decrypt individual TOTP secrets
     
-    The master key is never stored directly, only in encrypted form.
+    This design provides several security benefits:
+    - The master key is never stored directly, only in encrypted form
+    - User can change vault password without re-encrypting all secrets
+    - Compartmentalized security with different keys for different purposes
+    - Memory-safe handling of sensitive cryptographic material
+    
+    The vault maintains a clear separation between:
+    - Regular data directory: For configuration and non-sensitive data
+    - Secure data directory: For cryptographic materials with restricted permissions
     """
     
     def __init__(self, storage_path=None):
-        """Initialize the vault with the specified storage path."""
+        """
+        Initialize the SecureVault with the specified storage path.
+        
+        Args:
+            storage_path: Optional custom path for storing vault data.
+                          If None, uses the configured DATA_DIR.
+        
+        The initialization process:
+        1. Sets up directory paths for regular and secure storage
+        2. Prepares paths for vault metadata and master key storage
+        3. Does not automatically load or unlock the vault
+        """
         # Use configured DATA_DIR from config module if no storage path specified
         self.storage_path = storage_path or DATA_DIR
         
@@ -569,19 +598,31 @@ class SecureVault:
 
     def create_vault(self, vault_password, master_password=None):
         """
-        Create a new secure vault for storing the TOTP secrets.
+        Create a new secure vault using envelope encryption.
         
+        This method sets up a new vault with the following security features:
+        - Creates directory structure with appropriate permissions
+        - Generates cryptographically secure random salt
+        - Derives vault key using strong key derivation (Argon2id preferred)
+        - Creates a secure random master key for encrypting secrets
+        - Implements envelope encryption if master_password is provided
+        - Securely saves vault metadata and encrypted master key
+
         Args:
-            vault_password: Password to unlock the vault in the future
-            master_password: Optional secondary password for additional encryption
-            
+            vault_password (str/SecureString): Password to unlock the vault
+                Must be strong enough to withstand brute force attacks
+            master_password (str/SecureString, optional): Secondary password 
+                If provided, adds an additional encryption layer (envelope encryption)
+                
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if vault creation succeeded, False if it failed
             
-        Security:
-        - Uses secure key derivation (Argon2id if available, else PBKDF2)
-        - Generates secure random salt
-        - Provides envelope encryption when master_password is supplied
+        Raises:
+            Various exceptions if filesystem operations or cryptographic functions fail
+            
+        Note:
+            Even if the vault creation process fails, the method attempts to clean up
+            any partially created files to avoid leaving sensitive data behind.
         """
         # Import modules here to ensure they're available throughout the method
         import os as os_module
