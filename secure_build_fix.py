@@ -18,8 +18,8 @@ import platform
 import importlib.util
 
 # Configuration
-APP_NAME = "TrueFA"
-APP_VERSION = "1.0.0"
+APP_NAME = "TrueFA-Py"
+APP_VERSION = "0.1.0"
 CONSOLE_MODE = True
 ICON_PATH = None  # Set to path of icon file if available
 
