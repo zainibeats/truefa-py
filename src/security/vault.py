@@ -15,6 +15,24 @@ from .secure_string import SecureString
 from datetime import datetime
 import secrets
 
+# Import configuration
+try:
+    from ..config import DATA_DIR, VAULT_FILE, SECURE_DATA_DIR, VAULT_CRYPTO_DIR
+except ImportError:
+    # Fallback if config module not available
+    DATA_DIR = os.path.expanduser('~/.truefa')
+    VAULT_FILE = os.path.join(DATA_DIR, "vault.dat")
+    SECURE_DATA_DIR = os.path.join(os.path.expanduser('~'), '.truefa_secure')
+    VAULT_CRYPTO_DIR = os.path.join(SECURE_DATA_DIR, "crypto")
+    # Create secure directories if they don't exist
+    os.makedirs(SECURE_DATA_DIR, exist_ok=True)
+    os.makedirs(VAULT_CRYPTO_DIR, exist_ok=True)
+    # Try to set secure permissions
+    try:
+        os.chmod(SECURE_DATA_DIR, 0o700)
+    except Exception as e:
+        print(f"Warning: Could not set secure permissions: {e}")
+
 # Import our Rust crypto module with proper fallbacks
 try:
     import truefa_crypto
@@ -35,8 +53,8 @@ except ImportError as e:
             self._vault_initialized = False
             self._vault_unlocked = False
             
-            # Set up paths
-            self.storage_path = os.path.expanduser('~/.truefa')
+            # Set up paths - use appropriate data directory from config if available
+            self.storage_path = DATA_DIR
             self.vault_dir = os.path.join(self.storage_path, '.vault')
             self._vault_meta_file = os.path.join(self.vault_dir, 'vault.meta')
             
@@ -403,18 +421,44 @@ class SecureVault:
     
     def __init__(self, storage_path=None):
         """Initialize the vault with the specified storage path."""
-        self.storage_path = storage_path or os.path.expanduser('~/.truefa')
+        # Use configured DATA_DIR from config module if no storage path specified
+        self.storage_path = storage_path or DATA_DIR
+        
+        # Split storage between regular and secure directories:
+        # - Regular user data goes to DATA_DIR (less sensitive)
+        # - Cryptographic materials go to SECURE_DATA_DIR (more sensitive)
         self.vault_dir = os.path.join(self.storage_path, '.vault')
         self.vault_meta_path = os.path.join(self.vault_dir, "vault.meta")
         
-        # Ensure storage directory exists with proper permissions
+        # Use secure directory for crypto materials
+        self.crypto_dir = VAULT_CRYPTO_DIR
+        self.master_key_path = os.path.join(self.crypto_dir, "master.meta")
+        
+        # Ensure storage directories exist with proper permissions
         os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
+        os.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
+        os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
         
         # Try to set permissions, but don't fail if we can't
         try:
             os.chmod(self.storage_path, 0o700)
-        except Exception:
-            pass
+            os.chmod(self.vault_dir, 0o700)
+            os.chmod(self.crypto_dir, 0o700)
+            
+            # On Windows, apply additional ACL protections to the crypto directory
+            if os.name == 'nt':
+                import subprocess
+                try:
+                    subprocess.run([
+                        "icacls", 
+                        self.crypto_dir, 
+                        "/inheritance:r",  # Remove inherited permissions
+                        "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Full control to owner
+                    ], check=False, capture_output=True)
+                except Exception as e:
+                    print(f"Warning: Could not set ACL permissions: {e}")
+        except Exception as e:
+            print(f"Warning: Could not set permissions: {e}")
         
         # Vault state
         self._initialized = False
@@ -470,11 +514,28 @@ class SecureVault:
                 # Ensure the vault directory exists with proper permissions
                 Path(self.vault_dir).mkdir(parents=True, exist_ok=True)
                 
-                # Try to set secure permissions on the vault directory
+                # Ensure the crypto directory exists with proper permissions
+                Path(self.crypto_dir).mkdir(parents=True, exist_ok=True)
+                
+                # Try to set secure permissions on the vault and crypto directories
                 try:
                     os.chmod(self.vault_dir, 0o700)
+                    os.chmod(self.crypto_dir, 0o700)
+                    
+                    # On Windows, apply additional ACL protections to the crypto directory
+                    if os.name == 'nt':
+                        import subprocess
+                        try:
+                            subprocess.run([
+                                "icacls", 
+                                self.crypto_dir, 
+                                "/inheritance:r",  # Remove inherited permissions
+                                "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Full control to owner
+                            ], check=False, capture_output=True)
+                        except Exception:
+                            pass
                 except Exception as perm_error:
-                    print(f"Warning: Could not set permissions on vault directory: {perm_error}")
+                    print(f"Warning: Could not set permissions on vault directories: {perm_error}")
                     
                 # Verify the vault directory is writable
                 test_file = os.path.join(self.vault_dir, ".test")
@@ -484,6 +545,16 @@ class SecureVault:
                     os.remove(test_file)
                 except Exception as e:
                     print(f"Error: Vault directory is not writable: {e}")
+                    return False
+                    
+                # Verify the crypto directory is writable
+                test_file = os.path.join(self.crypto_dir, ".test")
+                try:
+                    with open(test_file, 'w') as f:
+                        f.write('test')
+                    os.remove(test_file)
+                except Exception as e:
+                    print(f"Error: Crypto directory is not writable: {e}")
                     return False
             except Exception as e:
                 print(f"Error creating vault directories: {e}")
@@ -528,10 +599,9 @@ class SecureVault:
                 # Encrypt the master key with the vault key
                 encrypted_master_key = truefa_crypto.encrypt_master_key(master_key)
                 
-                # Store the master key metadata
-                master_meta_path = os.path.join(self.vault_dir, "master.meta")
+                # Store the master key metadata in the SECURE directory
                 try:
-                    with open(master_meta_path, "w") as f:
+                    with open(self.master_key_path, "w") as f:
                         f.write(json.dumps({
                             "salt": master_salt,
                             "encrypted_key": encrypted_master_key,
@@ -634,9 +704,9 @@ class SecureVault:
             return None
         
         try:
-            # Decrypt the master key
+            # Decrypt the master key from the secure location
             encrypted_master_key = None
-            with open(os.path.join(self.vault_dir, "master.meta"), 'r') as f:
+            with open(self.master_key_path, 'r') as f:
                 master_config = json.load(f)
                 encrypted_master_key = master_config.get('encrypted_key')
             
@@ -714,7 +784,7 @@ class SecureVault:
         
         # Verify current master password
         master_salt = None
-        with open(os.path.join(self.vault_dir, "master.meta"), 'r') as f:
+        with open(self.master_key_path, 'r') as f:
             master_config = json.load(f)
             master_salt = master_config.get('salt')
         
@@ -734,8 +804,8 @@ class SecureVault:
             # Encrypt the new master key with the vault key
             encrypted_master_key = truefa_crypto.encrypt_master_key(new_master_key)
             
-            # Update and save configuration
-            with open(os.path.join(self.vault_dir, "master.meta"), "w") as f:
+            # Update and save configuration to the secure crypto directory
+            with open(self.master_key_path, "w") as f:
                 f.write(json.dumps({
                     "salt": new_master_salt,
                     "encrypted_key": encrypted_master_key,
