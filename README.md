@@ -64,7 +64,7 @@ This creates both a portable executable and an installer in the `dist` directory
 For more control over the build process:
 
 ```
-pyinstaller TrueFA_simple.spec
+pyinstaller TrueFA_Py.spec
 ```
 
 #### Method 3: Building the installer manually
