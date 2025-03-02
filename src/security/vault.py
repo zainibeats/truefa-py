@@ -108,6 +108,15 @@ except ImportError as e:
             except Exception as e:
                 print(f"Error saving vault state: {e}")
         
+        def set_vault_path(self, vault_meta_path):
+            """Set the vault metadata path to use for operations."""
+            import os
+            self._vault_meta_file = vault_meta_path
+            self.vault_dir = os.path.dirname(vault_meta_path)
+            print(f"Set vault path to: {vault_meta_path}")
+            # Reload vault state to match the new path
+            self._load_vault_state()
+        
         # SecureString implementation
         class SecureString:
             def __init__(self, value):
@@ -220,8 +229,29 @@ except ImportError as e:
                 print("ERROR: Empty password not allowed")
                 return False
             
-            # Ensure we use the same vault_meta_path that was set during initialization
-            self.vault_meta_path = os_module.path.join(self.vault_dir, "vault.meta")
+            # IMPORTANT: Get the path from the correct location that matches where the vault was created
+            # First check in .truefa directory which is where the vault is typically created
+            home_dir = os_module.path.expanduser("~")
+            possible_paths = [
+                os_module.path.join(home_dir, ".truefa", ".vault", "vault.meta"),  # Standard user home .truefa location
+                os_module.path.join(self.vault_dir, "vault.meta"),  # Location from init
+                os_module.path.join(home_dir, ".truefa_vault", "vault.meta"),  # Alternative location
+                os_module.path.join(DATA_DIR, ".vault", "vault.meta")  # DATA_DIR based location
+            ]
+            
+            # Find the first path that exists
+            self.vault_meta_path = None
+            for path in possible_paths:
+                if os_module.path.exists(path):
+                    self.vault_meta_path = path
+                    self.vault_dir = os_module.path.dirname(path)
+                    print(f"Found vault metadata at: {path}")
+                    break
+            
+            if not self.vault_meta_path:
+                # If not found, use the default path but print a warning
+                self.vault_meta_path = os_module.path.join(self.vault_dir, "vault.meta")
+                print(f"WARNING: Using default vault path: {self.vault_meta_path}")
             
             print(f"Attempting to unlock vault using metadata at: {self.vault_meta_path}")
             
@@ -414,6 +444,10 @@ except ImportError as e:
         
     def verify_signature(message, signature, public_key):
         return truefa_crypto.verify_signature(message, signature, public_key)
+        
+    def set_vault_path(vault_meta_path):
+        """Set the vault metadata path for operations."""
+        return truefa_crypto.set_vault_path(vault_meta_path)
     
 _USING_DUMMY = True
 
@@ -967,10 +1001,32 @@ class SecureVault:
             bool: True if vault is unlocked, False otherwise
         """
         try:
-            # Get the stored salt and password hash
-            if not os.path.exists(self.vault_meta_path):
+            import os as os_module
+            # First check if vault path exists, if not try alternative locations
+            if not os_module.path.exists(self.vault_meta_path):
                 print(f"Vault metadata not found at: {self.vault_meta_path}")
-                return False
+                
+                # Try alternative locations
+                home_dir = os_module.path.expanduser("~")
+                possible_paths = [
+                    os_module.path.join(home_dir, ".truefa", ".vault", "vault.meta"),
+                    os_module.path.join(home_dir, ".truefa_vault", "vault.meta"),
+                    os_module.path.join(os_module.path.expanduser("~"), ".truefa_secure", "vault.meta"),
+                    os_module.path.join(DATA_DIR, ".vault", "vault.meta")
+                ]
+                
+                for path in possible_paths:
+                    if os_module.path.exists(path):
+                        print(f"Found vault metadata at alternative location: {path}")
+                        self.vault_meta_path = path
+                        self.vault_dir = os_module.path.dirname(path)
+                        break
+                
+                if not os_module.path.exists(self.vault_meta_path):
+                    print("Vault metadata not found in any known location.")
+                    return False
+            
+            print(f"Using vault metadata at: {self.vault_meta_path}")
                 
             try:
                 with open(self.vault_meta_path, 'r') as f:
@@ -985,6 +1041,10 @@ class SecureVault:
                     if not stored_hash_b64:
                         print("Password hash not found in metadata - vault needs upgrade")
                         # For backwards compatibility, fall back to the old unlock method
+                        # Pass our discovered vault_meta_path to the truefa_crypto module
+                        if hasattr(truefa_crypto, 'set_vault_path'):
+                            truefa_crypto.set_vault_path(self.vault_meta_path)
+                            
                         if not truefa_crypto.unlock_vault(password, vault_salt):
                             print("Invalid password for vault")
                             return False
@@ -1014,6 +1074,10 @@ class SecureVault:
                 return False
                 
             # If we got here, either the password hash matched or we're using the fallback method
+            # Pass our discovered vault_meta_path to the truefa_crypto module 
+            if hasattr(truefa_crypto, 'set_vault_path'):
+                truefa_crypto.set_vault_path(self.vault_meta_path)
+                
             if not truefa_crypto.unlock_vault(password, vault_salt):
                 # This should not happen if the hash already matched, but just in case
                 print("Invalid password for vault")
