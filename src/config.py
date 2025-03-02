@@ -20,8 +20,8 @@ from pathlib import Path
 import subprocess
 
 # Application information
-APP_NAME = "TrueFA"
-APP_VERSION = "1.0.0"
+APP_NAME = "TrueFA-Py"
+APP_VERSION = "0.1.0"
 
 # Determine the correct data directory based on platform
 def get_data_directory():
