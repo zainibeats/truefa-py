@@ -22,10 +22,10 @@ import stat
 import argparse
 
 # Configuration
-APP_NAME = "TrueFA"
-APP_VERSION = "1.0.0"
-AUTHOR = "TrueFA Team"
-COPYRIGHT = "Copyright © 2023-2024 TrueFA Team"
+APP_NAME = "TrueFA-Py"
+APP_VERSION = "0.1.0"
+AUTHOR = "Cheyenne Z"
+COPYRIGHT = "Copyright © 2025 Cheyenne Zaini"
 DESCRIPTION = "Secure Two-Factor Authentication Tool"
 WEBSITE = "https://github.com/zainibeats/truefa-py"
 
