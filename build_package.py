@@ -53,13 +53,19 @@ def check_requirements():
     
     # 1. Check for PyInstaller
     try:
-        spec = importlib.util.find_spec("PyInstaller")
-        if spec is None:
+        # Try to import PyInstaller directly
+        import PyInstaller
+        print(f"✓ PyInstaller found (version {PyInstaller.__version__})")
+    except ImportError:
+        # Fall back to spec check
+        try:
+            spec = importlib.util.find_spec("PyInstaller")
+            if spec is None:
+                requirements.append("PyInstaller (pip install pyinstaller)")
+            else:
+                print("✓ PyInstaller found")
+        except Exception:
             requirements.append("PyInstaller (pip install pyinstaller)")
-        else:
-            print("✓ PyInstaller found")
-    except Exception:
-        requirements.append("PyInstaller (pip install pyinstaller)")
     
     # 2. Check for NSIS (for installer creation)
     nsis_found = False
