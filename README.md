@@ -54,7 +54,7 @@ python secure_build_fix.py
 
 ```powershell
 # Simple build
-python -m PyInstaller TrueFA_simple.spec
+python -m PyInstaller TrueFA_Py.spec
 
 # Complete package build
 python build_package.py
