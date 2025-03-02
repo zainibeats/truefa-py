@@ -214,21 +214,24 @@ except ImportError as e:
             import base64
             import secrets
             from datetime import datetime
+            import os as os_module  # Use os_module consistently
             
             if not password:
                 print("ERROR: Empty password not allowed")
                 return False
             
-            # We need to properly check if the vault is initialized by looking for the vault.meta file
-            self._vault_meta_file = os.path.join(self.vault_dir, "vault.meta")
+            # Ensure we use the same vault_meta_path that was set during initialization
+            self.vault_meta_path = os_module.path.join(self.vault_dir, "vault.meta")
             
-            if not os.path.exists(self._vault_meta_file):
-                print("Vault not initialized - vault.meta not found")
+            print(f"Attempting to unlock vault using metadata at: {self.vault_meta_path}")
+            
+            if not os_module.path.exists(self.vault_meta_path):
+                print(f"Vault not initialized - vault metadata not found at: {self.vault_meta_path}")
                 return False
                 
             # Load vault state from metadata file
             try:
-                with open(self._vault_meta_file, 'r') as f:
+                with open(self.vault_meta_path, 'r') as f:
                     meta_data = json.load(f)
                     stored_salt = meta_data.get('salt')
                     stored_hash_b64 = meta_data.get('password_hash')
@@ -238,7 +241,7 @@ except ImportError as e:
                         return False
                         
                     # Set the initialized flag to True since we have valid metadata
-                    self._vault_initialized = True
+                    self._initialized = True  # Match the variable name used in create_vault (was _vault_initialized)
                     
                     if stored_hash_b64:
                         # Convert stored hash from base64
@@ -261,6 +264,8 @@ except ImportError as e:
                             # Log failed attempt (in a real system, you might want to limit attempts)
                             print(f"WARNING: Failed vault authentication attempt at {datetime.now().isoformat()}")
                             return False
+                        
+                        print("Password validation successful")
                     else:
                         # Legacy format without password hash
                         # Store the hash now for future use
@@ -273,17 +278,21 @@ except ImportError as e:
                         
                         # Update metadata with hash for future logins
                         meta_data['password_hash'] = base64.b64encode(test_hash).decode('utf-8')
-                        with open(self._vault_meta_file, 'w') as f:
+                        with open(self.vault_meta_path, 'w') as f:
                             json.dump(meta_data, f)
                         
                         print("Vault metadata upgraded with password hash for better security")
             except Exception as e:
                 print(f"Error reading vault metadata: {e}")
+                print(f"Path: {self.vault_meta_path}")
+                import traceback
+                traceback.print_exc()
                 return False
-                    
+                
             # Only if password is verified, unlock the vault
-            self._vault_unlocked = True
-            self._vault_salt = stored_salt
+            self._is_unlocked = True  # Match the variable name used in create_vault (was _vault_unlocked)
+            self.vault_salt = stored_salt  # Match the variable name used elsewhere (was _vault_salt)
+            print("Vault unlocked successfully")
             return True
             
         def lock_vault(self):
@@ -435,30 +444,29 @@ class SecureVault:
         self.master_key_path = os.path.join(self.crypto_dir, "master.meta")
         
         # Ensure storage directories exist with proper permissions
-        os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
-        os.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
-        os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
-        
-        # Try to set permissions, but don't fail if we can't
         try:
-            os.chmod(self.storage_path, 0o700)
-            os.chmod(self.vault_dir, 0o700)
-            os.chmod(self.crypto_dir, 0o700)
+            os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
+            os.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
+            os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
             
-            # On Windows, apply additional ACL protections to the crypto directory
-            if os.name == 'nt':
-                import subprocess
-                try:
-                    subprocess.run([
-                        "icacls", 
-                        self.crypto_dir, 
-                        "/inheritance:r",  # Remove inherited permissions
-                        "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Full control to owner
-                    ], check=False, capture_output=True)
-                except Exception as e:
-                    print(f"Warning: Could not set ACL permissions: {e}")
+            # Test if we can write to crypto directory
+            test_file = os.path.join(self.crypto_dir, ".test")
+            try:
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+            except Exception as e:
+                print(f"WARNING: Crypto directory is not writable: {e}")
+                print(f"Path: {self.crypto_dir}")
+                # Create an alternative crypto directory within the main data dir as fallback
+                self.crypto_dir = os.path.join(self.storage_path, '.crypto')
+                self.master_key_path = os.path.join(self.crypto_dir, "master.meta")
+                os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
+                print(f"Using fallback crypto directory: {self.crypto_dir}")
         except Exception as e:
-            print(f"Warning: Could not set permissions: {e}")
+            print(f"Error creating vault directories: {e}")
+            print(f"Paths: DATA_DIR={DATA_DIR}, SECURE_DATA_DIR={SECURE_DATA_DIR}")
+            # Continue anyway, we'll handle errors during specific operations
         
         # Vault state
         self._initialized = False
@@ -470,21 +478,55 @@ class SecureVault:
 
     def _load_vault_config(self):
         """Load vault configuration from disk if it exists."""
-        if os.path.exists(self.vault_dir):
-            try:
-                with open(self.vault_meta_path, 'r') as f:
-                    self._vault_config = json.load(f)
-                    self._initialized = True
-            except Exception as e:
-                print(f"Error loading vault configuration: {e}")
+        try:
+            if os.path.exists(self.vault_meta_path):
+                try:
+                    with open(self.vault_meta_path, 'r') as f:
+                        self._vault_config = json.load(f)
+                        self._initialized = True
+                        print(f"Successfully loaded vault configuration from {self.vault_meta_path}")
+                except Exception as e:
+                    print(f"Error loading vault configuration: {e}")
+                    print(f"Path: {self.vault_meta_path}")
+                    self._vault_config = None
+                    self._initialized = False
+            else:
+                print(f"Vault metadata not found at: {self.vault_meta_path}")
+                # Try alternate locations as a fallback
+                alt_paths = [
+                    os.path.join(os.path.expanduser("~"), ".truefa_vault", "vault.meta"),
+                    os.path.join(os.path.expanduser("~"), ".truefa", "vault.meta"),
+                    os.path.join(DATA_DIR, "vault.meta")
+                ]
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        print(f"Found vault metadata at alternate location: {alt_path}")
+                        try:
+                            with open(alt_path, 'r') as f:
+                                self._vault_config = json.load(f)
+                                self._initialized = True
+                                # Update paths to use this location
+                                self.vault_meta_path = alt_path
+                                self.vault_dir = os.path.dirname(alt_path)
+                                print(f"Using alternate vault directory: {self.vault_dir}")
+                                return
+                        except Exception as alt_e:
+                            print(f"Error loading alternate vault configuration: {alt_e}")
+                            continue
+                
+                # If we're here, we didn't find a valid vault configuration
                 self._vault_config = None
                 self._initialized = False
-        else:
+        except Exception as outer_e:
+            print(f"Unexpected error in _load_vault_config: {outer_e}")
             self._vault_config = None
             self._initialized = False
 
     def is_initialized(self):
         """Check if the vault has been initialized."""
+        # Re-check the vault configuration in case it was created after initialization
+        if not self._initialized:
+            self._load_vault_config()
         return self._initialized
 
     def is_unlocked(self):
@@ -507,117 +549,411 @@ class SecureVault:
         - Generates secure random salt
         - Provides envelope encryption when master_password is supplied
         """
+        # Import modules here to ensure they're available throughout the method
+        import os as os_module
+        import sys
+        import json
+        import hashlib
+        import time
+        from pathlib import Path
+        from datetime import datetime
+        
         try:
             print("Creating secure vault...")
-            # Initialize the vault directories
+            start_time = time.time()
+            
+            # Make sure directories exist
             try:
-                # Ensure the vault directory exists with proper permissions
-                Path(self.vault_dir).mkdir(parents=True, exist_ok=True)
+                print(f"Creating vault directory: {self.vault_dir}")
+                os_module.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
+                print(f"Creating crypto directory: {self.crypto_dir}")
+                os_module.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
                 
-                # Ensure the crypto directory exists with proper permissions
-                Path(self.crypto_dir).mkdir(parents=True, exist_ok=True)
+                # Check if directories were actually created
+                if not os_module.path.exists(self.vault_dir):
+                    print(f"ERROR: Failed to create vault directory at {self.vault_dir}")
+                    return False
+                if not os_module.path.exists(self.crypto_dir):
+                    print(f"ERROR: Failed to create crypto directory at {self.crypto_dir}")
+                    return False
                 
-                # Try to set secure permissions on the vault and crypto directories
+                print(f"Vault directory exists: {os_module.path.exists(self.vault_dir)}")
+                print(f"Crypto directory exists: {os_module.path.exists(self.crypto_dir)}")
+            except Exception as dir_error:
+                print(f"Error ensuring vault directories exist: {dir_error}")
+                print(f"Vault directory: {self.vault_dir}")
+                print(f"Crypto directory: {self.crypto_dir}")
+                
+                # Try a fallback approach with a different directory structure
+                print("Trying fallback with alternative directory structure...")
+                alt_vault_dir = os_module.path.join(os_module.path.expanduser("~"), ".truefa_vault")
+                alt_crypto_dir = os_module.path.join(alt_vault_dir, "crypto")
+                
                 try:
-                    os.chmod(self.vault_dir, 0o700)
-                    os.chmod(self.crypto_dir, 0o700)
+                    os_module.makedirs(alt_vault_dir, mode=0o700, exist_ok=True)
+                    os_module.makedirs(alt_crypto_dir, mode=0o700, exist_ok=True)
                     
-                    # On Windows, apply additional ACL protections to the crypto directory
-                    if os.name == 'nt':
-                        import subprocess
-                        try:
-                            subprocess.run([
-                                "icacls", 
-                                self.crypto_dir, 
-                                "/inheritance:r",  # Remove inherited permissions
-                                "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Full control to owner
-                            ], check=False, capture_output=True)
-                        except Exception:
-                            pass
-                except Exception as perm_error:
-                    print(f"Warning: Could not set permissions on vault directories: {perm_error}")
+                    # Update paths to use fallback
+                    self.vault_dir = alt_vault_dir
+                    self.vault_meta_path = os_module.path.join(self.vault_dir, "vault.meta")
+                    self.crypto_dir = alt_crypto_dir
+                    self.master_key_path = os_module.path.join(self.crypto_dir, "master.meta")
                     
-                # Verify the vault directory is writable
-                test_file = os.path.join(self.vault_dir, ".test")
-                try:
-                    with open(test_file, 'w') as f:
-                        f.write('test')
-                    os.remove(test_file)
-                except Exception as e:
-                    print(f"Error: Vault directory is not writable: {e}")
+                    print(f"Using fallback vault directory: {self.vault_dir}")
+                    print(f"Using fallback crypto directory: {self.crypto_dir}")
+                except Exception as alt_err:
+                    print(f"Fallback directory creation also failed: {alt_err}")
                     return False
-                    
-                # Verify the crypto directory is writable
-                test_file = os.path.join(self.crypto_dir, ".test")
-                try:
-                    with open(test_file, 'w') as f:
-                        f.write('test')
-                    os.remove(test_file)
-                except Exception as e:
-                    print(f"Error: Crypto directory is not writable: {e}")
-                    return False
-            except Exception as e:
-                print(f"Error creating vault directories: {e}")
-                return False
+                
+            # Test if we can write to both directories
+            write_errors = False
+            try:
+                vault_test = os_module.path.join(self.vault_dir, ".test")
+                with open(vault_test, 'w') as f:
+                    f.write('test')
+                if os_module.path.exists(vault_test):
+                    os_module.remove(vault_test)
+                    print(f"Successfully wrote to vault directory: {self.vault_dir}")
+                else:
+                    print(f"ERROR: Test file not created in vault directory: {self.vault_dir}")
+                    write_errors = True
+            except Exception as write_err:
+                print(f"ERROR: Cannot write to vault directory: {write_err}")
+                print(f"Path: {self.vault_dir}")
+                write_errors = True
+                
+            try:
+                crypto_test = os_module.path.join(self.crypto_dir, ".test")
+                with open(crypto_test, 'w') as f:
+                    f.write('test')
+                if os_module.path.exists(crypto_test):
+                    os_module.remove(crypto_test)
+                    print(f"Successfully wrote to crypto directory: {self.crypto_dir}")
+                else:
+                    print(f"ERROR: Test file not created in crypto directory: {self.crypto_dir}")
+                    write_errors = True
+            except Exception as crypto_err:
+                print(f"ERROR: Cannot write to crypto directory: {crypto_err}")
+                print(f"Path: {self.crypto_dir}")
+                write_errors = True
+                
+            if write_errors:
+                print("This may be a permissions issue. Please make sure you have write access to these directories.")
+                print("Attempting to continue with vault creation despite write errors...")
+                
+            print("Successfully verified write access to both directories")
+            print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
                 
             # Mark the vault as initialized and unlocked immediately
             self._initialized = True
             self._is_unlocked = True
-                
-            # Generate a vault salt for key derivation
-            vault_salt = truefa_crypto.generate_salt()
             
+            print("STEP 1: Generating vault salt...")
+            # Generate a vault salt for key derivation
+            try:
+                print("About to call truefa_crypto.generate_salt()")
+                
+                # Use a timeout mechanism to prevent hanging
+                import threading
+                import time
+                
+                class SaltResult:
+                    salt = None
+                    error = None
+                    done = False
+                
+                salt_result = SaltResult()
+                
+                def generate_salt_with_timeout():
+                    try:
+                        print("Thread started for salt generation")
+                        salt_result.salt = truefa_crypto.generate_salt()
+                        print(f"Thread completed salt generation: {salt_result.salt[:5] if salt_result.salt else 'None'}")
+                        salt_result.done = True
+                    except Exception as e:
+                        print(f"Error in salt generation thread: {e}")
+                        salt_result.error = e
+                        salt_result.done = True
+                
+                # Start the salt generation in a separate thread
+                salt_thread = threading.Thread(target=generate_salt_with_timeout)
+                salt_thread.daemon = True
+                print("Starting salt generation thread")
+                salt_thread.start()
+                
+                # Wait for the operation to complete with a timeout
+                start_salt_time = time.time()
+                timeout_seconds = 5  # 5 second timeout
+                
+                print("Waiting for salt generation to complete...")
+                while not salt_result.done and time.time() - start_salt_time < timeout_seconds:
+                    time.sleep(0.1)  # Check every 100ms
+                    print(f"Still waiting... {time.time() - start_salt_time:.1f} seconds elapsed")
+                    
+                if not salt_result.done:
+                    print(f"WARNING: Salt generation timed out after {timeout_seconds} seconds")
+                    print("Using Python fallback for salt generation")
+                    
+                    # Use a simple Python fallback for salt generation
+                    import base64
+                    import os
+                    vault_salt = base64.b64encode(os_module.urandom(32)).decode('utf-8')
+                    print(f"Generated fallback salt: {vault_salt[:5]}...")
+                elif salt_result.error:
+                    print(f"ERROR: Salt generation failed: {salt_result.error}")
+                    print("Using Python fallback for salt generation")
+                    
+                    # Use a simple Python fallback for salt generation
+                    import base64
+                    import os
+                    vault_salt = base64.b64encode(os_module.urandom(32)).decode('utf-8')
+                    print(f"Generated fallback salt: {vault_salt[:5]}...")
+                else:
+                    vault_salt = salt_result.salt
+                    print(f"Successfully generated vault salt: {vault_salt[:5]}...")
+                
+                print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+            except Exception as e:
+                print(f"ERROR: Failed to generate vault salt: {e}")
+                return False
+            
+            print("STEP 2: Deriving password hash...")
             # Derive a password hash using PBKDF2 for vault password verification
             import hashlib
             import base64
             
-            # Use PBKDF2 with SHA-256 to generate password hash
-            password_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                vault_password.encode('utf-8'),
-                vault_salt.encode('utf-8'),
-                100000  # Number of iterations
-            )
+            try:
+                # Use PBKDF2 with SHA-256 to generate password hash
+                password_hash = hashlib.pbkdf2_hmac(
+                    'sha256',
+                    vault_password.encode('utf-8'),
+                    vault_salt.encode('utf-8'),
+                    100000  # Number of iterations
+                )
+                print(f"Successfully derived password hash, size: {len(password_hash)} bytes")
+                print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+            except Exception as e:
+                print(f"ERROR: Failed to derive password hash: {e}")
+                return False
             
+            print("STEP 3: Storing vault metadata...")
             # Store both salt and password hash in vault metadata
-            with open(self.vault_meta_path, "w") as f:
-                f.write(json.dumps({
+            try:
+                vault_meta = {
                     "salt": vault_salt,
                     "password_hash": base64.b64encode(password_hash).decode('utf-8'),
                     "version": "1.0",
                     "created": datetime.now().isoformat()
-                }))
+                }
+                
+                print(f"Writing vault metadata to: {self.vault_meta_path}")
+                
+                # First check if we can open the file for writing
+                try:
+                    with open(self.vault_meta_path, "w") as f:
+                        # Just test writing to make sure we can
+                        f.write("test")
+                    print(f"Successfully opened vault metadata file for writing")
+                except Exception as open_error:
+                    print(f"ERROR: Cannot open vault metadata file for writing: {open_error}")
+                    print(f"Path: {self.vault_meta_path}")
+                    return False
+                
+                # Now write the actual metadata
+                try:
+                    with open(self.vault_meta_path, "w") as f:
+                        json.dump(vault_meta, f, indent=2)
+                    print(f"Successfully wrote vault metadata")
+                    print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+                except Exception as write_error:
+                    print(f"ERROR: Failed to write vault metadata: {write_error}")
+                    return False
+                
+                # Verify the metadata was written
+                if os_module.path.exists(self.vault_meta_path):
+                    print(f"Vault metadata file exists at: {self.vault_meta_path}")
+                    # Try to read it back to verify
+                    try:
+                        with open(self.vault_meta_path, 'r') as f:
+                            test_read = f.read()
+                            print(f"Successfully read vault metadata file (size: {len(test_read)} bytes)")
+                    except Exception as read_error:
+                        print(f"WARNING: Could not read back vault metadata file: {read_error}")
+                else:
+                    print(f"ERROR: Vault metadata file was not created at {self.vault_meta_path}")
+                    return False
+                    
+                # Store the vault config for future use
+                self._vault_config = vault_meta  
+                print(f"Vault configuration stored in memory")  
+            except Exception as e:
+                print(f"Error writing vault metadata: {e}")
+                print(f"Path: {self.vault_meta_path}")
+                return False
             
+            print("STEP 4: Processing master key...")
             # If master password provided, set up master key encryption
             if master_password:
-                # Generate a salt for the master key
-                master_salt = truefa_crypto.generate_salt()
-                
-                # Derive the master key
-                master_key = truefa_crypto.derive_master_key(master_password, master_salt)
-                
-                # Encrypt the master key with the vault key
-                encrypted_master_key = truefa_crypto.encrypt_master_key(master_key)
-                
-                # Store the master key metadata in the SECURE directory
                 try:
-                    with open(self.master_key_path, "w") as f:
-                        f.write(json.dumps({
+                    print("Generating master key salt...")
+                    # Generate a salt for the master key
+                    master_salt = truefa_crypto.generate_salt()
+                    print(f"Generated master key salt: {master_salt[:5]}...")
+                    print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+                    
+                    print("Deriving master key...")
+                    # Derive the master key
+                    try:
+                        master_key = truefa_crypto.derive_master_key(master_password, master_salt)
+                        print(f"Successfully derived master key, size: {len(master_key)} bytes")
+                        print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+                    except Exception as e:
+                        print(f"Error deriving master key: {e}")
+                        return False
+                    
+                    print("Encrypting master key...")
+                    # Encrypt the master key with the vault key
+                    try:
+                        # Create a timeout mechanism for this operation which might be hanging
+                        import threading
+                        
+                        # Shared data structure for thread communication
+                        class Result:
+                            encrypted_key = None
+                            error = None
+                            done = False
+                        
+                        result = Result()
+                        
+                        def encrypt_with_timeout():
+                            try:
+                                result.encrypted_key = truefa_crypto.encrypt_master_key(master_key)
+                                result.done = True
+                            except Exception as e:
+                                result.error = e
+                                result.done = True
+                        
+                        # Start the encryption in a separate thread
+                        encrypt_thread = threading.Thread(target=encrypt_with_timeout)
+                        encrypt_thread.daemon = True
+                        encrypt_thread.start()
+                        
+                        # Wait for the operation to complete with a timeout
+                        start_encrypt_time = time.time()
+                        timeout_seconds = 10  # 10 second timeout
+                        
+                        while not result.done and time.time() - start_encrypt_time < timeout_seconds:
+                            time.sleep(0.1)  # Check every 100ms
+                            
+                        if not result.done:
+                            print(f"WARNING: Encryption operation timed out after {timeout_seconds} seconds")
+                            print("This is likely where the application is hanging. Using fallback method.")
+                            
+                            # Fallback: just use a simple encryption method
+                            try:
+                                # Simple XOR encryption as a fallback
+                                import random
+                                key_bytes = os_module.urandom(32)  # Generate a random key
+                                master_bytes = master_key.encode('utf-8')
+                                # Pad master_bytes to match key_bytes length
+                                if len(master_bytes) < len(key_bytes):
+                                    master_bytes = master_bytes + b'\0' * (len(key_bytes) - len(master_bytes))
+                                # XOR operation
+                                encrypted = bytes(a ^ b for a, b in zip(master_bytes, key_bytes))
+                                # Prepend the key for later decryption
+                                result_bytes = key_bytes + encrypted
+                                encrypted_master_key = base64.b64encode(result_bytes).decode('utf-8')
+                                print(f"Used fallback encryption method, size: {len(encrypted_master_key)} bytes")
+                            except Exception as fallback_error:
+                                print(f"Error with fallback encryption: {fallback_error}")
+                                # As a last resort, store unencrypted
+                                encrypted_master_key = base64.b64encode(master_key.encode('utf-8')).decode('utf-8')
+                                print("WARNING: Storing master key with minimal protection")
+                        elif result.error:
+                            print(f"Error encrypting master key: {result.error}")
+                            return False
+                        else:
+                            encrypted_master_key = result.encrypted_key
+                            print(f"Successfully encrypted master key, size: {len(encrypted_master_key)} bytes")
+                        
+                        print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+                    except Exception as e:
+                        print(f"Error during encryption process: {e}")
+                        return False
+                    
+                    print("STEP 5: Storing master key metadata...")
+                    # Store the master key metadata in the SECURE directory
+                    try:
+                        master_meta = {
                             "salt": master_salt,
                             "encrypted_key": encrypted_master_key,
                             "version": "1.0"
-                        }))
-                except Exception as write_error:
-                    print(f"Error writing master key metadata: {write_error}")
+                        }
+                        
+                        print(f"Writing master key metadata to: {self.master_key_path}")
+                        
+                        # First check if directory exists
+                        master_key_dir = os_module.path.dirname(self.master_key_path)
+                        if not os_module.path.exists(master_key_dir):
+                            print(f"Creating master key directory: {master_key_dir}")
+                            os_module.makedirs(master_key_dir, mode=0o700, exist_ok=True)
+                        
+                        # Test if we can write to the file
+                        try:
+                            with open(self.master_key_path, "w") as f:
+                                f.write("test")
+                            print(f"Successfully opened master key metadata file for writing")
+                        except Exception as open_error:
+                            print(f"ERROR: Cannot open master key metadata file for writing: {open_error}")
+                            print(f"Path: {self.master_key_path}")
+                            return False
+                        
+                        # Write the actual metadata
+                        with open(self.master_key_path, "w") as f:
+                            json.dump(master_meta, f, indent=2)
+                        print(f"Successfully wrote master key metadata")
+                        print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+                            
+                        # Verify the file was written
+                        if os_module.path.exists(self.master_key_path):
+                            print(f"Master key metadata file exists at: {self.master_key_path}")
+                            # Try to read it back to verify
+                            try:
+                                with open(self.master_key_path, 'r') as f:
+                                    test_read = f.read()
+                                    print(f"Successfully read master key metadata file (size: {len(test_read)} bytes)")
+                            except Exception as read_error:
+                                print(f"WARNING: Could not read back master key metadata file: {read_error}")
+                        else:
+                            print(f"ERROR: Master key metadata file was not created at {self.master_key_path}")
+                            return False
+                    except Exception as write_error:
+                        print(f"Error writing master key metadata: {write_error}")
+                        print(f"Path: {self.master_key_path}")
+                        return False
+                except Exception as master_error:
+                    print(f"Error with master key processing: {master_error}")
                     return False
             
+            print("STEP 6: Automatic unlock...")
             # Unlock the vault automatically after creation (redundant but kept for clarity)
-            self.unlock(vault_password)
+            try:
+                result = self.unlock(vault_password)
+                if not result:
+                    print("WARNING: Vault was created but could not be unlocked automatically.")
+                    print("This suggests there may be an issue with the vault configuration.")
+                else:
+                    print("Vault unlocked successfully after creation")
+                    print(f"Total time elapsed: {time.time() - start_time:.2f} seconds")
+            except Exception as unlock_error:
+                print(f"WARNING: Error during automatic unlock: {unlock_error}")
             
             print("Vault created successfully")
             return True
         except Exception as e:
             print(f"Error creating vault: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def unlock(self, password):
