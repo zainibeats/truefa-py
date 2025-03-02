@@ -25,6 +25,14 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+# Import our configuration
+try:
+    from ..config import DATA_DIR, EXPORTS_DIR
+except ImportError:
+    # Create a minimal config if the module isn't found
+    DATA_DIR = os.path.join(os.path.expanduser("~"), ".truefa")
+    EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
+
 try:
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
     from cryptography.hazmat.backends import default_backend
@@ -64,9 +72,9 @@ class SecureStorage:
         
         Args:
             storage_path (str, optional): Path to use for storing secrets.
-                Defaults to ~/.truefa
+                Defaults to the path specified in config.DATA_DIR
         """
-        self.storage_path = storage_path or os.path.join(os.path.expanduser("~"), ".truefa")
+        self.storage_path = storage_path or DATA_DIR
         
         # Initialize the vault
         self.vault = SecureVault(self.storage_path)
