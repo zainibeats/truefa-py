@@ -2,7 +2,7 @@
 
 ## Overview
 
-The TrueFA cryptography module (`truefa_crypto`) provides critical security operations for the TrueFA application. It is implemented with a dual-layer approach:
+The TrueFA cryptography module (`truefa_crypto`) provides critical security operations for the TrueFA-Py application. It is implemented with a dual-layer approach:
 
 1. **Rust Implementation**: High-performance, memory-safe native implementation (preferred)
 2. **Python Fallback**: Pure Python implementation used when the Rust module is unavailable
@@ -19,7 +19,7 @@ The Rust implementation provides enhanced security through:
 
 ### Python Fallback
 
-The Python fallback implementation ensures that TrueFA can function even when the Rust library cannot be loaded:
+The Python fallback implementation ensures that TrueFA-Py can function even when the Rust library cannot be loaded:
 - Uses standard Python cryptographic libraries
 - Maintains API compatibility with the Rust implementation
 - Automatically activates when the Rust library is not available
