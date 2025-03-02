@@ -20,36 +20,36 @@ Before building TrueFA, ensure you have the following software installed:
 
 ## Build Tools
 
-TrueFA includes several build tools to help you compile and package the application:
+TrueFA includes several build tools located in the `dev-tools` directory to help you compile and package the application:
 
 ### 1. PowerShell Build Script (Recommended)
 
-The `build.ps1` script provides a convenient way to build TrueFA with various options:
+The PowerShell build script provides a convenient way to build TrueFA with various options:
 
 ```powershell
 # Basic usage (builds both portable EXE and installer)
-.\build.ps1
+.\dev-tools\build.ps1
 
 # Build only portable EXE
-.\build.ps1 -Portable
+.\dev-tools\build.ps1 -Portable
 
 # Build only installer
-.\build.ps1 -Installer
+.\dev-tools\build.ps1 -Installer
 
 # Build with console window (for debugging)
-.\build.ps1 -Console
+.\dev-tools\build.ps1 -Console
 
 # Force use of Python fallback implementation
-.\build.ps1 -Fallback
+.\dev-tools\build.ps1 -Fallback
 
 # Build Rust cryptography backend first
-.\build.ps1 -BuildRust
+.\dev-tools\build.ps1 -BuildRust
 
 # Clean build artifacts before building
-.\build.ps1 -Clean
+.\dev-tools\build.ps1 -Clean
 
 # Combine options as needed
-.\build.ps1 -Portable -Console -BuildRust -Clean
+.\dev-tools\build.ps1 -Portable -Console -BuildRust -Clean
 ```
 
 ### 2. Python Build Package Script
@@ -58,19 +58,19 @@ For more control, you can use the Python build script directly:
 
 ```powershell
 # Build both portable EXE and installer
-python build_package.py
+python dev-tools\build_package.py
 
 # Build only portable EXE
-python build_package.py --portable
+python dev-tools\build_package.py --portable
 
 # Build only installer
-python build_package.py --installer
+python dev-tools\build_package.py --installer
 
 # Build with console window
-python build_package.py --console
+python dev-tools\build_package.py --console
 
 # Force use of Python fallback implementation
-python build_package.py --fallback
+python dev-tools\build_package.py --fallback
 ```
 
 ### 3. Rust Cryptography Backend
@@ -78,7 +78,13 @@ python build_package.py --fallback
 To build only the Rust cryptography backend:
 
 ```powershell
-python secure_build_fix.py
+python dev-tools\build_rust.py
+```
+
+To build and validate the cryptography backend:
+
+```powershell
+python dev-tools\secure_build_fix.py
 ```
 
 This script will:
@@ -88,32 +94,41 @@ This script will:
 
 ## Development Environment
 
-For development, you can use the included batch file:
+For initial setup, use the setup script:
 
 ```powershell
-# Run TrueFA in development mode
-.\run_dev.bat
+# Set up development environment
+python dev-tools\setup.py
 ```
 
 This script will:
-1. Create a virtual environment if it doesn't exist
-2. Install required dependencies
-3. Set development environment variables
-4. Run the application in development mode
+1. Create necessary directories
+2. Build the Rust crypto library
+3. Install required dependencies
+4. Set up DLL paths
+
+## Release Process
+
+To create a release version with proper versioning:
+
+```powershell
+# Run release with PowerShell script (recommended)
+powershell -ExecutionPolicy Bypass -File ".\ez-release1\release.ps1" -VersionType [major|minor|patch|none]
+```
 
 ## Build Output
 
 After a successful build, you will find the following files in the `dist` directory:
 
-- **Portable EXE**: `dist\TrueFA.exe` (or `dist\TrueFA_console.exe` if built with console)
-- **Installer**: `dist\TrueFA_Setup_1.0.0.exe`
+- **Portable EXE**: `dist\TrueFA-Py.exe` (or `dist\TrueFA-Py_console.exe` if built with console)
+- **Installer**: `dist\TrueFA-Py_Setup_{version}.exe`
 
 ## Troubleshooting
 
 If you encounter build issues:
 
 1. **Missing DLL Functions**
-   - Run `python secure_build_fix.py` to rebuild the Rust cryptography DLL
+   - Run `python dev-tools\secure_build_fix.py` to rebuild the Rust cryptography DLL
    - Check the console output for specific function names that are missing
 
 2. **PyInstaller Errors**
