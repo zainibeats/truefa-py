@@ -305,8 +305,8 @@ class TwoFactorAuth:
                 if not self.is_generating:
                     print()  # Add newline
             
-            # Generate TOTP with proper secret
-            totp = pyotp.TOTP(base64.b32encode(raw_value.encode('utf-8')).decode('utf-8'))
+            # Generate TOTP with the secret directly - the secret from QR codes is already encoded
+            totp = pyotp.TOTP(raw_value)
             code = totp.now()
             
             if return_remaining:
