@@ -25,7 +25,7 @@ import argparse
 APP_NAME = "TrueFA-Py"
 APP_VERSION = "0.1.0"
 AUTHOR = "Cheyenne Z"
-COPYRIGHT = "Copyright © 2025 Cheyenne Zaini"
+COPYRIGHT = "Copyright (c) 2025 Cheyenne Zaini"
 DESCRIPTION = "Secure Two-Factor Authentication Tool"
 WEBSITE = "https://github.com/zainibeats/truefa-py"
 
@@ -39,8 +39,8 @@ def setup_parser():
                         help="Build portable version only")
     parser.add_argument("--installer", action="store_true", 
                         help="Build installer version only")
-    parser.add_argument("--console", action="store_true", 
-                        help="Include console window (for debugging)")
+    parser.add_argument("--no-console", action="store_true", 
+                        help="Hide console window (not recommended for CLI applications)")
     parser.add_argument("--fallback", action="store_true", 
                         help="Force use of Python fallback implementation")
     return parser
@@ -96,10 +96,10 @@ def check_icon():
     """Check if the icon file exists and is valid."""
     if not os.path.exists(ICON_PATH):
         print(f"Warning: Icon file not found at {ICON_PATH}")
-        return False
+        return None
     
     print(f"✓ Using icon: {ICON_PATH}")
-    return True
+    return ICON_PATH
 
 def check_dll():
     """Check if the Rust DLL exists and has the required functions."""
@@ -179,7 +179,8 @@ def create_spec_file(icon_path, use_console=True, one_file=True):
     """Create a PyInstaller spec file."""
     print("Creating PyInstaller spec file...")
     
-    output_name = f"{APP_NAME}_console" if use_console else APP_NAME
+    # Always use the main app name without the _console suffix since there's no GUI version
+    output_name = APP_NAME
     
     spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
 
@@ -191,7 +192,6 @@ a = Analysis(
     binaries=[('truefa_crypto\\\\truefa_crypto.dll', '.')],
     datas=[
         ('assets/*', 'assets'),
-        ('images/*', 'images'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -330,8 +330,8 @@ def create_nsis_script(icon_path, has_console=False):
     """Create an NSIS script for the installer."""
     print("Creating NSIS installer script...")
     
-    # Determine EXE name based on console mode
-    exe_name = f"{APP_NAME}_console.exe" if has_console else f"{APP_NAME}.exe"
+    # Always use the main app name without suffix since there's no GUI version
+    exe_name = f"{APP_NAME}.exe"
     
     nsis_script = f"""
 ; TrueFA Installer Script
@@ -433,40 +433,38 @@ def build_installer(nsis_script):
     """Build the installer using NSIS."""
     print("Building installer with NSIS...")
     
-    nsis_paths = [
-        r"C:\Program Files (x86)\NSIS\makensis.exe",
-        r"C:\Program Files\NSIS\makensis.exe"
-    ]
-    
-    nsis_exe = None
-    for path in nsis_paths:
-        if os.path.exists(path):
-            nsis_exe = path
-            break
-    
-    if not nsis_exe:
-        print("Error: NSIS not found")
-        return False
-    
     try:
-        # Run NSIS
-        result = subprocess.run(
-            [nsis_exe, nsis_script],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        
-        print("✓ NSIS installer build completed successfully")
-        return True
+        # Find NSIS
+        if os.name == 'nt':  # Windows
+            nsis_paths = [
+                r"C:\Program Files (x86)\NSIS\makensis.exe",
+                r"C:\Program Files\NSIS\makensis.exe"
+            ]
+            
+            nsis_exe = None
+            for path in nsis_paths:
+                if os.path.exists(path):
+                    nsis_exe = path
+                    break
+                    
+            if not nsis_exe:
+                print("NSIS not found. Please install it and try again.")
+                return False
+                
+            # Run NSIS
+            subprocess.run([nsis_exe, nsis_script], check=True)
+            
+            print("✓ NSIS installer build completed successfully")
+            return True
+        else:
+            print("NSIS building is only supported on Windows.")
+            return False
     except subprocess.CalledProcessError as e:
         print(f"Error building installer: {e}")
-        print(f"Output: {e.stdout}")
-        print(f"Error: {e.stderr}")
         return False
 
 def main():
-    """Main function for building the application."""
+    """Main entry point for the build script."""
     parser = setup_parser()
     args = parser.parse_args()
     
@@ -477,88 +475,56 @@ def main():
     # Check requirements
     if not check_requirements():
         return 1
-    
-    # Check icon
-    icon_exists = check_icon()
-    icon_path = ICON_PATH if icon_exists else ""
-    
-    # Check DLL if not using fallback
-    if args.fallback:
-        use_fallback = True
-        print("Using Python fallback implementation as requested")
-    else:
-        dll_valid, dll_path = check_dll()
-        use_fallback = not dll_valid
         
-        if use_fallback:
-            print("Warning: Using Python fallback implementation due to DLL issues")
-            response = input("Continue with fallback implementation? (y/n): ").lower()
-            if response != 'y':
-                print("Build aborted")
-                return 1
-    
-    # Setup environment
+    # Check for icon
+    icon_path = check_icon()
+    if not icon_path:
+        print("Icon not found or invalid.")
+        return 1
+        
+    # Check for DLL
+    dll_available, dll_path = check_dll()
+        
+    # Set up environment (use fallback if requested)
+    use_fallback = args.fallback or not dll_available
     setup_environment(use_fallback)
     
-    # Create version information file
+    # Create version file
     create_version_file()
+
+    print("=" * 40)
     
-    # Determine what to build
-    build_portable = args.portable or not args.installer
-    build_installer = args.installer or not args.portable
+    # Get build mode parameters
+    use_console = not args.no_console  # Default to console mode
+    portable = args.portable
+    should_build_installer = args.installer
+    one_file = True  # Default to one-file build
     
-    # Build portable EXE if requested
-    if build_portable:
-        print("\n" + "=" * 40)
-        print("Building Portable Executable")
-        print("=" * 40)
-        
-        # Create spec file for console/windowed mode
-        use_console = args.console
-        spec_file = create_spec_file(icon_path, use_console=use_console, one_file=True)
-        
-        # Build the executable
+    # Build the spec file and executable
+    if portable or should_build_installer:
+        spec_file = create_spec_file(icon_path, use_console, one_file)
+        if not spec_file:
+            return 1
+            
         if not build_executable(spec_file):
-            print("Failed to build portable executable")
             return 1
-        
-        print(f"Portable {'console ' if use_console else ''}executable created successfully!")
     
-    # Build installer if requested
-    if build_installer:
-        print("\n" + "=" * 40)
-        print("Building Installer")
-        print("=" * 40)
-        
-        # Create spec file for windowed mode (installer should use windowed version)
-        use_console = args.console
-        spec_file = create_spec_file(icon_path, use_console=use_console, one_file=True)
-        
-        # Build the executable for installer
-        if not build_executable(spec_file):
-            print("Failed to build executable for installer")
-            return 1
-        
-        # Create NSIS script
-        nsis_script = create_nsis_script(icon_path, has_console=use_console)
-        
-        # Build the installer
-        if not build_installer(nsis_script):
-            print("Failed to build installer")
-            return 1
-        
-        print("Installer created successfully!")
-    
+    # Success message
     print("\n" + "=" * 60)
     print("Build completed successfully!")
     print("=" * 60)
     
-    if build_portable:
-        portable_exe = f"dist\\{APP_NAME}_console.exe" if args.console else f"dist\\{APP_NAME}.exe"
+    # Always use the main app name without suffix
+    portable_exe = f"dist\\{APP_NAME}.exe"
+    
+    if portable:
         print(f"Portable Executable: {portable_exe}")
     
-    if build_installer:
-        print(f"Installer: dist\\{APP_NAME}_Setup_{APP_VERSION}.exe")
+    if should_build_installer:
+        # Create and build installer
+        nsis_script = create_nsis_script(icon_path, use_console)
+        if nsis_script and build_installer(nsis_script):
+            print(f"Installer: dist\\{APP_NAME}_Setup_{APP_VERSION}.exe")
     
     return 0
 
