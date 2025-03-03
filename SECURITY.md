@@ -41,6 +41,8 @@ To prevent security bugs, TrueFA implements multiple validation checks:
 2. **State Consistency Verification**: Ensures vault unlock state is consistently tracked
 3. **Double Authentication Verification**: Confirms both vault and application-level authentication
 4. **Secure Default Implementation**: Falls back to secure Python implementations when Rust is unavailable
+5. **Directory Permission Validation**: Tests write permissions before using a directory
+6. **Windows-Specific ACL Management**: Uses Windows security APIs for proper permissions on secure directories
 
 ## Implementation Details
 
@@ -50,6 +52,7 @@ To prevent security bugs, TrueFA implements multiple validation checks:
    - Primary vault management
    - Password verification
    - State management
+   - Directory selection and validation
 
 2. **SecureStorage Class**:
    - Secret encryption/decryption
@@ -57,9 +60,17 @@ To prevent security bugs, TrueFA implements multiple validation checks:
    - Authentication handling
 
 3. **Rust Cryptographic Module**:
-   - Secure memory operations
+   - Secure memory operations (with Python fallback)
    - Random number generation
    - Cryptographic primitives
+
+### Directory Security
+
+TrueFA implements enhanced directory security:
+- Windows ACLs configured to limit access to the current user only
+- Test file creation/deletion to verify write permissions
+- Automatic fallback paths when permissions cannot be secured
+- Dynamic path selection based on application mode (portable vs. installed)
 
 ### Upgrading Legacy Vaults
 
