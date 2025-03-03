@@ -23,43 +23,38 @@ The Python fallback implementation ensures that TrueFA-Py can function even when
 - Uses standard Python cryptographic libraries
 - Maintains API compatibility with the Rust implementation
 - Automatically activates when the Rust library is not available
+- Function-level fallback for specific missing operations
 
 ## Fixed Issues and Improvements
 
 The following issues were resolved in the cryptography module:
 
-### DLL Integration
-- Fixed export naming conventions to ensure C ABI compatibility
-- Implemented proper memory management for cross-language boundary
-- Added validation of DLL functions before use
-- Established robust error handling for missing functions
+### DLL Loading Strategy
+- Implemented intelligent DLL search paths based on runtime environment
+- Prioritizes PyInstaller bundle paths in packaged applications
+- Falls back to standard locations in development environments
+- Logs detailed search path information for troubleshooting
+- Early verification of DLL compatibility before use
 
 ### Function Exports
 - Added prefix `c_` to all exported functions to clarify C ABI boundary
-- Ensured all required functions are properly exported:
-  - `c_secure_random_bytes`
-  - `c_is_vault_unlocked`
-  - `c_vault_exists`
-  - `c_create_vault`
-  - `c_unlock_vault`
-  - `c_lock_vault`
-  - `c_generate_salt`
-  - `c_derive_master_key`
-  - `c_encrypt_master_key`
-  - `c_decrypt_master_key`
-  - `c_verify_signature`
-  - `c_create_secure_string`
+- Implemented partial function loading with targeted fallbacks
+- Core functions include:
+  - `c_secure_random_bytes` (Rust implementation)
+  - `c_create_secure_string` (Rust implementation)
+  - Other functions with Python fallbacks as needed
 
 ### SecureString Implementation
-- Added proper memory protection for sensitive string data
-- Implemented automatic cleanup when strings are no longer needed
-- Created consistent API between Rust and Python implementations
+- Added hybrid implementation approach for secure string handling
+- Rust implementation for core operations when available
+- Automatic fallback to Python implementation for unavailable functions
+- Consistent API between implementations
 
 ### Build Process
-- Created enhanced build scripts with automatic validation
-- Added DLL verification to ensure all required functions are available
-- Implemented automatic copying of DLL to required locations
-- Added environment variable control for fallback behavior
+- Enhanced build scripts with runtime environment detection
+- Support for both portable and installed application modes
+- Automatic DLL validation during build process
+- Streamlined packaging for Windows environments
 
 ## Usage
 
@@ -70,6 +65,17 @@ The module is designed to be loaded with proper fallback behavior:
 ```python
 # Import the crypto module with automatic fallback
 from src.truefa_crypto import secure_random_bytes, create_vault, unlock_vault
+```
+
+### Environment Detection
+
+The module automatically detects the runtime environment:
+
+```python
+# Current environment will be detected automatically
+# - PyInstaller bundle (portable or installed)
+# - Development environment
+# - CI/CD pipeline
 ```
 
 ### Controlling Implementation
