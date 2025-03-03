@@ -8,7 +8,6 @@ a = Analysis(
     binaries=[('truefa_crypto\\truefa_crypto.dll', '.')],
     datas=[
         ('assets/*', 'assets'),
-        ('images/*', 'images'),
     ],
     hiddenimports=[],
     hookspath=[],
