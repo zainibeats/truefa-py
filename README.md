@@ -87,7 +87,7 @@ truefa-py/
 
 ### Enhanced Crypto Architecture
 - Native Rust crypto module for high-performance security operations
-- Automatic fallback to Python implementation when native module unavailable
+- Automatic fallback to Python implementation when native module unavailable or specific functions missing
 - Memory-safe implementation with Rust's security guarantees
 - Envelope encryption for enhanced security
 
@@ -95,7 +95,21 @@ truefa-py/
 - **Primary Vault Location**: `C:\Users\<username>\.truefa\.vault\`
 - **Cryptographic Materials**: `C:\Users\<username>\.truefa\.crypto\`
 - **Vault Metadata**: Stored in `vault.meta` with salt and password verification hash
-- **Fallback Locations**: Multiple path resolution for reliability
+- **Fallback Locations**: Multiple path resolution with automatic directory creation and permission verification
+
+### Data Storage Locations
+
+#### Portable Version
+- **User Data**: Stored in `C:\Users\<username>\.truefa\`
+- **Secure Data**: Stored in `C:\Users\<username>\.truefa\.crypto\`
+- **QR Code Images**: Stored in the `images` folder next to the executable
+
+#### Installed Version
+- **User Data**: Stored in `C:\Users\<username>\AppData\Roaming\TrueFA-Py\`
+- **Secure Data**: Stored in `C:\Users\<username>\AppData\Local\TrueFA-Py\Secure\crypto\`
+- **QR Code Images**: Stored in `C:\Users\<username>\Documents\TrueFA-Py\images\`
+
+> **Note**: The application uses a robust directory selection algorithm with proper permission testing and fallback paths. If a preferred directory cannot be accessed, the application automatically falls back to a user-accessible location.
 
 ### Encryption and Storage
 - AES-256-GCM authenticated encryption (when available)
