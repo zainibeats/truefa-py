@@ -23,6 +23,30 @@ import subprocess
 APP_NAME = "TrueFA-Py"
 APP_VERSION = "0.1.0"
 
+# Flag to determine if we're running from an installed location
+# that might have permission restrictions
+def is_running_from_program_files():
+    """
+    Check if the application is running from a restricted directory like Program Files.
+    
+    Returns:
+        bool: True if running from a directory that might have permission issues, False otherwise
+    """
+    if not getattr(sys, 'frozen', False):
+        return False  # Not a frozen app, so not installed
+        
+    executable_path = os.path.abspath(sys.executable).lower()
+    
+    # Check for common restricted directories
+    restricted_paths = [
+        "program files",
+        "program files (x86)",
+        "windows",
+        "system32"
+    ]
+    
+    return any(restricted in executable_path for restricted in restricted_paths)
+
 # Determine the correct data directory based on platform
 def get_data_directory():
     """
@@ -39,6 +63,7 @@ def get_data_directory():
     Returns:
         str: Full path to the application data directory
     """
+    # Always use user directory for data storage, regardless of installation type
     if platform.system() == "Windows":
         # Use %APPDATA% on Windows (C:\Users\username\AppData\Roaming\TrueFA)
         base_dir = os.environ.get('APPDATA')
@@ -82,16 +107,30 @@ def get_secure_data_directory():
     - Validation of permissions after creation
     """
     if platform.system() == "Windows":
-        # On Windows, we'll use %LOCALAPPDATA% with restricted ACLs
+        # On Windows, we'll use %LOCALAPPDATA% with restrictive ACLs
         # This is better than APPDATA because it's not synced and can have stricter permissions
         base_dir = os.environ.get('LOCALAPPDATA')
         if not base_dir:
+            # Fallback if LOCALAPPDATA is not available
             base_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local')
         
         secure_dir = os.path.join(base_dir, APP_NAME, "Secure")
         
-        # Create the secure directory if it doesn't exist
+        # Create the directory if it doesn't exist
         os.makedirs(secure_dir, exist_ok=True)
+        
+        # Test if we can write to this directory (important for installed apps)
+        test_file = os.path.join(secure_dir, ".test")
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+        except Exception as e:
+            # If we can't write to LocalAppData, fall back to user home directory
+            print(f"Warning: Cannot write to {secure_dir}: {e}")
+            secure_dir = os.path.join(os.path.expanduser('~'), '.truefa', '.secure')
+            os.makedirs(secure_dir, exist_ok=True)
+            print(f"Using fallback secure directory: {secure_dir}")
         
         # Apply restrictive ACLs to the secure directory
         # This will restrict access to only the owner account
