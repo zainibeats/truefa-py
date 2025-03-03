@@ -72,8 +72,26 @@ class TwoFactorAuth:
             app_dir = os.path.dirname(sys.executable)
             bundle_dir = getattr(sys, '_MEIPASS', app_dir)
             print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
-            # Set images directory relative to the executable
-            self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
+            
+            # First check if we have write permission to the app directory
+            test_file = os.path.join(app_dir, 'images', '.test')
+            try:
+                # Create images directory if it doesn't exist
+                if not os.path.exists(os.path.join(app_dir, 'images')):
+                    os.makedirs(os.path.join(app_dir, 'images'), exist_ok=True)
+                
+                # Test if directory is writable
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+                # We can write to the directory, use the app's images folder
+                self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
+            except Exception:
+                # Can't write to program directory, use user's documents folder instead
+                user_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'TrueFA-Py', 'images')
+                os.makedirs(user_dir, exist_ok=True)
+                self.images_dir = os.getenv('QR_IMAGES_DIR', user_dir)
+                print(f"Using personal images directory in Documents folder: {user_dir}")
         else:
             # Running in normal Python environment
             self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
