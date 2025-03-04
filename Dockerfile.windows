@@ -1,0 +1,80 @@
+# Dockerfile.windows
+# Windows container for testing TrueFA-Py executables in a clean environment
+# Note: This requires Docker Desktop with Windows containers enabled
+
+# Use Windows Server Core as the base image
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Set shell to PowerShell
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Install Python 3.10 - matching the version you're likely using for development
+RUN powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe' -OutFile 'C:\\python-3.10.11-amd64.exe'"
+RUN powershell -Command "Start-Process 'C:\\python-3.10.11-amd64.exe' -ArgumentList '/quiet InstallAllUsers=1 PrependPath=1 Include_test=0' -Wait"
+RUN powershell -Command "Remove-Item 'C:\\python-3.10.11-amd64.exe' -Force"
+
+# Install Visual C++ Redistributable (which is often needed for Python extensions)
+RUN powershell -Command "Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile 'C:\\vc_redist.x64.exe'"
+RUN powershell -Command "Start-Process 'C:\\vc_redist.x64.exe' -ArgumentList '/quiet /norestart' -Wait"
+RUN powershell -Command "Remove-Item 'C:\\vc_redist.x64.exe' -Force"
+
+# Add Python to the PATH
+RUN setx /M PATH "%PATH%;C:\Program Files\Python310;C:\Program Files\Python310\Scripts"
+
+# Create a test user account (similar to a regular Windows user)
+RUN net user testuser Password123! /add
+RUN net localgroup Administrators testuser /add
+
+# Create a directory for the application
+RUN mkdir C:\app
+
+# Copy application files
+COPY . C:\app\
+
+# Install pip dependencies
+RUN powershell -Command "cd C:\app && python -m pip install --upgrade pip"
+RUN powershell -Command "cd C:\app && pip install -r requirements.txt"
+RUN powershell -Command "cd C:\app && pip install pywin32"
+
+# Create a script to run the application with output
+RUN powershell -Command "Add-Content -Path C:\run_test.ps1 -Value @'\n\
+Write-Host \"Starting TrueFA Test Run\"\n\
+Write-Host \"=============================\"\n\
+Write-Host \"Test environment: Windows Server Core\"\n\
+Write-Host \"Current directory: $(Get-Location)\"\n\
+Write-Host \"System info: $(Get-ComputerInfo | Select-Object WindowsProductName, OsVersion | Format-List | Out-String)\"\n\
+Write-Host \"Python version: $(python --version 2>&1)\"\n\
+\n\
+# Make sure we're starting with a clean environment\n\
+if (Test-Path \"$env:USERPROFILE\\.truefa\") {\n\
+    Write-Host \"Cleaning up previous .truefa directory\"\n\
+    Remove-Item -Path \"$env:USERPROFILE\\.truefa\" -Recurse -Force -ErrorAction SilentlyContinue\n\
+}\n\
+\n\
+try {\n\
+    # First try running the executable directly\n\
+    $exePath = Get-ChildItem -Path \"C:\\app\\dist\" -Filter \"*.exe\" -Recurse | Where-Object { -not $_.Name.Contains(\"Setup\") } | Select-Object -First 1 -ExpandProperty FullName\n\
+    \n\
+    if ($exePath) {\n\
+        Write-Host \"Found executable: $exePath\"\n\
+        Write-Host \"Running executable...\"\n\
+        Write-Host \"=============================\"\n\
+        & $exePath\n\
+    } else {\n\
+        Write-Host \"No executable found in dist directory.\"\n\
+    }\n\
+} catch {\n\
+    Write-Host \"Error running executable: $_\"\n\
+}\n\
+\n\
+# Check if DLL crash marker was created\n\
+if (Test-Path \"$env:USERPROFILE\\.truefa\\.dll_crash\") {\n\
+    Write-Host \"DLL crash marker found. Contents:\"\n\
+    Get-Content \"$env:USERPROFILE\\.truefa\\.dll_crash\"\n\
+}\n\
+\n\
+Write-Host \"Test completed\"\n\
+'@"
+
+# Set the entrypoint to run the test script
+ENTRYPOINT ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "C:\\run_test.ps1"]
