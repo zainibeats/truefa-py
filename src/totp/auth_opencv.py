@@ -24,6 +24,7 @@ import time
 from PIL import Image
 import urllib.parse
 import subprocess
+import getpass  # Add getpass module for secure password input
 from ..security.secure_string import SecureString
 from ..security.secure_storage import SecureStorage
 import base64
@@ -418,11 +419,11 @@ class TwoFactorAuth:
         if not self.storage.vault.is_initialized():
             # We need to create the vault first
             print("\nThis is the first time saving a secret. You need to set up a vault password.")
-            vault_password = input("Enter a vault password to secure your secrets: ")
+            vault_password = getpass.getpass("Enter a vault password to secure your secrets: ")
             if not vault_password:
                 return "Vault password cannot be empty"
                 
-            confirm_password = input("Confirm vault password: ")
+            confirm_password = getpass.getpass("Confirm vault password: ")
             if vault_password != confirm_password:
                 return "Passwords do not match"
                 
@@ -451,7 +452,7 @@ class TwoFactorAuth:
         elif self.storage.vault.is_initialized() and not self.storage.vault.is_unlocked():
             # We need to unlock the vault
             print("\nVault is locked. Please unlock it to save your secret.")
-            vault_password = input("Enter your vault password: ")
+            vault_password = getpass.getpass("Enter your vault password: ")
             if not vault_password:
                 return "Vault password cannot be empty"
                 

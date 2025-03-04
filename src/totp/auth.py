@@ -20,12 +20,14 @@ import sys
 import signal
 import platform
 import re
+import time
+import base64
+import getpass  # Add getpass module for secure password input
 from pathlib import Path
 import pyotp
-import time
+import urllib.parse
 from PIL import Image
 from pyzbar.pyzbar import decode
-import urllib.parse
 from ..security.secure_string import SecureString
 from ..security.secure_storage import SecureStorage
 
@@ -293,13 +295,13 @@ class TwoFactorAuth:
                 if not self.storage.vault.is_initialized():
                     print(f"\nYou need to set up a vault with a vault password and master password to {purpose}")
                     while True:
-                        vault_password = input("Enter vault password (this unlocks the entire vault): ")
+                        vault_password = getpass.getpass("Enter vault password (this unlocks the entire vault): ")
                         if not vault_password:
                             return False
-                        master_password = input("Enter master password (this encrypts individual secrets): ")
+                        master_password = getpass.getpass("Enter master password (this encrypts individual secrets): ")
                         if not master_password:
                             return False
-                        confirm_master = input("Confirm master password: ")
+                        confirm_master = getpass.getpass("Confirm master password: ")
                         if master_password != confirm_master:
                             print("Master passwords don't match. Try again.")
                             continue
@@ -309,7 +311,7 @@ class TwoFactorAuth:
                     print(f"\nVault is locked. Please enter your passwords to {purpose}")
                     attempts = 3
                     while attempts > 0:
-                        vault_password = input("Enter vault password: ")
+                        vault_password = getpass.getpass("Enter vault password: ")
                         if self.storage.verify_master_password(None, vault_password):
                             return True
                         attempts -= 1
@@ -321,10 +323,10 @@ class TwoFactorAuth:
                 if not self.storage.has_master_password():
                     print(f"\nYou need to set up a master password to {purpose}")
                     while True:
-                        password = input("Enter new master password: ")
+                        password = getpass.getpass("Enter new master password: ")
                         if not password:
                             return False
-                        confirm = input("Confirm master password: ")
+                        confirm = getpass.getpass("Confirm master password: ")
                         if password == confirm:
                             self.storage.set_master_password(password)
                             return True
@@ -333,7 +335,7 @@ class TwoFactorAuth:
                     print(f"\nStorage is locked. Please enter your master password to {purpose}")
                     attempts = 3
                     while attempts > 0:
-                        password = input("Enter master password: ")
+                        password = getpass.getpass("Enter master password: ")
                         if self.storage.verify_master_password(password):
                             return True
                         attempts -= 1

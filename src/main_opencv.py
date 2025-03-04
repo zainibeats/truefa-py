@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 import urllib.parse
 import traceback
+import getpass  # Add getpass module for secure password input
 
 # Import our configuration
 try:
@@ -107,7 +108,7 @@ def main():
                             if secure_storage.vault.is_initialized():
                                 # Try to auto-unlock if needed
                                 if not secure_storage.is_unlocked:
-                                    master_password = input("Enter your vault master password to save this secret: ")
+                                    master_password = getpass.getpass("Enter your vault master password to save this secret: ")
                                     if not secure_storage.unlock(master_password):
                                         print("Failed to unlock vault. Secret loaded but not saved.")
                                     else:
@@ -175,7 +176,7 @@ def main():
                         if secure_storage.vault.is_initialized():
                             # Try to auto-unlock if needed
                             if not secure_storage.is_unlocked:
-                                master_password = input("Enter your vault master password to save this secret: ")
+                                master_password = getpass.getpass("Enter your vault master password to save this secret: ")
                                 if not secure_storage.unlock(master_password):
                                     print("Failed to unlock vault. Secret loaded but not saved.")
                                 else:
@@ -239,7 +240,7 @@ def main():
                         # If we have a vault, prompt for secrets from it
                         if has_vault:
                             if not secure_storage.is_unlocked:
-                                master_password = input("Enter your vault master password: ")
+                                master_password = getpass.getpass("Enter your vault master password: ")
                                 
                                 if not secure_storage.unlock(master_password):
                                     print("Invalid password for vault")
@@ -352,12 +353,12 @@ def main():
                         if not secure_storage.vault.is_initialized():
                             print("\nYou'll need to create a master password for your TrueFA vault.")
                             print("This password will protect all your secret keys.")
-                            master_password = input("Enter master password: ")
+                            master_password = getpass.getpass("Enter master password: ")
                             if not master_password:
                                 print("Master password cannot be empty!")
                                 continue
                                 
-                            confirm_master = input("Confirm master password: ")
+                            confirm_master = getpass.getpass("Confirm master password: ")
                             if master_password != confirm_master:
                                 print("Master passwords don't match. Try again.")
                                 continue
@@ -370,7 +371,7 @@ def main():
                             print("Vault created successfully!")
                         elif not secure_storage.is_unlocked:
                             # Vault exists but is locked, prompt for password
-                            master_password = input("Enter your vault master password: ")
+                            master_password = getpass.getpass("Enter your vault master password: ")
                             if not secure_storage.unlock(master_password):
                                 print("Failed to unlock vault with the provided password.")
                                 continue
