@@ -1,6 +1,6 @@
 # TrueFA-Py Documentation
 
-This directory contains comprehensive documentation for the TrueFA-Py project.
+This directory contains comprehensive documentation for the TrueFA-Py project
 
 ## Documentation Index
 
@@ -9,14 +9,6 @@ This directory contains comprehensive documentation for the TrueFA-Py project.
 - [BUILD_GUIDE.md](BUILD_GUIDE.md) - Detailed instructions for building TrueFA-Py
 - [SECURITY_GUIDE.md](SECURITY_GUIDE.md) - Security model and cryptography implementation
 - [TESTING_GUIDE.md](TESTING_GUIDE.md) - Testing infrastructure and results
-
-### Legacy Documentation
-
-These documents are kept for reference but have been consolidated into the guides above:
-
-- [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) - Legacy build instructions
-- [SECURITY_CRYPTO.md](SECURITY_CRYPTO.md) - Legacy security documentation
-- [TESTING_SUMMARY.md](TESTING_SUMMARY.md) - Legacy testing summary
 
 ## Project Structure
 
