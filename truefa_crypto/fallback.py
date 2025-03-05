@@ -97,9 +97,24 @@ def lock_vault() -> None:
 
 def generate_salt() -> str:
     """Generate a cryptographically secure random salt for key derivation."""
-    print(f"DUMMY CALL: generate_salt((), {{}})")
-    salt = secrets.token_bytes(16)
-    return base64.b64encode(salt).decode('utf-8')
+    print(f"Running Python fallback implementation of generate_salt")
+    try:
+        # Try to use the most secure method available (secrets)
+        import secrets
+        salt = secrets.token_bytes(32)  # Use 32 bytes (256 bits) for stronger security
+        print("Generated salt using secrets module")
+    except Exception as e:
+        # If secrets module fails, fall back to os.urandom
+        print(f"Secrets module failed: {e}, falling back to os.urandom")
+        import os
+        salt = os.urandom(32)
+        print("Generated salt using os.urandom")
+    
+    # Encode as base64 for string representation
+    import base64
+    result = base64.b64encode(salt).decode('utf-8')
+    print(f"Salt generation complete: {result[:5]}...")
+    return result
 
 def derive_master_key(master_password: str, salt_b64: str) -> str:
     """Derive a master key from a password and salt using a KDF."""

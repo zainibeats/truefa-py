@@ -2,7 +2,50 @@
 
 This directory contains various build scripts and development utilities for the TrueFA-Py project. These tools are used during development and are not required for running the application.
 
-## Build Scripts
+## Directory Structure
+
+The development tools are organized into the following directories:
+
+- `build-tools/`: Scripts and files related to building the application
+- `docker-tests/`: Docker configuration and test scripts 
+- `vm-testing/`: Scripts for testing in virtual machine environments
+- Root directory: Core development utilities and test scripts
+
+## Build Tools (`/build-tools`)
+
+### PyInstaller Specification Files
+- `TrueFA-Py.spec`: PyInstaller spec for the windowed application
+- `TrueFA-Py_console.spec`: PyInstaller spec for the console application
+
+### Build and Packaging Scripts
+- `cleanup.ps1`: Cleans build artifacts and temporary files
+- `create_windows_package.ps1`: Creates a Windows distribution package
+- `ez-release.ps1`: Handles the release process with versioning
+- `file_version_info.txt`: Windows version information for the executable
+- `installer.nsi`: NSIS installer script
+
+## Docker Testing (`/docker-tests`)
+
+### Docker Configuration Files
+- `Dockerfile.full`: Complete Docker environment for testing
+- `Dockerfile.minimal`: Minimal Docker configuration 
+- `Dockerfile.simple`: Simple Docker configuration for basic tests
+
+### Docker Test Scripts
+- `test_in_windows_container.bat`: Test the application in a Windows container
+- `test_minimal_container.bat`: Test using the minimal container
+- `test_simple_container.bat`: Test using the simple container
+- `test_script.ps1`: PowerShell script run within the Docker container
+
+## VM Testing (`/vm-testing`)
+
+### VM Test Scripts
+- `fresh_build_test.ps1`: Creates a fresh build and test environment
+- `test_exe_directly.ps1`: Tests the executable directly
+- `prepare_vm_test.ps1`: Prepares files for VM testing
+- `full_test_script.ps1`: Comprehensive test script for VMs
+
+## Core Build Scripts
 
 ### build_package.py
 A comprehensive build script for creating both portable executables and installers. This script:
@@ -60,9 +103,18 @@ Set up script for development environment:
 python dev-tools/setup.py
 ```
 
-## Release Tools
+## Test Scripts
 
-The release tools have been moved to the `ez-release1` directory and are managed separately. Please refer to the PowerShell release scripts in that directory for handling the release process.
+The repository contains various test scripts to ensure the application works correctly in different environments:
+
+- `test_crypto_loading.py`: Tests loading of the cryptographic module
+- `test_exe_compatibility.py`: Tests executable compatibility
+- `test_fixes.py`: Tests fixes for various issues
+- `test_secure_dirs.py`: Tests secure directory handling
+- `test_secure_storage.py`: Tests secure storage functionality
+- `test_secure_string.py`: Tests secure string handling
+- `test_vault_creation.py`: Tests vault creation and management
+- `vault_test.py`: Tests vault functionality
 
 ## Development Workflow
 
@@ -70,8 +122,8 @@ The release tools have been moved to the `ez-release1` directory and are managed
 2. **Rust Development**: After modifying Rust code, use `build_rust.py` to rebuild the crypto library
 3. **Building for Testing**: Use `build.ps1` with appropriate options for quick development builds
 4. **Final Builds**: Use `build_package.py` for creating optimized release builds
-5. **Release Process**: Use the PowerShell scripts in `ez-release1` to create versioned releases
+5. **Testing**: Use appropriate test scripts based on your test environment (Docker, VM, local)
 
 ## Notes
 
-- For contributions or questions about these tools, please contact the project maintainers 
+- For contributions or questions about these tools, please contact the project maintainers

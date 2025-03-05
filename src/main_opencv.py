@@ -26,6 +26,7 @@ from pathlib import Path
 import urllib.parse
 import traceback
 import getpass  # Add getpass module for secure password input
+import argparse
 
 # Import our configuration
 try:
@@ -442,4 +443,20 @@ def main():
         auth.cleanup()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="TrueFA-Py OpenCV Edition")
+    parser.add_argument("--use-fallback", action="store_true", help="Force use of Python fallback for crypto operations")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    args = parser.parse_args()
+    
+    if args.use_fallback:
+        print("Forcing use of Python fallback for crypto operations")
+        # Set environment variable before imports
+        import os
+        os.environ["TRUEFA_USE_FALLBACK"] = "true"
+    
+    if args.debug:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+        print("Debug logging enabled")
+    
     main()
