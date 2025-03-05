@@ -149,4 +149,4 @@ For maximum security, users should:
 
 ## Reporting Security Issues
 
-Please report security vulnerabilities to [security@example.com](mailto:security@example.com) rather than creating a public issue.
+Please report security vulnerabilities to [cheyenne@czaini.net](mailto:cheyenne@czaini.net) rather than creating a public issue.
