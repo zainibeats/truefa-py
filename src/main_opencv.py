@@ -36,10 +36,10 @@ except ImportError:
     DATA_DIR = os.path.join(os.path.expanduser("~"), ".truefa")
     VAULT_FILE = os.path.join(DATA_DIR, "vault.dat")
 
-from src.security.secure_storage import SecureStorage
-from src.security.secure_string import SecureString
-from src.totp.auth_opencv import TwoFactorAuth
-from src.utils.screen import clear_screen
+from .security.secure_storage import SecureStorage
+from .security.secure_string import SecureString
+from .totp.auth_opencv import TwoFactorAuth
+from .utils.screen import clear_screen
 
 def main():
     """
