@@ -21,11 +21,8 @@ RUN mkdir -p /build/output && \
 FROM python:3.10-slim
 
 # Install system dependencies:
-# - libzbar0 & zbar-tools: Required for QR code scanning
 # - gnupg2: Required for secure export functionality
 RUN apt-get update && apt-get install -y \
-    libzbar0 \
-    zbar-tools \
     gnupg2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -104,4 +101,4 @@ ENV HOME=/home/truefa \
 WORKDIR /app
 
 # Start the application
-CMD ["python", "-m", "src.main"]
+CMD ["python", "-m", "src.main_opencv"]
