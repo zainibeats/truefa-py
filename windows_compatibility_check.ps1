@@ -110,7 +110,9 @@ function Test-DllCompatibility {
             ".\python-embed",
             "..\python-embed",
             ".\dist",
-            "..\dist"
+            "..\dist",
+            ".\rust_crypto\target\release",
+            "..\rust_crypto\target\release"
         )
         
         foreach ($path in $localDllPaths) {
@@ -127,6 +129,104 @@ function Test-DllCompatibility {
     catch {
         Write-Host "  [WARN] Error checking for DLL $DllName" -ForegroundColor Yellow
         return $false
+    }
+}
+
+# Function to check for Python installation
+function Test-PythonInstallation {
+    param (
+        [string]$Version = "3.10"
+    )
+    
+    try {
+        # Check for Python in PATH
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if ($null -ne $pythonCommand) {
+            # Check version
+            $versionOutput = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+            if ($versionOutput -like "$Version*") {
+                return @{
+                    Found = $true
+                    Path = $pythonCommand.Source
+                    Version = $versionOutput
+                }
+            }
+        }
+        
+        # Check for Python in common install locations
+        $possiblePythonPaths = @(
+            "${env:LOCALAPPDATA}\Programs\Python\Python$($Version.Replace('.', ''))\python.exe",
+            "C:\Python$($Version.Replace('.', ''))\python.exe",
+            "C:\Program Files\Python$($Version.Replace('.', ''))\python.exe",
+            "C:\Program Files (x86)\Python$($Version.Replace('.', ''))\python.exe"
+        )
+        
+        foreach ($path in $possiblePythonPaths) {
+            if (Test-Path $path) {
+                # Check version
+                $versionOutput = & $path -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+                if ($versionOutput -like "$Version*") {
+                    return @{
+                        Found = $true
+                        Path = $path
+                        Version = $versionOutput
+                    }
+                }
+            }
+        }
+        
+        # Check registry for Python installations
+        $regPaths = @(
+            "HKLM:\SOFTWARE\Python\PythonCore\$Version\InstallPath",
+            "HKCU:\SOFTWARE\Python\PythonCore\$Version\InstallPath"
+        )
+        
+        foreach ($regPath in $regPaths) {
+            if (Test-Path $regPath) {
+                $installPath = (Get-ItemProperty -Path $regPath -Name "(Default)" -ErrorAction SilentlyContinue)."(Default)"
+                if ($null -ne $installPath) {
+                    $pythonPath = Join-Path $installPath "python.exe"
+                    if (Test-Path $pythonPath) {
+                        $versionOutput = & $pythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+                        return @{
+                            Found = $true
+                            Path = $pythonPath
+                            Version = $versionOutput
+                        }
+                    }
+                }
+            }
+        }
+        
+        # Look for embedded Python in the application directory
+        $embeddedPythonPaths = @(
+            ".\python-embed\python.exe",
+            "..\python-embed\python.exe",
+            ".\dist\python-embed\python.exe",
+            "..\dist\python-embed\python.exe"
+        )
+        
+        foreach ($path in $embeddedPythonPaths) {
+            if (Test-Path $path) {
+                return @{
+                    Found = $true
+                    Path = (Get-Item $path).FullName
+                    Version = "Embedded Python"
+                    Embedded = $true
+                }
+            }
+        }
+        
+        return @{
+            Found = $false
+        }
+    }
+    catch {
+        Write-Host "  [WARN] Error checking for Python installation" -ForegroundColor Yellow
+        return @{
+            Found = $false
+            Error = $_
+        }
     }
 }
 
@@ -158,10 +258,27 @@ if ($vc2015to2022) {
     Write-Host "         TrueFA-Py may not run without this dependency" -ForegroundColor Red
     Write-Host "         Download from: https://aka.ms/vs/17/release/vc_redist.x64.exe" -ForegroundColor Cyan
     
-    # Check if the redistributable installer is in the dependencies directory
-    $vcRedistPath = ".\dependencies\VC_redist.x64.exe"
-    if (Test-Path $vcRedistPath) {
-        Write-Host "  [INFO] Visual C++ Redistributable installer found in dependencies folder" -ForegroundColor Cyan
+    # Check if the redistributable installer is in common locations
+    $vcRedistPaths = @(
+        ".\dependencies\VC_redist.x64.exe",
+        ".\tools\VC_redist.x64.exe",
+        ".\dev-tools\VC_redist.x64.exe",
+        "..\dependencies\VC_redist.x64.exe",
+        "..\tools\VC_redist.x64.exe",
+        "..\dev-tools\VC_redist.x64.exe"
+    )
+    
+    $vcRedistFound = $false
+    foreach($vcPath in $vcRedistPaths) {
+        if (Test-Path $vcPath) {
+            $vcRedistFound = $true
+            $vcRedistPath = $vcPath
+            break
+        }
+    }
+    
+    if ($vcRedistFound) {
+        Write-Host "  [INFO] Visual C++ Redistributable installer found at: $vcRedistPath" -ForegroundColor Cyan
         $installNow = Read-Host "  Would you like to install it now? (y/n)"
         if ($installNow -eq 'y') {
             try {
@@ -181,6 +298,81 @@ if ($vc2015to2022) {
                 Write-Host "  [ERROR] Failed to install Visual C++ Redistributable" -ForegroundColor Red
             }
         }
+    } else {
+        Write-Host "  [INFO] Would you like to download and install the Visual C++ Redistributable now? (y/n)" -ForegroundColor Cyan
+        $downloadNow = Read-Host
+        if ($downloadNow -eq 'y') {
+            try {
+                $tempDir = [System.IO.Path]::GetTempPath()
+                $vcRedistTempPath = Join-Path $tempDir "vc_redist.x64.exe"
+                Write-Host "  [INFO] Downloading Visual C++ Redistributable..." -ForegroundColor Cyan
+                
+                # Download using .NET WebClient
+                $webClient = New-Object System.Net.WebClient
+                $webClient.DownloadFile("https://aka.ms/vs/17/release/vc_redist.x64.exe", $vcRedistTempPath)
+                
+                if (Test-Path $vcRedistTempPath) {
+                    Write-Host "  [INFO] Installing Visual C++ Redistributable..." -ForegroundColor Cyan
+                    $process = Start-Process -FilePath $vcRedistTempPath -ArgumentList "/quiet", "/norestart" -Wait -PassThru
+                    
+                    if ($process.ExitCode -eq 0 -or $process.ExitCode -eq 3010) {
+                        if ($process.ExitCode -eq 3010) {
+                            Write-Host "  [SUCCESS] Visual C++ Redistributable installed but requires a system restart" -ForegroundColor Yellow
+                        } else {
+                            Write-Host "  [SUCCESS] Visual C++ Redistributable installed successfully" -ForegroundColor Green
+                        }
+                    } else {
+                        Write-Host "  [WARN] Visual C++ Redistributable installer returned exit code: $($process.ExitCode)" -ForegroundColor Yellow
+                    }
+                } else {
+                    Write-Host "  [ERROR] Failed to download Visual C++ Redistributable" -ForegroundColor Red
+                }
+            } catch {
+                Write-Host "  [ERROR] Failed to download/install Visual C++ Redistributable: $_" -ForegroundColor Red
+            }
+        }
+    }
+}
+Write-Host ""
+
+# Check for Python 3.10
+Write-Host "Python Installation Check:" -ForegroundColor Yellow
+$pythonCheck = Test-PythonInstallation -Version "3.10"
+
+if ($pythonCheck.Found) {
+    if ($pythonCheck.Embedded) {
+        Write-Host "  [PASS] Embedded Python found at: $($pythonCheck.Path)" -ForegroundColor Green
+        Write-Host "         This is suitable for the portable application" -ForegroundColor Green
+    } else {
+        Write-Host "  [PASS] Python $($pythonCheck.Version) found at: $($pythonCheck.Path)" -ForegroundColor Green
+    }
+} else {
+    Write-Host "  [WARN] Python 3.10 not found on this system" -ForegroundColor Yellow
+    Write-Host "         This may not be an issue if you're using the bundled application" -ForegroundColor Yellow
+    Write-Host "         If you're running from source, you need Python 3.10+" -ForegroundColor Yellow
+    Write-Host "         Download from: https://www.python.org/downloads/" -ForegroundColor Cyan
+}
+Write-Host ""
+
+# Check for environment variables used by TrueFA-Py
+Write-Host "TrueFA-Py Environment Variable Check:" -ForegroundColor Yellow
+$envVarsToCheck = @(
+    "TRUEFA_PORTABLE",
+    "TRUEFA_DATA_DIR",
+    "TRUEFA_EXPORTS_DIR",
+    "TRUEFA_CRYPTO_DIR",
+    "TRUEFA_VAULT_FILE",
+    "TRUEFA_SECURE_DIR",
+    "TRUEFA_USE_FALLBACK"
+)
+
+foreach ($envVar in $envVarsToCheck) {
+    $varValue = [Environment]::GetEnvironmentVariable($envVar)
+    
+    if ($null -ne $varValue) {
+        Write-Host "  [INFO] $envVar is set to: $varValue" -ForegroundColor Cyan
+    } else {
+        Write-Host "  [INFO] $envVar is not set (will use defaults)" -ForegroundColor Gray
     }
 }
 Write-Host ""
@@ -190,7 +382,8 @@ Write-Host "Critical DLL Check:" -ForegroundColor Yellow
 $dllsToCheck = @(
     "VCRUNTIME140.dll",
     "MSVCP140.dll",
-    "python310.dll"
+    "python310.dll",
+    "truefa_crypto.dll"
 )
 
 $missingDlls = @()
@@ -209,6 +402,35 @@ if ($missingDlls.Count -gt 0) {
     Write-Host "Some system DLLs might be missing. These may be needed by TrueFA-Py." -ForegroundColor Yellow
     Write-Host "If the application fails to start, consider installing Visual C++ Redistributable" -ForegroundColor Yellow
     Write-Host "and/or Python 3.10 if they are not already installed." -ForegroundColor Yellow
+}
+Write-Host ""
+
+# Check for Rust crypto component
+Write-Host "Rust Crypto Component Check:" -ForegroundColor Yellow
+$cryptoDll = "truefa_crypto.dll"
+$rustCryptoFound = $false
+
+$possibleCryptoPaths = @(
+    ".\rust_crypto\target\release\$cryptoDll",
+    "..\rust_crypto\target\release\$cryptoDll",
+    ".\dist\$cryptoDll",
+    "..\dist\$cryptoDll",
+    ".\$cryptoDll",
+    "..\$cryptoDll"
+)
+
+foreach ($path in $possibleCryptoPaths) {
+    if (Test-Path $path) {
+        $rustCryptoFound = $true
+        $cryptoPath = (Get-Item $path).FullName
+        Write-Host "  [PASS] Rust crypto component found at: $cryptoPath" -ForegroundColor Green
+        break
+    }
+}
+
+if (-not $rustCryptoFound) {
+    Write-Host "  [WARN] Rust crypto component ($cryptoDll) not found" -ForegroundColor Yellow
+    Write-Host "         TrueFA-Py may attempt to use Python fallback crypto implementation" -ForegroundColor Yellow
 }
 Write-Host ""
 
@@ -246,10 +468,10 @@ if ($exePath) {
     $launcherExists = $false
     $launcherPath = $null
     $possibleLaunchers = @(
-        ".\TrueFA-Py.bat",
         ".\TrueFA-Py-Launcher.bat",
-        "..\TrueFA-Py.bat",
-        "..\TrueFA-Py-Launcher.bat"
+        ".\TrueFA-Py.bat",
+        "..\TrueFA-Py-Launcher.bat",
+        "..\TrueFA-Py.bat"
     )
     
     foreach ($launcher in $possibleLaunchers) {
