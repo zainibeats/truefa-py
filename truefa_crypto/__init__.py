@@ -19,7 +19,49 @@ logger = logging.getLogger(__name__)
 
 # Define constants
 USE_FALLBACK = os.environ.get("TRUEFA_USE_FALLBACK", "").lower() in ("true", "1", "yes")
-_dll_path = None
+FALLBACK_MARKER_PATH = os.path.join(os.path.expanduser("~"), ".truefa", ".dll_crash")
+
+# Create a global to track if we've detected a Rust DLL issue
+_detected_dll_issue = False
+
+# Check if we previously detected a DLL issue
+if os.path.exists(FALLBACK_MARKER_PATH):
+    _detected_dll_issue = True
+    logger.info(f"Detected previous DLL issues (marker file: {FALLBACK_MARKER_PATH})")
+    # Don't automatically use fallback, but we'll be more cautious
+
+# Function to check if fallback is being used
+def get_fallback_status():
+    """Return whether the fallback Python implementation is currently being used."""
+    return USE_FALLBACK or _detected_dll_issue or getattr(_lib, "is_dummy", False)
+
+# Find the DLL
+def _find_dll():
+    """Find the Rust DLL in various possible locations."""
+    possible_locations = [
+        # PyInstaller bundle
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "truefa_crypto.dll"),
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "truefa_crypto", "truefa_crypto.dll"),
+        
+        # Development locations
+        os.path.join(os.getcwd(), "rust_crypto", "target", "release", "truefa_crypto.dll"),
+        os.path.join(os.getcwd(), "truefa_crypto", "truefa_crypto.dll"),
+        os.path.join(os.getcwd(), "truefa_crypto.dll"),
+        
+        # Installation locations
+        os.path.join(os.path.dirname(__file__), "truefa_crypto.dll"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "truefa_crypto.dll")
+    ]
+    
+    for location in possible_locations:
+        if os.path.exists(location):
+            print(f"DLL found at: {location}")
+            return location
+            
+    print("DLL not found in any standard location")
+    return None
+
+_dll_path = _find_dll()
 
 # Global variable for the DLL instance
 _lib = None
@@ -41,6 +83,7 @@ class _DummyModule:
     """A pure Python fallback implementation."""
     def __init__(self):
         self.is_initialized = True
+        self.is_dummy = True
         print("Using Python fallback implementations for crypto functions")
         
     def c_secure_random_bytes(self, size):
@@ -111,122 +154,161 @@ class _DummyModule:
         """Create a secure string."""
         return str(data)
 
-# Function to be called by modules using this library
-def generate_salt():
-    """Generate a random salt for key derivation."""
-    # First check if we should use fallback mode
-    if os.path.exists(os.path.join(os.path.expanduser("~"), ".truefa", ".dll_crash")):
-        logger.info("Using fallback implementation for salt generation due to .dll_crash marker")
-        import base64
-        import os as os_module
-        return base64.b64encode(os_module.urandom(32)).decode('utf-8')
+# Function to test if the DLL responds in a reasonable time
+def _test_dll_responsiveness():
+    """Test if the DLL responds to basic function calls."""
+    global _detected_dll_issue
     
-    # Otherwise, attempt DLL function with timeout
-    try:
-        # Record start time for diagnostics
-        start_time = time.time()
-        print(f"Starting salt generation at {time.strftime('%H:%M:%S')}")
+    if _detected_dll_issue:
+        logger.info("Skipping DLL test due to previously detected issues")
+        return False
         
-        # Create a sentinel file to track if generation is in progress
-        sentinel_path = os.path.join(os.path.expanduser("~"), ".truefa", ".salt_generation")
-        try:
-            os.makedirs(os.path.dirname(sentinel_path), exist_ok=True)
-            with open(sentinel_path, "w") as f:
-                f.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        except Exception as e:
-            logger.warning(f"Failed to create sentinel file: {e}")
-        
-        # Use a more reliable timeout mechanism
-        result = None
-        error = None
-        timeout_seconds = 3.0  # reasonable timeout
-        
-        # Use a thread with timeout to call the DLL function
-        def salt_worker():
-            nonlocal result, error
-            try:
-                result = _lib.c_generate_salt()
-            except Exception as e:
-                error = e
-        
-        worker_thread = threading.Thread(target=salt_worker)
-        worker_thread.daemon = True
-        worker_thread.start()
-        
-        # Wait for the thread to complete with timeout
-        worker_thread.join(timeout_seconds)
-        
-        # Check if thread is still alive (timed out)
-        if worker_thread.is_alive():
-            print(f"Salt generation timed out after {timeout_seconds} seconds")
-            logger.warning(f"Salt generation timed out after {timeout_seconds} seconds")
-            
-            # Create a .dll_crash marker file to use fallback in future
-            dll_crash_path = os.path.join(os.path.expanduser("~"), ".truefa", ".dll_crash")
-            try:
-                with open(dll_crash_path, "w") as f:
-                    f.write(f"Salt generation timed out after {timeout_seconds} seconds\n")
-                    f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                logger.info("Created .dll_crash marker file")
-            except Exception as e:
-                logger.warning(f"Failed to create .dll_crash marker: {e}")
-            
-            # Use Python fallback
-            import base64
-            import os as os_module
-            result = base64.b64encode(os_module.urandom(32)).decode('utf-8')
-            print("Using Python fallback for salt generation after timeout")
-        elif error:
-            # Handle errors
-            print(f"Error in salt generation: {error}")
-            logger.error(f"Error in salt generation: {error}")
-            
-            # Create a .dll_crash marker
-            dll_crash_path = os.path.join(os.path.expanduser("~"), ".truefa", ".dll_crash")
-            try:
-                with open(dll_crash_path, "w") as f:
-                    f.write(f"Salt generation error: {error}\n")
-                    f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                logger.info("Created .dll_crash marker file")
-            except Exception as e:
-                logger.warning(f"Failed to create .dll_crash marker: {e}")
-            
-            # Use Python fallback
-            import base64
-            import os as os_module
-            result = base64.b64encode(os_module.urandom(32)).decode('utf-8')
-            print("Using Python fallback for salt generation after error")
-        else:
-            # Success - clean up sentinel file
-            elapsed = time.time() - start_time
-            print(f"Salt generation completed in {elapsed:.2f} seconds")
-            
-            if not result:
-                print("Salt generation failed (null result)")
-                # Use Python fallback
-                import base64
-                import os as os_module
-                result = base64.b64encode(os_module.urandom(32)).decode('utf-8')
-                print("Using Python fallback for salt generation due to null result")
-        
-        # Clean up sentinel file
-        try:
-            if os.path.exists(sentinel_path):
-                os.remove(sentinel_path)
-        except Exception as e:
-            logger.warning(f"Failed to remove sentinel file: {e}")
-        
-        return result.decode('utf-8') if isinstance(result, bytes) else result
+    if USE_FALLBACK:
+        logger.info("Skipping DLL test due to USE_FALLBACK setting")
+        return False
     
-    except Exception as e:
-        # Catch any unexpected errors
-        print(f"Unexpected error in salt generation: {e}")
-        logger.error(f"Unexpected error in salt generation: {e}")
+    if not _lib or getattr(_lib, "is_dummy", False):
+        logger.info("Skipping DLL test because dummy module is loaded")
+        return False
+    
+    logger.info("Testing DLL responsiveness...")
+    
+    # Define a simple test function that should complete quickly
+    def test_function():
+        try:
+            # Try the simplest, fastest function first - just to check DLL response
+            if hasattr(_lib, "c_is_vault_unlocked"):
+                result = _lib.c_is_vault_unlocked()
+                logger.info(f"DLL test (c_is_vault_unlocked) returned: {result}")
+                return True
+            elif hasattr(_lib, "c_secure_random_bytes"):
+                # Create buffer for secure random bytes (small size)
+                buffer = (ctypes.c_ubyte * 1)()
+                output_len = ctypes.c_size_t(0)
+                result = _lib.c_secure_random_bytes(
+                    1,  # Just 1 byte for testing
+                    ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    ctypes.byref(output_len)
+                )
+                logger.info(f"DLL test (c_secure_random_bytes) returned: {result}")
+                return True
+            else:
+                logger.warning("No suitable test function found in DLL")
+                return False
+        except Exception as e:
+            logger.error(f"Error testing DLL function: {e}")
+            return False
+    
+    # Run test with a short timeout
+    result = None
+    error = None
+    completed = threading.Event()
+    
+    def worker():
+        nonlocal result, error
+        try:
+            result = test_function()
+        except Exception as e:
+            error = e
+        finally:
+            completed.set()
+    
+    thread = threading.Thread(target=worker)
+    thread.daemon = True
+    
+    # Use a short timeout to quickly detect responsiveness issues
+    timeout = 1.0  # 1 second should be plenty for a simple function call
+    
+    logger.info(f"Starting DLL test with {timeout}s timeout")
+    thread.start()
+    completed.wait(timeout)
+    
+    if not completed.is_set():
+        logger.warning(f"DLL test timed out after {timeout} seconds")
+        _detected_dll_issue = True
         
-        # Use Python fallback as last resort
-        import base64
-        import os as os_module
-        return base64.b64encode(os_module.urandom(32)).decode('utf-8')
+        # Create marker file
+        try:
+            os.makedirs(os.path.dirname(FALLBACK_MARKER_PATH), exist_ok=True)
+            with open(FALLBACK_MARKER_PATH, "w") as f:
+                f.write(f"DLL test timed out after {timeout} seconds\n")
+                f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"DLL path: {_dll_path}\n")
+            logger.info("Created DLL issue marker file")
+        except Exception as e:
+            logger.warning(f"Failed to create DLL issue marker: {e}")
+        
+        return False
+    
+    if error:
+        logger.warning(f"DLL test failed with error: {error}")
+        _detected_dll_issue = True
+        return False
+    
+    if not result:
+        logger.warning("DLL test failed (returned False)")
+        _detected_dll_issue = True
+        return False
+    
+    logger.info("DLL test passed successfully")
+    return True
+
+# Function to make safe DLL calls with fallback
+def _safe_dll_call(func_name, fallback_func, *args, **kwargs):
+    """Call a DLL function safely with fallback if it fails or times out."""
+    global _detected_dll_issue
+    
+    # If we've detected issues or are in fallback mode, use fallback immediately
+    if _detected_dll_issue or USE_FALLBACK:
+        logger.info(f"Using fallback for {func_name} due to previously detected issues")
+        return fallback_func(*args, **kwargs)
+    
+    # Attempt to call the DLL function with timeout
+    result = None
+    error = None
+    completed = threading.Event()
+    
+    def worker():
+        nonlocal result, error
+        try:
+            dll_func = getattr(_lib, func_name)
+            result = dll_func(*args, **kwargs)
+        except Exception as e:
+            error = e
+        finally:
+            completed.set()
+    
+    thread = threading.Thread(target=worker)
+    thread.daemon = True
+    
+    # Use a short timeout
+    timeout = 2.0  # 2 seconds should be enough for most functions
+    
+    logger.info(f"Calling {func_name} with {timeout}s timeout")
+    thread.start()
+    completed.wait(timeout)
+    
+    if not completed.is_set():
+        logger.warning(f"Call to {func_name} timed out after {timeout} seconds")
+        _detected_dll_issue = True
+        
+        # Update marker file
+        try:
+            os.makedirs(os.path.dirname(FALLBACK_MARKER_PATH), exist_ok=True)
+            with open(FALLBACK_MARKER_PATH, "a") as f:
+                f.write(f"Function {func_name} timed out after {timeout} seconds\n")
+                f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            logger.info("Updated DLL issue marker file")
+        except Exception as e:
+            logger.warning(f"Failed to update DLL issue marker: {e}")
+        
+        return fallback_func(*args, **kwargs)
+    
+    if error:
+        logger.warning(f"Call to {func_name} failed with error: {error}")
+        return fallback_func(*args, **kwargs)
+    
+    return result
 
 # Load the DLL
 def _load_dll():
@@ -241,69 +323,129 @@ def _load_dll():
     try:
         logger.info(f"Attempting to load DLL from {_dll_path}")
         
+        # Check if DLL exists
+        if not _dll_path or not os.path.exists(_dll_path):
+            logger.error(f"DLL path is invalid or file doesn't exist: {_dll_path}")
+            raise FileNotFoundError(f"DLL not found at {_dll_path}")
+            
+        print(f"Loading DLL from {_dll_path}")
+        
         # Load the DLL
         _lib = ctypes.CDLL(_dll_path)
+        print(f"DLL loaded successfully from {_dll_path}")
+        
+        # Check if the functions exist in the DLL
+        dll_functions = dir(_lib)
+        print(f"Available functions in DLL: {dll_functions}")
         
         # Set function signatures
-        _lib.c_secure_random_bytes.argtypes = [
-            ctypes.c_size_t,  # size
-            ctypes.POINTER(ctypes.c_ubyte),  # buffer
-            ctypes.POINTER(ctypes.c_size_t)  # output_len
-        ]
-        _lib.c_secure_random_bytes.restype = ctypes.c_bool
+        try:
+            _lib.c_secure_random_bytes.argtypes = [
+                ctypes.c_size_t,  # size
+                ctypes.POINTER(ctypes.c_ubyte),  # buffer
+                ctypes.POINTER(ctypes.c_size_t)  # output_len
+            ]
+            _lib.c_secure_random_bytes.restype = ctypes.c_bool
+            print("Set signature for c_secure_random_bytes")
+        except AttributeError as e:
+            print(f"Error setting c_secure_random_bytes signature: {e}")
+            
+        try:
+            _lib.c_is_vault_unlocked.argtypes = []
+            _lib.c_is_vault_unlocked.restype = ctypes.c_bool
+            print("Set signature for c_is_vault_unlocked")
+        except AttributeError as e:
+            print(f"Error setting c_is_vault_unlocked signature: {e}")
         
-        _lib.c_is_vault_unlocked.argtypes = []
-        _lib.c_is_vault_unlocked.restype = ctypes.c_bool
+        try:
+            _lib.c_vault_exists.argtypes = []
+            _lib.c_vault_exists.restype = ctypes.c_bool
+            print("Set signature for c_vault_exists")
+        except AttributeError as e:
+            print(f"Error setting c_vault_exists signature: {e}")
+            
+        try:
+            _lib.c_create_vault.argtypes = [
+                ctypes.c_char_p  # password
+            ]
+            _lib.c_create_vault.restype = ctypes.c_char_p
+            print("Set signature for c_create_vault")
+        except AttributeError as e:
+            print(f"Error setting c_create_vault signature: {e}")
         
-        _lib.c_vault_exists.argtypes = []
-        _lib.c_vault_exists.restype = ctypes.c_bool
+        try:
+            _lib.c_unlock_vault.argtypes = [
+                ctypes.c_char_p,  # password
+                ctypes.c_char_p   # salt
+            ]
+            _lib.c_unlock_vault.restype = ctypes.c_bool
+            print("Set signature for c_unlock_vault")
+        except AttributeError as e:
+            print(f"Error setting c_unlock_vault signature: {e}")
         
-        _lib.c_create_vault.argtypes = [
-            ctypes.c_char_p  # password
-        ]
-        _lib.c_create_vault.restype = ctypes.c_char_p
+        try:
+            _lib.c_lock_vault.argtypes = []
+            _lib.c_lock_vault.restype = ctypes.c_bool
+            print("Set signature for c_lock_vault")
+        except AttributeError as e:
+            print(f"Error setting c_lock_vault signature: {e}")
         
-        _lib.c_unlock_vault.argtypes = [
-            ctypes.c_char_p,  # password
-            ctypes.c_char_p   # salt
-        ]
-        _lib.c_unlock_vault.restype = ctypes.c_bool
+        try:
+            _lib.c_generate_salt.argtypes = []
+            _lib.c_generate_salt.restype = ctypes.c_char_p
+            print("Set signature for c_generate_salt")
+        except AttributeError as e:
+            print(f"Error setting c_generate_salt signature: {e}")
         
-        _lib.c_lock_vault.argtypes = []
-        _lib.c_lock_vault.restype = ctypes.c_bool
+        try:
+            _lib.c_derive_master_key.argtypes = [
+                ctypes.c_char_p,  # password
+                ctypes.c_char_p   # salt
+            ]
+            _lib.c_derive_master_key.restype = ctypes.c_char_p
+            print("Set signature for c_derive_master_key")
+        except AttributeError as e:
+            print(f"Error setting c_derive_master_key signature: {e}")
         
-        _lib.c_generate_salt.argtypes = []
-        _lib.c_generate_salt.restype = ctypes.c_char_p
+        try:
+            _lib.c_encrypt_master_key.argtypes = [
+                ctypes.c_char_p  # master_key
+            ]
+            _lib.c_encrypt_master_key.restype = ctypes.c_char_p
+            print("Set signature for c_encrypt_master_key")
+        except AttributeError as e:
+            print(f"Error setting c_encrypt_master_key signature: {e}")
         
-        _lib.c_derive_master_key.argtypes = [
-            ctypes.c_char_p,  # password
-            ctypes.c_char_p   # salt
-        ]
-        _lib.c_derive_master_key.restype = ctypes.c_char_p
+        try:
+            _lib.c_decrypt_master_key.argtypes = [
+                ctypes.c_char_p  # encrypted_key
+            ]
+            _lib.c_decrypt_master_key.restype = ctypes.c_char_p
+            print("Set signature for c_decrypt_master_key")
+        except AttributeError as e:
+            print(f"Error setting c_decrypt_master_key signature: {e}")
         
-        _lib.c_encrypt_master_key.argtypes = [
-            ctypes.c_char_p  # master_key
-        ]
-        _lib.c_encrypt_master_key.restype = ctypes.c_char_p
+        try:
+            _lib.c_verify_signature.argtypes = [
+                ctypes.POINTER(ctypes.c_ubyte),  # data
+                ctypes.c_size_t,                 # data_len
+                ctypes.POINTER(ctypes.c_ubyte),  # signature
+                ctypes.c_size_t                  # signature_len
+            ]
+            _lib.c_verify_signature.restype = ctypes.c_bool
+            print("Set signature for c_verify_signature")
+        except AttributeError as e:
+            print(f"Error setting c_verify_signature signature: {e}")
         
-        _lib.c_decrypt_master_key.argtypes = [
-            ctypes.c_char_p  # encrypted_key
-        ]
-        _lib.c_decrypt_master_key.restype = ctypes.c_char_p
-        
-        _lib.c_verify_signature.argtypes = [
-            ctypes.POINTER(ctypes.c_ubyte),  # data
-            ctypes.c_size_t,                 # data_len
-            ctypes.POINTER(ctypes.c_ubyte),  # signature
-            ctypes.c_size_t                  # signature_len
-        ]
-        _lib.c_verify_signature.restype = ctypes.c_bool
-        
-        _lib.c_create_secure_string.argtypes = [
-            ctypes.POINTER(ctypes.c_ubyte),  # data
-            ctypes.c_size_t                  # data_len
-        ]
-        _lib.c_create_secure_string.restype = ctypes.c_void_p
+        try:
+            _lib.c_create_secure_string.argtypes = [
+                ctypes.c_char_p,  # data
+                ctypes.c_size_t   # data_len
+            ]
+            _lib.c_create_secure_string.restype = ctypes.c_void_p
+            print("Set signature for c_create_secure_string")
+        except AttributeError as e:
+            print(f"Error setting c_create_secure_string signature: {e}")
         
         logger.info(f"Successfully loaded DLL from {_dll_path}")
         
@@ -322,6 +464,134 @@ def _load_dll():
 
 # Load the DLL
 _lib = _load_dll()
+
+# Test DLL responsiveness after loading
+if not getattr(_lib, "is_dummy", False):
+    if not _test_dll_responsiveness():
+        logger.warning("DLL did not respond in time, will use fallback for critical functions")
+        # We don't reload as _DummyModule here to keep the DLL available for non-critical functions
+        # Instead we'll use _safe_dll_call for critical functions
+
+# Python fallback implementations for crypto functions
+def _fallback_generate_salt():
+    """Python implementation of salt generation."""
+    import base64
+    import os as os_module
+    logger.info("Using Python fallback for salt generation")
+    return base64.b64encode(os_module.urandom(32)).decode('utf-8')
+
+def _fallback_create_secure_string(data):
+    """Python implementation of secure string creation."""
+    logger.info("Using Python fallback for secure string creation")
+    if isinstance(data, bytes):
+        try:
+            return data.decode('utf-8', errors='replace')
+        except:
+            return str(data)
+    return str(data)
+
+def _fallback_secure_random_bytes(size):
+    """Python implementation of secure random bytes generation."""
+    import os as os_module
+    logger.info("Using Python fallback for secure random bytes generation")
+    return os_module.urandom(size)
+
+# Define the high-risk functions that might hang and use safe calling
+def generate_salt():
+    """Generate a random salt for key derivation."""
+    if USE_FALLBACK or _detected_dll_issue:
+        return _fallback_generate_salt()
+    
+    try:
+        # Record start time for diagnostics
+        start_time = time.time()
+        print(f"Starting salt generation at {time.strftime('%H:%M:%S')}")
+        
+        # We'll use our safe calling method instead of the complex threading code
+        result = _safe_dll_call("c_generate_salt", _fallback_generate_salt)
+        
+        # Process result
+        elapsed = time.time() - start_time
+        print(f"Salt generation completed in {elapsed:.2f} seconds")
+        
+        if not result:
+            logger.warning("Salt generation returned null result")
+            return _fallback_generate_salt()
+        
+        return result.decode('utf-8') if isinstance(result, bytes) else result
+        
+    except Exception as e:
+        # Catch any unexpected errors
+        logger.error(f"Unexpected error in salt generation: {e}")
+        print(f"Unexpected error in salt generation: {e}")
+        return _fallback_generate_salt()
+
+def create_secure_string(data):
+    """Create a secure string from data."""
+    if USE_FALLBACK or _detected_dll_issue or not hasattr(_lib, "c_create_secure_string"):
+        return _fallback_create_secure_string(data)
+    
+    try:
+        if isinstance(data, str):
+            data_bytes = data.encode('utf-8')
+        else:
+            data_bytes = data
+        
+        # Call the DLL function with correct parameters
+        data_len = len(data_bytes)
+        logger.info(f"Calling c_create_secure_string with data length: {data_len}")
+        
+        # Use safe call with fallback
+        result = _safe_dll_call("c_create_secure_string", 
+                               lambda d, l: _fallback_create_secure_string(d),
+                               data_bytes, data_len)
+        
+        if result is None:
+            logger.error("c_create_secure_string returned NULL")
+            return _fallback_create_secure_string(data)
+            
+        logger.info(f"c_create_secure_string returned: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error in create_secure_string: {e}")
+        print(f"Error creating secure string: {e}")
+        return _fallback_create_secure_string(data)
+
+def secure_random_bytes(size):
+    """Generate secure random bytes of the specified size."""
+    if USE_FALLBACK or _detected_dll_issue or not hasattr(_lib, "c_secure_random_bytes"):
+        return _fallback_secure_random_bytes(size)
+    
+    try:
+        # Create a buffer to hold the result
+        buffer = (ctypes.c_ubyte * size)()
+        output_len = ctypes.c_size_t(0)
+        
+        # Use our safe call with fallback
+        logger.info(f"Calling c_secure_random_bytes for {size} bytes")
+        
+        def safe_random_call(size, buffer_ptr, output_len_ptr):
+            result = _lib.c_secure_random_bytes(size, buffer_ptr, output_len_ptr)
+            if not result:
+                raise RuntimeError("c_secure_random_bytes failed")
+            return buffer[:output_len_ptr.value]
+            
+        result = _safe_dll_call("c_secure_random_bytes", 
+                              lambda s, b, o: _fallback_secure_random_bytes(size),
+                              size, 
+                              ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                              ctypes.byref(output_len))
+        
+        # If we got a successful result from the DLL, it will be the buffer
+        # If we got a fallback result, it will be the bytes from urandom
+        if isinstance(result, bytes):
+            return result
+        
+        # Convert the buffer to bytes
+        return bytes(buffer[:output_len.value])
+    except Exception as e:
+        logger.error(f"Error in secure_random_bytes: {e}")
+        return _fallback_secure_random_bytes(size)
 
 # Export the functions for the library callers
 if USE_FALLBACK:
@@ -423,24 +693,57 @@ else:
         def verify_signature(data, signature):
             """Verify a signature."""
             try:
+                # Convert inputs to bytes if they're strings
                 if isinstance(data, str):
                     data = data.encode('utf-8')
                 if isinstance(signature, str):
                     signature = signature.encode('utf-8')
-                return _lib.c_verify_signature(data, signature)
+                
+                # Create C arrays for the data and signature
+                data_len = len(data)
+                data_array = (ctypes.c_ubyte * data_len)(*data)
+                
+                signature_len = len(signature)
+                signature_array = (ctypes.c_ubyte * signature_len)(*signature)
+                
+                # Call the DLL function with the correct parameters
+                logger.info(f"Calling c_verify_signature with data length: {data_len}, signature length: {signature_len}")
+                result = _lib.c_verify_signature(
+                    ctypes.cast(data_array, ctypes.POINTER(ctypes.c_ubyte)),
+                    data_len,
+                    ctypes.cast(signature_array, ctypes.POINTER(ctypes.c_ubyte)),
+                    signature_len
+                )
+                logger.info(f"c_verify_signature returned: {result}")
+                return result
             except Exception as e:
                 logger.error(f"Error in verify_signature: {e}")
                 return False
         
         def create_secure_string(data):
-            """Create a secure string."""
+            """Create a secure string from data."""
             try:
                 if isinstance(data, str):
-                    data = data.encode('utf-8')
-                return _lib.c_create_secure_string(data)
+                    data_bytes = data.encode('utf-8')
+                else:
+                    data_bytes = data
+                
+                # Call the DLL function with correct parameters
+                data_len = len(data_bytes)
+                logger.info(f"Calling c_create_secure_string with data length: {data_len}")
+                result = _lib.c_create_secure_string(data_bytes, data_len)
+                if result is None:
+                    logger.error("c_create_secure_string returned NULL")
+                    return None
+                logger.info(f"c_create_secure_string returned: {result}")
+                return result
             except Exception as e:
                 logger.error(f"Error in create_secure_string: {e}")
-                return None
+                print(f"Error creating secure string: {e}")
+                # Fall back to a simple string if there's an error
+                if isinstance(data, bytes):
+                    return data.decode('utf-8', errors='replace')
+                return str(data)
     
     except Exception as e:
         logger.error(f"Error setting up function wrappers: {e}")
