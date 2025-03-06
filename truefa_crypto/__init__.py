@@ -12,7 +12,37 @@ import time
 import ctypes
 import logging
 import threading
+import secrets
 from pathlib import Path
+
+# Direct export of the most critical functions to ensure they're always available
+def secure_random_bytes(size):
+    """Generate secure random bytes of the specified size using Python's secrets module."""
+    return secrets.token_bytes(size)
+
+def create_secure_string(data):
+    """Create a secure string that will be automatically zeroed when no longer needed."""
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    return SecureString(data)
+
+class SecureString:
+    """A string that is securely wiped from memory when no longer needed."""
+    def __init__(self, data):
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        self.data = bytearray(data)
+    
+    def __str__(self):
+        return self.data.decode('utf-8', errors='replace')
+    
+    def clear(self):
+        """Securely wipe the data."""
+        for i in range(len(self.data)):
+            self.data[i] = 0
+    
+    def __del__(self):
+        self.clear()
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -556,42 +586,6 @@ def create_secure_string(data):
         logger.error(f"Error in create_secure_string: {e}")
         print(f"Error creating secure string: {e}")
         return _fallback_create_secure_string(data)
-
-def secure_random_bytes(size):
-    """Generate secure random bytes of the specified size."""
-    if USE_FALLBACK or _detected_dll_issue or not hasattr(_lib, "c_secure_random_bytes"):
-        return _fallback_secure_random_bytes(size)
-    
-    try:
-        # Create a buffer to hold the result
-        buffer = (ctypes.c_ubyte * size)()
-        output_len = ctypes.c_size_t(0)
-        
-        # Use our safe call with fallback
-        logger.info(f"Calling c_secure_random_bytes for {size} bytes")
-        
-        def safe_random_call(size, buffer_ptr, output_len_ptr):
-            result = _lib.c_secure_random_bytes(size, buffer_ptr, output_len_ptr)
-            if not result:
-                raise RuntimeError("c_secure_random_bytes failed")
-            return buffer[:output_len_ptr.value]
-            
-        result = _safe_dll_call("c_secure_random_bytes", 
-                              lambda s, b, o: _fallback_secure_random_bytes(size),
-                              size, 
-                              ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
-                              ctypes.byref(output_len))
-        
-        # If we got a successful result from the DLL, it will be the buffer
-        # If we got a fallback result, it will be the bytes from urandom
-        if isinstance(result, bytes):
-            return result
-        
-        # Convert the buffer to bytes
-        return bytes(buffer[:output_len.value])
-    except Exception as e:
-        logger.error(f"Error in secure_random_bytes: {e}")
-        return _fallback_secure_random_bytes(size)
 
 # Export the functions for the library callers
 if USE_FALLBACK:
