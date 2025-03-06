@@ -6,7 +6,7 @@ Welcome to the TrueFA-Py documentation. This directory contains comprehensive gu
 
 ### For Users
 
-- [**User Guide**](USER_GUIDE.md) - Complete instructions for installing, configuring, and using TrueFA-Py, including a quick start section for new users.
+- [**Main README**](../README.md) - Complete instructions for installing, configuring, and using TrueFA-Py, including a quick start section for new users.
 
 - [**Frequently Asked Questions**](FAQ.md) - Answers to common questions about TrueFA-Py, including general usage, security, troubleshooting, and technical details.
 
@@ -18,7 +18,7 @@ Welcome to the TrueFA-Py documentation. This directory contains comprehensive gu
 
 We've consolidated our documentation into these core guides to make it easier to find the information you need:
 
-1. **User Guide**: Everything end-users need to know to install and use TrueFA-Py effectively
+1. **Main README**: Everything end-users need to know to install and use TrueFA-Py effectively
 2. **Developer Guide**: Technical documentation for developers who want to build, modify, or contribute
 3. **FAQ**: Quick answers to common questions for both users and developers
 
@@ -26,7 +26,7 @@ Each guide is designed to be comprehensive within its scope while remaining acce
 
 ## Getting Started
 
-- **New users**: Start with the [User Guide](USER_GUIDE.md)'s Quick Start section
+- **New users**: Start with the [README's](../README.md) Quick Start Guide section
 - **Developers**: Begin with the [Developer Guide](DEVELOPER_GUIDE.md)
 - **Looking for specific information**: Check the [FAQ](FAQ.md)
 
