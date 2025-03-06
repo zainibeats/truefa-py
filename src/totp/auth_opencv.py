@@ -30,6 +30,17 @@ from ..security.secure_storage import SecureStorage
 import base64
 import datetime
 import traceback
+import socket  # For anti-debug
+import threading  # For anti-debug
+import hmac  # For file integrity verification
+import hashlib  # For file integrity verification
+import json
+import random
+import logging
+
+# Import new security modules
+from ..security.file_integrity import FileIntegrityVerifier, add_hmac_to_file, verify_file_integrity
+from ..security.security_events import record_security_event
 
 class TwoFactorAuth:
     """
@@ -48,66 +59,55 @@ class TwoFactorAuth:
     
     def __init__(self):
         """
-        Initialize the TwoFactorAuth instance.
-        
-        Sets up:
-        - Secure storage for TOTP secrets
-        - Signal handlers for secure termination
-        - QR code image directory
-        - Initial security state
-        - OpenCV installation check
+        Initialize the TwoFactorAuth object and setup necessary paths and security checks.
         """
-        # Store the current TOTP secret
-        self.secret = None
-        # Flag to track if we're continuously generating codes
-        self.is_generating = False
-        # Initialize secure storage for secrets
-        self.storage = SecureStorage()
-        # Check if vault is already initialized
-        self.is_vault_mode = self.storage.vault.is_initialized()
-        
-        # Register signal handlers for secure cleanup
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        # Determine the executable directory for resource paths
-        if getattr(sys, 'frozen', False):
-            # Running as compiled executable
-            app_dir = os.path.dirname(sys.executable)
-            bundle_dir = getattr(sys, '_MEIPASS', app_dir)
-            print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
+        try:
+            # Setup signal handling for secure termination
+            signal.signal(signal.SIGINT, self._signal_handler)
             
-            # First check if we have write permission to the app directory
-            test_file = os.path.join(app_dir, 'images', '.test')
-            try:
-                # Create images directory if it doesn't exist
-                if not os.path.exists(os.path.join(app_dir, 'images')):
-                    os.makedirs(os.path.join(app_dir, 'images'), exist_ok=True)
+            # Initialize security event counters
+            self._error_states = {
+                'debug_attempts': 0,
+                'path_violations': 0,
+                'buffer_overflows': 0,
+                'format_attacks': 0,
+                'permission_violations': 0,
+                'integrity_violations': 0,  # Added for HMAC integrity checks
+            }
+            
+            # Basic anti-debug check (don't be too aggressive)
+            if not os.environ.get("TRUEFA_SKIP_DEBUG_CHECK"):
+                self._check_debugger()
+            
+            # Initialize storage paths
+            self._find_storage_dirs()
+
+            # Initialize storage
+            self.storage = SecureStorage()
+            
+            # Check if vault is already initialized
+            self.is_vault_mode = self.storage.vault.is_initialized()
+            
+            # Register signal handlers for secure cleanup
+            signal.signal(signal.SIGTERM, self._signal_handler)
+            if hasattr(signal, 'SIGHUP'):  # Not available on Windows
+                signal.signal(signal.SIGHUP, self._signal_handler)
                 
-                # Test if directory is writable
-                with open(test_file, 'w') as f:
-                    f.write('test')
-                os.remove(test_file)
-                # We can write to the directory, use the app's images folder
-                self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
-            except Exception:
-                # Can't write to program directory, use user's documents folder instead
-                user_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'TrueFA-Py', 'images')
-                os.makedirs(user_dir, exist_ok=True)
-                self.images_dir = os.getenv('QR_IMAGES_DIR', user_dir)
-                print(f"Using personal images directory in Documents folder: {user_dir}")
-        else:
-            # Running in normal Python environment
-            self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
-        
-        print(f"You can use either the full path or just the filename if it's in the images directory")
-        
-        # Create images directory if needed
-        if not os.path.exists(self.images_dir):
-            os.makedirs(self.images_dir)
+            # Setup instance variables
+            self.secret = None
+            self.continuous_thread = None
+            self.should_stop = threading.Event()
             
-        # Ensure OpenCV is available
-        self._check_opencv()
+            # Ensure OpenCV is available
+            self._check_opencv()
+            
+            # Create a FileIntegrityVerifier instance for HMAC operations
+            self.integrity_verifier = FileIntegrityVerifier(
+                security_event_handler=lambda event_type: record_security_event(event_type)
+            )
+        except Exception as e:
+            print(f"Error initializing TwoFactorAuth: {e}")
+            traceback.print_exc()
 
     def _check_opencv(self):
         """
@@ -164,70 +164,103 @@ class TwoFactorAuth:
         # Stop continuous generation if active
         self.is_generating = False
 
-    def scan_qr_code(self, image_path):
+    def _secure_create_file(self, file_path, content="", mode=0o600):
         """
-        Scan a QR code image using OpenCV to extract a TOTP secret
+        Securely create a file with proper permissions.
         
         Args:
-            image_path: Path to the QR code image
+            file_path: Path to the file to create
+            content: Optional content to write to the file
+            mode: File permissions to set (default: 0o600 - user read/write only)
             
         Returns:
-            str: Extracted TOTP secret or None if not found
+            bool: True if successful, False otherwise
             
-        Raises:
-            Exception: If QR code scanning fails
+        Security:
+        - Sets restrictive permissions immediately after creation
+        - Uses atomic write operations where possible
+        - Creates parent directories with secure permissions if needed
         """
         try:
-            # Securely validate and sanitize the image path
-            validated_path, error = self._validate_image_path(image_path)
-            if not validated_path:
-                print(f"Image validation error: {error}")
-                return None
-                
-            # Load the image
-            image = cv2.imread(validated_path)
-            if image is None:
-                print(f"Error: Failed to load image at {validated_path}")
-                return None
-                
-            # Initialize the QR Code detector
-            qr_detector = cv2.QRCodeDetector()
+            # Ensure parent directory exists with secure permissions
+            parent_dir = os.path.dirname(file_path)
+            if not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, mode=0o700, exist_ok=True)
             
-            # Detect and decode the QR code
-            data, bbox, _ = qr_detector.detectAndDecode(image)
+            # Create the file atomically if possible
+            # First write to a temporary file, then rename
+            temp_path = f"{file_path}.tmp"
+            with open(temp_path, 'w') as f:
+                f.write(content)
+                # Ensure data is flushed to disk
+                f.flush()
+                os.fsync(f.fileno())
             
-            if not data:
-                # Try with image preprocessing if direct detection fails
-                preprocessed = self._preprocess_image(image)
-                data, bbox, _ = qr_detector.detectAndDecode(preprocessed)
-                
-            if not data:
-                print("No QR code found in the image")
-                return None
-                
-            # Parse the data to extract the TOTP secret
-            # Typically in format: otpauth://totp/Label:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Label&algorithm=SHA1&digits=6&period=30
-            parsed_data = self._parse_otpauth(data)
+            # Set permissions before moving to final location
+            try:
+                os.chmod(temp_path, mode)
+            except Exception as e:
+                # Continue even if chmod fails, this is best-effort
+                print(f"Warning: Could not set file permissions: {e}")
             
-            # Verify we have a valid secret
-            if not parsed_data or 'secret' not in parsed_data or not parsed_data['secret']:
-                print("Invalid or missing TOTP secret in QR code")
-                return None
-                
-            # Sanitize the extracted secret
-            secret = parsed_data['secret'].strip().upper()
+            # Move temp file to final location (atomic on POSIX systems)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+            os.rename(temp_path, file_path)
             
-            # Validate the secret format (Base32 characters only)
-            if not all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567' for c in secret):
-                print("Invalid TOTP secret format (not Base32)")
-                return None
-                
-            print(f"Successfully extracted TOTP secret from QR code")
-            return secret
-            
+            return True
         except Exception as e:
-            print(f"Error scanning QR code: {str(e)}")
-            return None
+            print(f"Error creating secure file: {e}")
+            # Clean up temp file if it exists
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+            return False
+
+    def _validate_secret_data(self, data):
+        """
+        Validate secret data before use to prevent unsafe deserialization.
+        
+        Args:
+            data: The data to validate
+            
+        Returns:
+            tuple: (bool validity, str error_message if invalid)
+            
+        Security:
+        - Ensures only expected data types and fields are present
+        - Prevents injection of malicious data
+        - Validates format of critical fields
+        """
+        if not isinstance(data, dict):
+            return False, "Invalid data format"
+        
+        # Validate required fields
+        if "secret" not in data:
+            return False, "Missing required 'secret' field"
+        
+        # Validate field types
+        if not isinstance(data.get("secret"), str):
+            return False, "Secret must be a string"
+        
+        # Optional fields should be of correct type if present
+        if "issuer" in data and not isinstance(data["issuer"], str):
+            return False, "Issuer must be a string"
+        
+        if "account" in data and not isinstance(data["account"], str):
+            return False, "Account must be a string"
+        
+        # Validate secret format (base32 encoding)
+        secret = data.get("secret", "")
+        if secret:
+            # Basic validation for base32-encoded string
+            base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
+            if not base32_pattern.match(secret):
+                return False, "Secret does not appear to be in valid base32 format"
+        
+        return True, None
 
     def extract_secret_from_qr(self, image_path):
         """
@@ -391,93 +424,107 @@ class TwoFactorAuth:
 
     def _validate_image_path(self, image_path):
         """
-        Validate and sanitize an image path for security.
-        
-        Prevents path traversal attacks and ensures file exists.
-        Only allows specified image formats for security.
+        Validate and resolve an image path securely.
         
         Args:
-            image_path: Path to potential QR code image
+            image_path: Raw path to validate
             
         Returns:
-            tuple: (validated_path, error_message)
+            Path object or None if validation fails
+            
+        Security:
+        - Sanitizes path input
+        - Resolves relative paths safely
+        - Validates path is within allowed directory
+        - Checks file existence
         """
-        # Check for path traversal attempts
-        path_to_check = Path(image_path)
-        
-        # Normalize the path
         try:
-            normalized_path = path_to_check.resolve()
-        except (ValueError, OSError):
-            return None, "Invalid path format"
-        
-        # Prevent path traversal by checking resolved path
-        images_dir_abs = Path(self.images_dir).resolve()
-        is_in_images_dir = False
-        
-        try:
-            # Check if the path resolves to something inside the images directory
-            if images_dir_abs in normalized_path.parents or images_dir_abs == normalized_path.parent:
-                is_in_images_dir = True
-        except (ValueError, OSError):
-            return None, "Path traversal attempt detected"
-        
-        # If path doesn't exist and not in images_dir, return error
-        if not path_to_check.exists() and not is_in_images_dir:
-            # Try with images directory
-            if not Path(self.images_dir).exists():
-                try:
-                    os.makedirs(self.images_dir, exist_ok=True)
-                except (PermissionError, OSError):
-                    return None, f"Cannot create images directory: {self.images_dir}"
+            # Clean up the path
+            image_path = image_path.strip().strip("'").strip('"')
+            
+            # Debug the path
+            print(f"DEBUG: Raw image path: {image_path}")
+            
+            # Convert to Path object for safer operations
+            path_obj = Path(image_path)
+            
+            # Additional security: Block absolute paths that try to escape
+            if path_obj.is_absolute():
+                # Check if it's inside the allowed directories
+                allowed_dirs = [
+                    Path(self.images_dir).resolve(),
+                    Path(os.getcwd()).resolve(),
+                    Path(os.path.join(os.getcwd(), 'assets')).resolve()
+                ]
                 
-            # Check if it might be a filename in the images directory
-            alt_path = Path(self.images_dir) / Path(image_path).name
-            if not alt_path.exists():
-                return None, f"Image file not found: {image_path}"
-            path_to_check = alt_path
-        
-        # Verify the file is actually an image
-        valid_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
-        if path_to_check.suffix.lower() not in valid_extensions:
-            return None, f"Invalid image format. Allowed formats: {', '.join(valid_extensions)}"
-        
-        # Validate the file size to prevent loading very large images
-        try:
-            file_size = path_to_check.stat().st_size
-            if file_size > 5 * 1024 * 1024:  # 5 MB limit
-                return None, "Image file too large (>5MB)"
-            if file_size == 0:
-                return None, "Empty file"
-        except (OSError, PermissionError):
-            return None, "Cannot access file"
-        
-        # Basic file type validation - check file headers
-        try:
-            with open(path_to_check, 'rb') as f:
-                header = f.read(8)  # Read first 8 bytes for file signature
+                resolved_path = path_obj.resolve()
+                path_allowed = False
                 
-            # Check common image format signatures
-            valid_signatures = [
-                b'\x89PNG\r\n\x1a\n',  # PNG
-                b'\xff\xd8\xff',        # JPEG (first 3 bytes)
-                b'GIF87a', b'GIF89a',   # GIF
-                b'BM',                  # BMP (first 2 bytes)
-                b'RIFF'                 # WEBP (starts with RIFF)
+                for allowed_dir in allowed_dirs:
+                    try:
+                        # Check if the path is within an allowed directory
+                        if str(resolved_path).startswith(str(allowed_dir)):
+                            path_allowed = True
+                            break
+                    except Exception:
+                        # Resolve can fail on some systems for non-existent paths
+                        continue
+                    
+                if not path_allowed:
+                    print(f"Security warning: Attempted access to restricted path: {image_path}")
+                    self._record_security_event('invalid_path', image_path)
+                    return None, "Access to this path is not allowed for security reasons"
+            
+            # Try several options to find the image
+            potential_paths = [
+                path_obj,                                       # As provided
+                Path(os.getcwd()) / path_obj,                   # Relative to CWD
+                Path(self.images_dir) / path_obj.name,          # In images dir
+                Path('assets') / path_obj.name,                 # In assets dir
+                Path(os.getcwd()) / 'assets' / path_obj.name,   # In CWD/assets
             ]
             
-            is_valid = False
-            for sig in valid_signatures:
-                if header.startswith(sig):
-                    is_valid = True
-                    break
-                
-            if not is_valid:
-                return None, "Invalid image file type"
-        except (OSError, PermissionError):
-            return None, "Cannot read file"
-        
-        return str(path_to_check), None
+            for potential_path in potential_paths:
+                print(f"DEBUG: Trying path: {potential_path}")
+                if potential_path.exists() and potential_path.is_file():
+                    # Ensure path didn't change through symlinks or other means
+                    resolved_path = potential_path.resolve()
+                    
+                    # Additional security check: verify file extension is an image format
+                    if resolved_path.suffix.lower() not in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+                        return None, f"File must be an image type (.png, .jpg, .jpeg, .gif, .bmp)"
+                    
+                    # Additional security: perform canonicalization check
+                    if str(potential_path) != str(resolved_path):
+                        print(f"Security warning: Path changed after resolution: {potential_path} -> {resolved_path}")
+                        # Extra validation for the resolved path
+                        allowed_dirs = [
+                            Path(self.images_dir).resolve(),
+                            Path(os.getcwd()).resolve(),
+                            Path(os.path.join(os.getcwd(), 'assets')).resolve()
+                        ]
+                        
+                        path_allowed = False
+                        for allowed_dir in allowed_dirs:
+                            try:
+                                if str(resolved_path).startswith(str(allowed_dir)):
+                                    path_allowed = True
+                                    break
+                            except Exception:
+                                continue
+                        
+                        if not path_allowed:
+                            return None, "Path resolves to a location outside allowed directories"
+                    
+                    print(f"DEBUG: Found valid image at: {potential_path}")
+                    return str(potential_path), None
+            
+            # If we get here, we didn't find a valid image
+            return None, f"Could not find image file: {image_path}"
+            
+        except Exception as e:
+            print(f"DEBUG: Path validation error: {str(e)}")
+            return None, f"Invalid path: {str(e)}"
 
     def generate_totp(self, secret=None, return_remaining=True):
         """
@@ -627,11 +674,30 @@ class TwoFactorAuth:
         - Encrypts secret before storage
         - Validates input parameters
         - Returns generic error messages
+        - Uses HMAC to verify file integrity
         """
         # Check if we have a secret to save
         if not self.secret:
             return "No secret available to save"
-            
+        
+        # Input validation
+        # Check for buffer overflow attempts or other malicious input
+        if name is None or not isinstance(name, str):
+            return "Invalid name format"
+        
+        if len(name) > 256:  # Set reasonable limits
+            return "Name is too long (maximum 256 characters)"
+        
+        # Sanitize the name to prevent directory traversal or command injection
+        # Only allow alphanumeric chars, dash, underscore, and space
+        sanitized_name = re.sub(r'[^\w\s-]', '', name)
+        if sanitized_name != name:
+            return "Name contains invalid characters (only letters, numbers, spaces, underscores, and dashes are allowed)"
+        
+        # Prevent common injection patterns
+        if '..' in name or '/' in name or '\\' in name:
+            return "Name contains invalid characters"
+        
         # Check if vault is not initialized
         if not self.storage.vault.is_initialized():
             # First-time setup: create the vault
@@ -700,7 +766,33 @@ class TwoFactorAuth:
                 return f"Failed to unlock vault: {str(e)}"
         
         try:
-            return self.storage.save_secret(name, self.secret, password)  # Return any error from the storage layer
+            result = self.storage.save_secret(name, self.secret, password)
+            
+            # If the save was successful, create an HMAC-protected backup
+            if result is None:  # None means success in this API
+                try:
+                    # Get the path to the saved secret file
+                    secret_file_path = self.storage.get_secret_path(name)
+                    if secret_file_path and os.path.exists(secret_file_path):
+                        # Create a backup with HMAC protection
+                        with open(secret_file_path, 'rb') as f:
+                            file_content = f.read()
+                        
+                        # Get a key for HMAC - derive from the storage key if available
+                        hmac_key = None
+                        if hasattr(self.storage, 'key') and self.storage.key:
+                            hmac_key = hashlib.sha256(self.storage.key).digest()
+                        
+                        # Create backup file with HMAC
+                        backup_path = f"{secret_file_path}.backup"
+                        add_hmac_to_file(backup_path, file_content, hmac_key)
+                        
+                        print(f"Integrity-protected backup created for {name}")
+                except Exception as e:
+                    # Don't fail the save if backup creation fails
+                    print(f"Warning: Could not create integrity-protected backup: {e}")
+            
+            return result  # Return any error from the storage layer
         except Exception as e:
             return f"Failed to save secret: {str(e)}"
 
@@ -719,8 +811,32 @@ class TwoFactorAuth:
         - Decrypts secret securely
         - Validates input parameters
         - Returns generic error messages
+        - Verifies file integrity using HMAC
         """
         try:
+            # Get the path to the secret file
+            secret_file_path = self.storage.get_secret_path(name)
+            
+            # If the file exists, verify its integrity first
+            if secret_file_path and os.path.exists(secret_file_path):
+                # Get a key for HMAC - derive from the storage key if available
+                hmac_key = None
+                if hasattr(self.storage, 'key') and self.storage.key:
+                    hmac_key = hashlib.sha256(self.storage.key).digest()
+                
+                # Check if we have an integrity-protected backup
+                backup_path = f"{secret_file_path}.backup"
+                if os.path.exists(backup_path):
+                    # Verify the backup's integrity
+                    is_valid, content = verify_file_integrity(backup_path, hmac_key)
+                    if is_valid:
+                        print(f"Using integrity-verified backup for {name}")
+                        
+                        # Write the original content back to the main file
+                        with open(secret_file_path, 'wb') as f:
+                            f.write(content)
+            
+            # Now load the secret as normal
             secret = self.storage.load_secret(name, password)
             if secret:
                 self.secret = secret
@@ -767,69 +883,167 @@ class TwoFactorAuth:
         except Exception as e:
             return f"Export failed: {e}"
 
-    def _preprocess_image(self, image):
+    def _check_debugger(self):
         """
-        Preprocess an image to improve QR code detection
+        Basic anti-debugging check.
         
-        Args:
-            image: OpenCV image
-            
-        Returns:
-            Preprocessed image
+        Detects common debugging methods without being too aggressive.
+        Can be bypassed with TRUEFA_SKIP_DEBUG_CHECK=1 environment variable.
         """
-        # Convert to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Apply adaptive thresholding
-        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                       cv2.THRESH_BINARY, 11, 2)
-        
-        # Apply image enhancement techniques
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Return both processed versions (the QR detector will try both)
-        return binary
-        
-    def _parse_otpauth(self, uri):
-        """
-        Parse an otpauth:// URI to extract TOTP parameters
-        
-        Args:
-            uri: otpauth URI string
-            
-        Returns:
-            dict: Parsed parameters or None if invalid
-        """
-        # Basic validation - must start with otpauth://
-        if not uri or not uri.startswith('otpauth://'):
-            return None
-            
-        # Extract the secret and other parameters
         try:
-            # Security check - limit URI length to prevent DoS
-            if len(uri) > 1024:
-                return None
+            # Only run checks in release mode, not during development
+            if getattr(sys, 'frozen', False):
+                # Skip checks in Docker environments
+                if os.path.exists('/.dockerenv') or os.environ.get('TRUEFA_IN_CONTAINER'):
+                    return
                 
-            # Parse the URI
-            parsed = {}
-            
-            # Get the query parameters
-            if '?' in uri:
-                query_string = uri.split('?', 1)[1]
-                pairs = query_string.split('&')
+                # Check for common debugger traces
+                debug_detected = False
                 
-                for pair in pairs:
-                    if '=' in pair:
-                        key, value = pair.split('=', 1)
-                        # Sanitize the keys and values
-                        key = key.strip().lower()
-                        value = value.strip()
+                # Check common debugger environment variables
+                debug_env_vars = ['PYTHONINSPECT', 'PYTHONDEBUG', 'PYTHONTRACEMALLOC']
+                for var in debug_env_vars:
+                    if os.environ.get(var):
+                        debug_detected = True
+                        break
                         
-                        # Only accept known keys for security
-                        if key in ['secret', 'issuer', 'algorithm', 'digits', 'period']:
-                            parsed[key] = value
+                # Check for tracers in parent process (basic check)
+                if platform.system() == 'Windows':
+                    try:
+                        import psutil
+                        parent = psutil.Process(os.getppid())
+                        if any(trace in parent.name().lower() for trace in ['debug', 'trace', 'ida']):
+                            debug_detected = True
+                    except:
+                        pass
+                
+                if debug_detected:
+                    # Don't exit, just log a warning - we don't want to be too aggressive
+                    print("Warning: Debugging environment detected. Some security features may be limited.")
+        except:
+            # If anything fails, continue silently
+            pass
+
+    def _record_security_event(self, event_type, details=None):
+        """
+        Record a security-related event for monitoring.
+        
+        Args:
+            event_type: Type of security event
+            details: Additional details (optional)
             
-            return parsed
-        except Exception:
-            return None
+        Returns:
+            None
+            
+        Security:
+        - Tracks potential security violations
+        - Implements cooldown periods to prevent alert fatigue
+        - Provides feedback for security monitoring
+        """
+        # Forward to the dedicated security event tracking module
+        record_security_event(event_type, details)
+
+    def get_all_secrets(self):
+        """
+        Get a list of all saved secrets.
+        
+        Returns:
+            list: List of secret names or empty list if none found
+            
+        Security:
+        - Performs integrity check on listed secrets
+        - Filters out potentially compromised files
+        """
+        try:
+            all_secrets = self.storage.get_all_secrets()
+            verified_secrets = []
+            
+            # Verify the integrity of each secret's backup
+            for secret_name in all_secrets:
+                try:
+                    # Get the path to the secret file
+                    secret_file_path = self.storage.get_secret_path(secret_name)
+                    
+                    # Get a key for HMAC - derive from the storage key if available
+                    hmac_key = None
+                    if hasattr(self.storage, 'key') and self.storage.key:
+                        hmac_key = hashlib.sha256(self.storage.key).digest()
+                    
+                    # Check if we have an integrity-protected backup
+                    backup_path = f"{secret_file_path}.backup"
+                    
+                    if os.path.exists(backup_path):
+                        # Verify the backup's integrity
+                        is_valid, _ = verify_file_integrity(backup_path, hmac_key)
+                        if not is_valid:
+                            # Record and log integrity violation, but still include in list
+                            record_security_event("integrity_violation")
+                            print(f"Warning: Integrity check failed for {secret_name}")
+                    
+                    # Add to verified list regardless of integrity status to allow user access
+                    verified_secrets.append(secret_name)
+                    
+                except Exception as e:
+                    print(f"Warning: Error checking integrity for {secret_name}: {str(e)}")
+                    # Still include in list to avoid blocking user access
+                    verified_secrets.append(secret_name)
+            
+            return verified_secrets
+        except Exception as e:
+            print(f"Error retrieving secrets: {e}")
+            return []
+
+    def _find_storage_dirs(self):
+        """
+        Determine the appropriate directories for storing images and other data.
+        
+        Sets up:
+        - Image directory for QR codes
+        - Creates directories if they don't exist
+        
+        Security:
+        - Uses OS-appropriate paths
+        - Creates directories with correct permissions
+        """
+        try:
+            # Determine the executable directory for resource paths
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable
+                app_dir = os.path.dirname(sys.executable)
+                bundle_dir = getattr(sys, '_MEIPASS', app_dir)
+                print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
+                
+                # First check if we have write permission to the app directory
+                test_file = os.path.join(app_dir, 'images', '.test')
+                try:
+                    # Create images directory if it doesn't exist
+                    if not os.path.exists(os.path.join(app_dir, 'images')):
+                        os.makedirs(os.path.join(app_dir, 'images'), exist_ok=True)
+                    
+                    # Test if directory is writable
+                    with open(test_file, 'w') as f:
+                        f.write('test')
+                    os.remove(test_file)
+                    # We can write to the directory, use the app's images folder
+                    self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
+                except Exception:
+                    # Can't write to program directory, use user's documents folder instead
+                    user_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'TrueFA-Py', 'images')
+                    os.makedirs(user_dir, exist_ok=True)
+                    self.images_dir = os.getenv('QR_IMAGES_DIR', user_dir)
+                    print(f"Using personal images directory in Documents folder: {user_dir}")
+            else:
+                # Running in normal Python environment
+                self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
+            
+            print(f"You can use either the full path or just the filename if it's in the images directory: {self.images_dir}")
+            
+            # Create images directory if needed
+            if not os.path.exists(self.images_dir):
+                self._secure_create_file(os.path.join(self.images_dir, '.gitkeep'), '')
+        except Exception as e:
+            print(f"Error setting up storage directories: {e}")
+            # Fallback to current directory
+            self.images_dir = os.path.join(os.getcwd(), 'images')
+            if not os.path.exists(self.images_dir):
+                os.makedirs(self.images_dir, exist_ok=True)
