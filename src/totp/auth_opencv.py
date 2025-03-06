@@ -305,10 +305,17 @@ class TwoFactorAuth:
             
             # Load and process the image with OpenCV
             try:
+                # Debug the image path
+                print(f"DEBUG: Reading image from: {full_path}")
+                
                 # Load the image using OpenCV
                 img = cv2.imread(str(full_path))
                 if img is None:
-                    return None, f"Could not read image: {full_path}"
+                    # Try one more time with the original path
+                    print(f"DEBUG: Retrying with original path: {image_path}")
+                    img = cv2.imread(str(image_path))
+                    if img is None:
+                        return None, f"Could not read image: {image_path}"
                 
                 print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
                 
@@ -354,68 +361,13 @@ class TwoFactorAuth:
                             
                             # Store the secret
                             self.secret = secure_secret
-                import cv2
-                print(f"DEBUG: OpenCV version: {cv2.__version__}")
-            except ImportError:
-                return None, "OpenCV is required for QR scanning. Please install it with 'pip install opencv-python'"
-            
-            # Read and process image
-            print(f"DEBUG: Reading image from: {image_path}")
-            img = cv2.imread(str(image_path))
-            if img is None:
-                return None, f"Could not read image: {image_path}"
-            
-            print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
-            
-            # Initialize QR Code detector
-            detector = cv2.QRCodeDetector()
-            
-            # Detect and decode
-            print("DEBUG: Attempting to detect and decode QR code...")
-            data, bbox, _ = detector.detectAndDecode(img)
-            
-            print(f"DEBUG: QR code data: {data if data else 'None'}")
-            print(f"DEBUG: QR code bounding box: {bbox if bbox is not None else 'None'}")
-            
-            # Process QR code data
-            if data:
-                print(f"DEBUG: Raw QR data: {data}")
-                if data.startswith('otpauth://'):
-                    parsed = urllib.parse.urlparse(data)
-                    params = dict(urllib.parse.parse_qsl(parsed.query))
-                    
-                    print(f"DEBUG: Parsed params: {params}")
-                    
-                    if 'secret' in params:
-                        # Extract and normalize the secret
-                        secret = params['secret']
-                        print(f"DEBUG: Raw secret from QR: {secret}")
-                        
-                        # Create a secure string from the extracted secret
-                        secure_secret = SecureString(secret)
-                        
-                        # Set the issuer and account if available
-                        path = parsed.path
-                        if path.startswith('/'):
-                            path = path[1:]
-                        
-                        if ':' in path:
-                            self.issuer, self.account = path.split(':', 1)
-                        else:
-                            self.account = path
-                            self.issuer = params.get('issuer', '')
-                        
-                        print(f"DEBUG: Parsed issuer: {self.issuer}, account: {self.account}")
-                        
-                        # Store the secret
-                        self.secret = secure_secret
-                        return secure_secret, None
+                            return secure_secret, None
                     
                     return None, "No secret parameter found in otpauth URL"
                 
                 return None, "QR code found but doesn't contain a valid otpauth URL"
-            else:
-                return None, "No QR code found in the image"
+            except ImportError:
+                return None, "OpenCV is required for QR scanning. Please install it with 'pip install opencv-python'"
             
         except Exception as e:
             print(f"DEBUG: Exception in extract_secret_from_qr: {str(e)}")
@@ -623,35 +575,45 @@ class TwoFactorAuth:
                     # Generate the current code and get remaining time
                     code, remaining = self.generate_totp()
                     
-                    # Only update if the code has changed or we're close to expiration
-                    if code != last_code or remaining <= 5:
-                        # If a callback is provided, use it; otherwise print to console
-                        if callback:
-                            callback(code, remaining)
-                        else:
-                            # Clear the line and print the new code with expiration time
-                            sys.stdout.write('\r' + ' ' * 50 + '\r')  # Clear line
-                            
-                            # Print code with color based on remaining time
-                            if remaining <= 5:
-                                # Red when close to expiring
-                                color_code = "\033[91m"  # Red
-                            elif remaining <= 10:
-                                # Yellow for warning
-                                color_code = "\033[93m"  # Yellow
-                            else:
-                                # Green for plenty of time
-                                color_code = "\033[92m"  # Green
-                                
-                            # Reset color code after printing
-                            reset_code = "\033[0m"
-                            
-                            # Format and print current code and time
-                            sys.stdout.write(f"Code: {color_code}{code}{reset_code} (expires in {remaining}s)")
-                            sys.stdout.flush()
+                    # Always update the display to show the countdown in real-time
+                    # If a callback is provided, use it; otherwise print to console
+                    if callback:
+                        callback(code, remaining)
+                    else:
+                        # Clear the line and print the new code with expiration time
+                        sys.stdout.write('\r' + ' ' * 50 + '\r')  # Clear line
                         
-                        # Update last code
-                        last_code = code
+                        # Print code with color based on remaining time
+                        if remaining <= 5:
+                            # Red when close to expiring
+                            color_code = "\033[91m"  # Red
+                        elif remaining <= 10:
+                            # Yellow for warning
+                            color_code = "\033[93m"  # Yellow
+                        else:
+                            # Green for plenty of time
+                            color_code = "\033[92m"  # Green
+                            
+                        # Reset color code after printing
+                        reset_code = "\033[0m"
+                        
+                        # Format and print current code and time
+                        sys.stdout.write(f"Code: {color_code}{code}{reset_code} (expires in {remaining}s)")
+                        sys.stdout.flush()
+                    
+                    # Store the current code to detect changes
+                    last_code = code
+                    
+                    # Sleep for a short time to reduce CPU usage
+                    # Use a shorter sleep time when close to code refresh
+                    if remaining <= 2:
+                        # Refresh more frequently near code expiration (100ms)
+                        time.sleep(0.1)
+                    else:
+                        # Standard refresh rate (1 second)
+                        # Using 0.9 instead of 1.0 to account for processing time
+                        time.sleep(0.9)
+                        
                 except KeyboardInterrupt:
                     pass
         except Exception as e:
