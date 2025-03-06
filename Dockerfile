@@ -13,7 +13,9 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /build
 COPY ./rust_crypto /build/rust_crypto
 WORKDIR /build/rust_crypto
-RUN cargo build --release
+
+# Build with explicit features to ensure all functions are exported
+RUN cargo build --release --features="export_all_symbols"
 RUN mkdir -p /build/output && \
     cp /build/rust_crypto/target/release/libtruefa_crypto.so /build/output/
 
@@ -22,8 +24,10 @@ FROM python:3.10-slim
 
 # Install system dependencies:
 # - gnupg2: Required for secure export functionality
+# - libgl1-mesa-glx: Required for OpenCV
 RUN apt-get update && apt-get install -y \
     gnupg2 \
+    libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -43,6 +47,9 @@ COPY --from=rust-builder --chown=truefa:truefa /build/output/libtruefa_crypto.so
 
 # Copy application code
 COPY --chown=truefa:truefa . .
+
+# Make the entrypoint script executable
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -87,7 +94,11 @@ def verify_signature(message: bytes, signature: bytes, public_key: bytes) -> boo
 # Create and secure application directories
 RUN mkdir -p images .truefa/exports && \
     chmod 700 .truefa && \
-    chmod 700 .truefa/exports
+    chmod 700 .truefa/exports && \
+    chmod 755 images
+
+# Create a volume mount point for QR code images
+VOLUME ["/app/images"]
 
 # Switch to non-root user for security
 USER truefa
@@ -95,10 +106,15 @@ USER truefa
 # Configure environment
 ENV HOME=/home/truefa \
     GNUPGHOME=/home/truefa/.gnupg \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    TRUEFA_FALLBACK_TIMEOUT=30000 \
+    TRUEFA_DEBUG_CRYPTO=1
 
 # Set working directory
 WORKDIR /app
+
+# Use the entrypoint script
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # Start the application
 CMD ["python", "-m", "src.main_opencv"]
