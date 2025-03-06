@@ -82,12 +82,125 @@ See the [documentation index](docs/README.md) for a complete overview of availab
 
 ### Known Issues
 - Some Windows installations may still experience permission issues in certain directories
-- Only the Python fallback implementation is supported in Docker containers
+- The Docker container uses the Python fallback implementation for enhanced compatibility and security
+- Docker builds require Linux containers mode in Docker Desktop for Windows
 
 ### Upcoming Improvements
 - Implement proper clean-up of secure strings in the Python fallback implementation
 - Add auto-detection and installation of required dependencies
 - Improve compatibility with different Python versions
+
+## Quick Start Guide
+
+### Installation Options
+
+#### Portable Version (Recommended for Windows)
+1. Download the latest release package
+2. Extract to your preferred location
+3. Run `setup.bat` to install required dependencies 
+4. Run `TrueFA-Py-Launcher.bat` to start the application
+
+The application will store its data in the `.truefa` directory in your user folder, or in the application directory if running in portable mode.
+
+#### Installer Version (Windows)
+Run `TrueFA-Py_Setup.exe` and follow the installation wizard. This will:
+- Install TrueFA-Py to the Program Files directory
+- Create start menu shortcuts
+- Add an uninstaller
+- Register the application with Windows
+
+#### Docker Installation (Enhanced Security)
+Docker provides an isolated, secure environment for running TrueFA-Py with proper dependencies and permissions:
+
+```bash
+# IMPORTANT: Switch Docker to Linux containers mode first
+# Right-click Docker Desktop icon in system tray -> Switch to Linux containers...
+
+# Build the Docker image using the Dockerfile in the project root
+docker build -t truefa-py .
+
+# Run TrueFA-Py in a container
+docker run -it --rm truefa-py
+```
+
+Benefits of using Docker:
+- Complete isolation from your host system
+- Pre-configured secure environment with non-root user
+- Consistent dependencies across different platforms
+- Automatic setup of all required libraries and tools
+- Enhanced privacy through containerization
+
+For persistent storage of your vault data, you can mount a volume:
+
+```bash
+docker run -it --rm -v /path/to/local/storage:/home/truefa/.truefa truefa-py
+```
+
+> **Note**: Our Docker setup uses Linux containers, not Windows containers. Make sure Docker Desktop is switched to Linux containers mode before building or running the image. Use the Dockerfile in the root directory for installation, not the testing Dockerfiles in dev-tools/docker/.
+
+### First-Time Setup
+
+When you first launch TrueFA-Py:
+1. You'll be prompted to create a master password
+2. Enter a strong password when prompted - this will be used to secure your vault
+3. This password cannot be recovered if lost, so remember it
+
+### Using TrueFA-Py
+
+TrueFA-Py provides the following options in its menu:
+
+| Option | Purpose |
+|--------|---------|
+| 1 | Load QR code from image file |
+| 2 | Enter secret key manually |
+| 3 | Save current token to your vault |
+| 4 | View saved tokens and generate codes |
+| 5 | Export vault backup |
+| 6 | Clear screen |
+| 7 | Exit application |
+
+#### Adding Authentication Tokens
+
+**Via QR Code:**
+1. Select option 1
+2. Enter the path to the QR code image file
+3. The application will extract the secret
+
+**Manually:**
+1. Select option 2
+2. Enter the secret key (usually a base32-encoded string)
+3. Enter a name for this token
+
+**Saving Tokens:**
+1. After adding a token, select option 3
+2. Enter a name for the token if prompted
+3. Enter your vault master password
+
+#### Generating TOTP Codes
+
+1. Select option 4
+2. Enter your vault master password
+3. Select the token from the list
+4. The current TOTP code will be displayed with a countdown timer
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Check the `.truefa` directory in your user home folder for marker files (like `.dll_crash`) that indicate specific issues.
+2. Ensure the application has permission to write to your home directory.
+3. Try running with administrator privileges if you encounter permission errors.
+4. Delete the `.truefa` directory to reset the application state if needed.
+5. Use the latest version of the application which includes the optimized Rust implementation with proper timeout protection.
+6. If the application appears to hang, try setting the `TRUEFA_USE_FALLBACK=1` environment variable to force using the Python implementation.
+7. For detailed troubleshooting steps, refer to the [FAQ](docs/FAQ.md) document.
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `TRUEFA_PORTABLE=1` | Run in portable mode (store vault in app directory) |
+| `TRUEFA_USE_FALLBACK=1` | Force using Python crypto implementation |
 
 ## Development
 
@@ -98,21 +211,21 @@ truefa-py/
 ├── assets/                  # Application assets (icons, etc.)
 ├── dev-tools/               # Development tools
 │   ├── build-tools/         # Build and packaging scripts
-│   └── docker/              # Docker testing configurations
+│   │   ├── cleanup.ps1      # Clean build artifacts
+│   │   └── ez-release.ps1   # Create signed release packages
 ├── docs/                    # Documentation
-│   ├── USER_GUIDE.md        # End-user guide with installation and usage
 │   ├── DEVELOPER_GUIDE.md   # Technical guide for developers
 │   ├── FAQ.md               # Frequently asked questions
 │   └── README.md            # Documentation index
 ├── rust_crypto/             # Rust cryptography module
 ├── src/                     # Python source code
 │   ├── totp/                # TOTP implementation
-│   │   ├── auth.py          # Core TOTP functionality (pyzbar)
-│   │   └── auth_opencv.py   # Alternative implementation (OpenCV)
+│   │   └── auth_opencv.py   # TOTP implementation with OpenCV for QR scanning
 │   ├── truefa_crypto/       # Cryptography module with fallbacks
 │   └── vault/               # Secure vault implementation
 ├── TrueFA-Py-Launcher.bat   # Windows launcher script with environment setup
 ├── main.py                  # Application entry point
+├── Dockerfile               # Main Dockerfile for secure Linux container installation
 └── requirements.txt         # Python dependencies
 ```
 
@@ -183,72 +296,6 @@ The secure vault uses a two-layer security model:
 2. **Master Key** - Encrypts/decrypts individual TOTP secrets
 
 This envelope encryption approach ensures that even if one layer is compromised, your secrets remain protected by the other layer.
-
-## User Guide
-
-For complete usage instructions, please refer to the [User Guide](docs/USER_GUIDE.md). Below is a quick overview:
-
-### First-Time Setup
-1. Launch TrueFA-Py using the provided launcher script
-2. When prompted, create a strong master password
-3. This password will be required for all future access to your vault
-
-### Adding Accounts
-1. Select option 1 or 2 from the main menu to add an account
-   - Option 1: Load QR code from image
-   - Option 2: Enter secret key manually
-2. Follow the prompts to enter account details
-3. Use option 3 to save the account to your secure vault
-
-### Viewing Accounts and Codes
-1. Select option 4 from the main menu
-2. Enter your master password when prompted
-3. Choose from the list of available accounts
-4. The current TOTP code will be displayed
-
-### Managing Accounts
-- Use option 5 to export your secrets
-- Use option 6 to clear the screen
-- Use option 7 to exit the application
-
-## Installation
-
-### Portable Version
-1. Download the latest release package
-2. Extract to your preferred location
-3. Run `TrueFA-Py-Launcher.bat` to start the application
-
-The application will store its data in the `.truefa` directory in your user folder, or in the application directory if running in portable mode.
-
-### Installer Version
-Run `TrueFA-Py_Setup.exe` and follow the installation wizard. This will:
-- Install TrueFA-Py to the Program Files directory
-- Create start menu shortcuts
-- Add an uninstaller
-- Register the application with Windows
-
-## Testing in Docker
-
-We've included a Docker-based testing environment to help diagnose issues in a clean Windows installation:
-
-```batch
-# Run the Docker test script
-.\dev-tools\docker\test_docker.bat
-```
-
-This creates a `truefa-py-docker-test` image and runs a container that tests the application in a clean Windows environment.
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Check the `.truefa` directory in your user home folder for marker files (like `.dll_crash`) that indicate specific issues.
-2. Ensure the application has permission to write to your home directory.
-3. Try running with administrator privileges if you encounter permission errors.
-4. Delete the `.truefa` directory to reset the application state if needed.
-5. Use the latest version of the application which includes the optimized Rust implementation with proper timeout protection.
-6. If the application appears to hang, try setting the `TRUEFA_USE_FALLBACK=1` environment variable to force using the Python implementation.
-7. For detailed troubleshooting steps, refer to the [FAQ](docs/FAQ.md) document.
 
 ## License
 
