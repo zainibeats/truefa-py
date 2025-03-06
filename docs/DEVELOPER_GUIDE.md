@@ -53,27 +53,6 @@ pip install -r requirements.txt
 python dev-tools\setup.py
 ```
 
-## Project Structure
-
-TrueFA-Py is organized as follows:
-
-```
-truefa-py/
-├── assets/                  # Application assets (icons, etc.)
-├── dev-tools/               # Development tools
-│   ├── build-tools/         # Build and packaging scripts
-├── docs/                    # Documentation
-├── rust_crypto/             # Rust cryptography module
-│   ├── src/                 # Rust source code
-│   └── Cargo.toml           # Rust package configuration
-├── src/                     # Python source code
-│   ├── totp/                # TOTP implementation
-│   ├── truefa_crypto/       # Cryptography module with fallbacks
-│   └── vault/               # Secure vault implementation
-├── main.py                  # Application entry point
-└── requirements.txt         # Python dependencies
-```
-
 ### Key Components
 
 1. **Cryptography Module** (`src/truefa_crypto/`):
@@ -90,6 +69,27 @@ truefa-py/
    - Implements secure storage for TOTP secrets
    - Handles encryption and decryption of vault contents
    - Manages user authentication and security
+
+4. **Configuration System** (`src/config.py`):
+   - Provides centralized configuration settings
+   - Handles platform-specific paths and portable mode
+   - Supports environment variable overrides for data directories
+
+### Environment Variable Overrides
+
+TrueFA-Py supports the following environment variables to customize data directory locations:
+
+| Environment Variable | Description | Default Location |
+|----------------------|-------------|------------------|
+| `TRUEFA_PORTABLE` | Set to "1" to enable portable mode | Current directory |
+| `TRUEFA_DATA_DIR` | Override main data directory | Platform-specific user directory |
+| `TRUEFA_EXPORTS_DIR` | Override exports directory | `DATA_DIR/exports` |
+| `TRUEFA_CRYPTO_DIR` | Override directory for crypto data | `SECURE_DATA_DIR/crypto` |
+| `TRUEFA_VAULT_FILE` | Override vault file location | `DATA_DIR/vault.dat` |
+| `TRUEFA_SECURE_DIR` | Override secure data directory | Platform-specific secure location |
+| `TRUEFA_USE_FALLBACK` | Set to "1" to force Python fallback | Automatic detection |
+
+These environment variables are particularly useful in containerized environments or when configuring non-standard installations.
 
 ## Building TrueFA-Py
 
@@ -170,7 +170,21 @@ TrueFA-Py relies on a native Rust implementation for critical cryptographic oper
 | `c_create_secure_string` | Memory Security | Stores sensitive strings in protected memory |
 | `c_verify_signature` | Verification | Verifies cryptographic signatures |
 
-### Docker Optimization
+### Docker Support and Persistence
+
+TrueFA-Py provides robust Docker support with persistent storage options:
+
+#### Docker for Developers
+
+For basic Docker installation and usage instructions, see the [Docker section in the README](../README.md#docker).
+
+When developing Docker-related features, note the following:
+
+- The Docker implementation uses volumes for vault data persistence and bind mounts for accessing local files
+- The `run_docker_persistent.ps1` script handles volume initialization and proper permissions
+- Environment variables configure data directory paths and runtime behavior
+
+#### Docker Build Optimization
 
 For Docker builds, we use the `export_all_symbols` feature in Cargo.toml to ensure all necessary functions are properly exported:
 
