@@ -255,6 +255,7 @@ debug.log
 .truefa/
 vault.dat
 release/
+installer.nsi
 
 # Specific build scripts (keep main one)
 build_exe.py 
