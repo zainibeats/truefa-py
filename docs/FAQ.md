@@ -88,7 +88,7 @@ This was an issue in older versions due to the Rust `c_generate_salt` function. 
 If you still experience hanging, try running with `TRUEFA_USE_FALLBACK=1` to use the Python implementation.
 
 ### I can't scan QR codes on Windows
-Some Windows installations have issues with the default QR code scanner (pyzbar) due to DLL dependencies. TrueFA-Py now includes an alternative OpenCV-based scanner that you can use by setting the `TRUEFA_USE_OPENCV=1` environment variable.
+TrueFA-Py uses OpenCV for QR code scanning which provides reliable operation across all platforms including Windows.
 
 ### I'm getting "DLL not found" errors
 Ensure that the Visual C++ Redistributable 2015-2022 is installed. The `setup.bat` script in the Windows package should install this automatically.
