@@ -58,9 +58,13 @@ class TwoFactorAuth:
         - Initial security state
         - OpenCV installation check
         """
+        # Store the current TOTP secret
         self.secret = None
+        # Flag to track if we're continuously generating codes
         self.is_generating = False
+        # Initialize secure storage for secrets
         self.storage = SecureStorage()
+        # Check if vault is already initialized
         self.is_vault_mode = self.storage.vault.is_initialized()
         
         # Register signal handlers for secure cleanup
@@ -117,18 +121,19 @@ class TwoFactorAuth:
             Attempts to install OpenCV using pip if not found
         """
         try:
+            # Try to import OpenCV
             import cv2
             return True
         except ImportError:
+            print("OpenCV not found. Installing...")
             try:
-                print("Installing OpenCV (required for QR scanning)...")
+                # Install OpenCV using pip
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python"])
-                import cv2
                 print("OpenCV installed successfully.")
+                import cv2
                 return True
             except Exception as e:
-                print(f"\nWARNING: Could not install OpenCV: {e}")
-                print("QR code scanning will not be available.")
+                print(f"Failed to install OpenCV: {e}")
                 return False
 
     def _signal_handler(self, signum, frame):
@@ -152,9 +157,13 @@ class TwoFactorAuth:
         Ensures that all secret data is properly zeroized
         and removed from memory.
         """
+        # Clear the TOTP secret if it exists
         if self.secret:
             self.secret.clear()
             self.secret = None
+        
+        # Stop continuous generation if active
+        self.is_generating = False
 
     def extract_secret_from_qr(self, image_path):
         """
@@ -170,16 +179,83 @@ class TwoFactorAuth:
         Security:
         - Validates and sanitizes image path
         - Uses OpenCV's QR code detector
-        - Returns generic error messages for security
+        - Securely stores extracted secret
         """
         try:
-            # Clean up and validate the image path
-            image_path = self._validate_image_path(image_path)
-            if not image_path:
-                return None, "Invalid image path or file not found"
+            # Import OpenCV - this should be available after _check_opencv
+            import cv2
             
-            # Check OpenCV availability
+            # Validate the image path
+            valid_path, error_msg = self._validate_image_path(image_path)
+            if not valid_path:
+                return None, error_msg
+                
+            # Adjusted path might be relative to images directory
+            full_path = os.path.join(self.images_dir, valid_path) if not os.path.isabs(valid_path) else valid_path
+            
+            # Check if file exists after adjustments
+            if not os.path.exists(full_path):
+                # Try finding file in images directory if not found at full path
+                if not os.path.isabs(valid_path):
+                    alternate_path = os.path.join(self.images_dir, os.path.basename(valid_path))
+                    if os.path.exists(alternate_path):
+                        full_path = alternate_path
+                    else:
+                        return None, f"File not found: {valid_path}"
+                else:
+                    return None, f"File not found: {full_path}"
+            
+            # Load and process the image with OpenCV
             try:
+                # Load the image using OpenCV
+                img = cv2.imread(str(full_path))
+                if img is None:
+                    return None, f"Could not read image: {full_path}"
+                
+                print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
+                
+                # Initialize QR Code detector
+                detector = cv2.QRCodeDetector()
+                
+                # Detect and decode
+                print("DEBUG: Attempting to detect and decode QR code...")
+                data, bbox, _ = detector.detectAndDecode(img)
+                
+                print(f"DEBUG: QR code data: {data if data else 'None'}")
+                print(f"DEBUG: QR code bounding box: {bbox if bbox is not None else 'None'}")
+                
+                # Process QR code data
+                if data:
+                    print(f"DEBUG: Raw QR data: {data}")
+                    if data.startswith('otpauth://'):
+                        parsed = urllib.parse.urlparse(data)
+                        params = dict(urllib.parse.parse_qsl(parsed.query))
+                        
+                        print(f"DEBUG: Parsed params: {params}")
+                        
+                        if 'secret' in params:
+                            # Extract and normalize the secret
+                            secret = params['secret']
+                            print(f"DEBUG: Raw secret from QR: {secret}")
+                            
+                            # Create a secure string from the extracted secret
+                            secure_secret = SecureString(secret)
+                            
+                            # Set the issuer and account if available
+                            path = parsed.path
+                            if path.startswith('/'):
+                                path = path[1:]
+                            
+                            if ':' in path:
+                                self.issuer, self.account = path.split(':', 1)
+                            else:
+                                self.account = path
+                                self.issuer = params.get('issuer', '')
+                            
+                            print(f"DEBUG: Parsed issuer: {self.issuer}, account: {self.account}")
+                            
+                            # Store the secret
+                            self.secret = secure_secret
                 import cv2
                 print(f"DEBUG: OpenCV version: {cv2.__version__}")
             except ImportError:
@@ -300,10 +376,26 @@ class TwoFactorAuth:
             return None
 
     def generate_totp(self, secret=None, return_remaining=True):
-        """Generate TOTP code from a secret"""
+        """
+        Generate a TOTP code from the provided or stored secret.
+        
+        Args:
+            secret: The secret key to use. If None, uses self.secret
+            return_remaining: Whether to return remaining time until code expiration
+        
+        Returns:
+            If return_remaining is True:
+                tuple: (TOTP code string, int seconds remaining until expiration)
+            If return_remaining is False:
+                str: TOTP code string
+            If error or no secret:
+                (None, 0) or None depending on return_remaining
+        """
+        # Use stored secret if none provided
         if secret is None:
             secret = self.secret
             
+        # Return immediately if no secret available
         if not secret:
             return None, 0 if return_remaining else None
             
@@ -337,6 +429,7 @@ class TwoFactorAuth:
             
             return code
         except Exception as e:
+            # Log error in debug mode
             if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
                 print(f"ERROR: Failed to generate TOTP code: {e}")
                 traceback.print_exc()
@@ -360,38 +453,57 @@ class TwoFactorAuth:
         - Cleans up on exit
         - Updates at appropriate intervals
         """
+        # Check if a secret is available
         if not self.secret:
             print("No secret key available. Please load a secret first.")
             return
         
+        # Set the continuous generation flag
         self.is_generating = True
-        last_code = None
         
         try:
-            print("\nPress Ctrl+C to return to the main menu")
-            print(f"Generating codes for: {self.issuer or 'Unknown'} ({self.account or 'Unknown'})")
-            print("-" * 40)
+            # Store the last code to avoid unnecessary updates
+            last_code = None
             
+            # Continue until interrupted
             while self.is_generating:
-                code, remaining = self.generate_totp()
-                
-                if code:
-                    # Update the display on every iteration
-                    if callback:
-                        callback(code, remaining)
-                    else:
-                        # Enhanced display with progress bar
-                        progress = "#" * (int(remaining / 3)) + "-" * (10 - int(remaining / 3))
-                        if debug_mode:
-                            print(f"\rCode: {code} | Expires in: {remaining:2d}s [{progress}] | DEBUG: Secret length: {len(self.secret.get_raw_value())} | Secret (for testing only): {self.secret.get_raw_value()}", end="")
+                try:
+                    # Generate the current code and get remaining time
+                    code, remaining = self.generate_totp()
+                    
+                    # Only update if the code has changed or we're close to expiration
+                    if code != last_code or remaining <= 5:
+                        # If a callback is provided, use it; otherwise print to console
+                        if callback:
+                            callback(code, remaining)
                         else:
-                            print(f"\rCode: {code} | Expires in: {remaining:2d}s [{progress}]", end="")
-                        sys.stdout.flush()
-                
-                # Sleep for a short time to avoid CPU usage
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            pass
+                            # Clear the line and print the new code with expiration time
+                            sys.stdout.write('\r' + ' ' * 50 + '\r')  # Clear line
+                            
+                            # Print code with color based on remaining time
+                            if remaining <= 5:
+                                # Red when close to expiring
+                                color_code = "\033[91m"  # Red
+                            elif remaining <= 10:
+                                # Yellow for warning
+                                color_code = "\033[93m"  # Yellow
+                            else:
+                                # Green for plenty of time
+                                color_code = "\033[92m"  # Green
+                                
+                            # Reset color code after printing
+                            reset_code = "\033[0m"
+                            
+                            # Format and print current code and time
+                            sys.stdout.write(f"Code: {color_code}{code}{reset_code} (expires in {remaining}s)")
+                            sys.stdout.flush()
+                        
+                        # Update last code
+                        last_code = code
+                except KeyboardInterrupt:
+                    pass
+        except Exception as e:
+            print(f"ERROR: Exception in continuous_generate: {e}")
         finally:
             self.is_generating = False
             print("\nStopped code generation.")
@@ -412,13 +524,16 @@ class TwoFactorAuth:
         - Validates input parameters
         - Returns generic error messages
         """
+        # Check if we have a secret to save
         if not self.secret:
             return "No secret available to save"
             
         # Check if vault is not initialized
         if not self.storage.vault.is_initialized():
-            # We need to create the vault first
+            # First-time setup: create the vault
             print("\nThis is the first time saving a secret. You need to set up a vault password.")
+            
+            # Securely get and confirm the vault password
             vault_password = getpass.getpass("Enter a vault password to secure your secrets: ")
             if not vault_password:
                 return "Vault password cannot be empty"
@@ -427,13 +542,16 @@ class TwoFactorAuth:
             if vault_password != confirm_password:
                 return "Passwords do not match"
                 
-            # Master password can be the same for simplicity
+            # Use vault password as master password for simplicity
             master_password = vault_password
             
-            # Initialize the vault
+            # Initialize the vault with the passwords
             try:
+                # Create the vault with the passwords
                 self.storage.vault.create_vault(vault_password, master_password)
+                # Unlock the vault for immediate use
                 self.storage.vault.unlock_vault(vault_password)
+                # Mark storage as unlocked
                 self.storage._unlock()
                 
                 # Make sure the key is derived from the vault's master key
@@ -452,24 +570,28 @@ class TwoFactorAuth:
         elif self.storage.vault.is_initialized() and not self.storage.vault.is_unlocked():
             # We need to unlock the vault
             print("\nVault is locked. Please unlock it to save your secret.")
+            
+            # Get the vault password
             vault_password = getpass.getpass("Enter your vault password: ")
             if not vault_password:
                 return "Vault password cannot be empty"
                 
             try:
+                # Attempt to unlock the vault
                 if not self.storage.vault.unlock_vault(vault_password):
                     return "Incorrect vault password"
+                
+                # Mark storage as unlocked
                 self.storage._unlock()
                 
-                # Make sure the key is derived from the vault's master key
+                # Get the master key for encryption
                 master_key = self.storage.vault.get_master_key()
                 if master_key and master_key.get():
                     self.storage.key = base64.b64decode(master_key.get().encode())
                     master_key.clear()
                 
+                self.is_vault_mode = True
                 print("Vault unlocked successfully.")
-                print(f"Vault unlocked state: {self.storage.vault.is_unlocked()}")
-                print(f"Storage unlocked state: {self.storage.is_unlocked}")
             except Exception as e:
                 return f"Failed to unlock vault: {str(e)}"
         
