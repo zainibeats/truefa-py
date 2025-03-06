@@ -35,7 +35,7 @@ if (Test-Path $VERSION_FILE) {
 
 # Step 2: Build executables (if not skipped)
 if (-not $NoBuild) {
-    Write-Host "[INFO] Building executables..."
+    Write-Host "[INFO] Building executables using build.ps1..."
     
     # Clean build artifacts
     if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
@@ -54,60 +54,128 @@ if (-not $NoBuild) {
     Write-Host "[INFO] Build skipped as requested."
 }
 
-# Step 3: Create release directory
-Write-Host "[INFO] Creating release directory..."
-if (Test-Path "release") { Remove-Item -Recurse -Force "release" }
-New-Item -Path "release" -ItemType Directory -Force | Out-Null
+# Step 3: Create release directories
+Write-Host "[INFO] Creating release directories..."
+$releaseBaseDir = "release"
+$portableReleaseDir = Join-Path $releaseBaseDir "portable"
+$installerReleaseDir = Join-Path $releaseBaseDir "installer"
 
-# Step 4: Copy files to release directory
-Write-Host "[INFO] Copying files to release directory..."
+if (Test-Path $releaseBaseDir) { Remove-Item -Recurse -Force $releaseBaseDir }
+New-Item -Path $releaseBaseDir -ItemType Directory -Force | Out-Null
+New-Item -Path $portableReleaseDir -ItemType Directory -Force | Out-Null
+New-Item -Path $installerReleaseDir -ItemType Directory -Force | Out-Null
 
-# Executables
-if (Test-Path "dist\*.exe") {
-    Copy-Item "dist\*.exe" "release\" -Force
-    Write-Host "[INFO] Copied executables to release directory."
-} else {
-    Write-Host "[WARNING] No executables found in dist directory."
-}
-
-# Documentation
+# Documentation files to include in both packages
 $docFiles = @("README.md", "LICENSE", "SECURITY.md", "CRYPTO.md")
-foreach ($file in $docFiles) {
-    if (Test-Path $file) {
-        Copy-Item $file "release\" -Force
-        Write-Host "[INFO] Copied $file to release directory."
-    } else {
-        Write-Host "[WARNING] $file not found, skipping."
+
+# Step 4: Prepare portable package
+Write-Host "[INFO] Preparing portable release package..."
+# Find portable executable
+$portableExe = Get-ChildItem -Path "dist" -Filter "TrueFA-Py.exe" | Where-Object { $_.Name -notmatch "Setup" } | Select-Object -First 1
+if ($portableExe) {
+    # Copy portable executable
+    Copy-Item $portableExe.FullName $portableReleaseDir -Force
+    Write-Host "[INFO] Copied portable executable to release directory."
+    
+    # Copy documentation files
+    foreach ($file in $docFiles) {
+        if (Test-Path $file) {
+            Copy-Item $file $portableReleaseDir -Force
+            Write-Host "[INFO] Copied $file to portable release directory."
+        }
     }
+    
+    # Copy launcher batch file
+    if (Test-Path "TrueFA-Py-Launcher.bat") {
+        Copy-Item "TrueFA-Py-Launcher.bat" $portableReleaseDir -Force
+        Write-Host "[INFO] Copied TrueFA-Py-Launcher.bat to portable release directory."
+    } else {
+        Write-Host "[WARNING] TrueFA-Py-Launcher.bat not found, creating a simple launcher..."
+        @"
+@echo off
+start "" "%~dp0TrueFA-Py.exe"
+"@ | Set-Content -Path (Join-Path $portableReleaseDir "TrueFA-Py-Launcher.bat") -Encoding ASCII
+    }
+} else {
+    Write-Host "[WARNING] Portable executable not found in dist directory."
 }
 
-# Step 5: Sign executables (unless skipped)
+# Step 5: Prepare installer package
+Write-Host "[INFO] Preparing installer release package..."
+# Find installer executable
+$installerExe = Get-ChildItem -Path "dist" -Filter "*Setup*.exe" | Select-Object -First 1
+if ($installerExe) {
+    # Copy installer executable
+    Copy-Item $installerExe.FullName $installerReleaseDir -Force
+    Write-Host "[INFO] Copied installer executable to release directory."
+    
+    # Copy documentation files
+    foreach ($file in $docFiles) {
+        if (Test-Path $file) {
+            Copy-Item $file $installerReleaseDir -Force
+            Write-Host "[INFO] Copied $file to installer release directory."
+        }
+    }
+} else {
+    Write-Host "[WARNING] Installer executable not found in dist directory."
+}
+
+# Step 6: Sign executables (unless skipped)
 if (-not $NoSign) {
     Write-Host "[INFO] Signing executables..."
-    Get-ChildItem "release\*.exe" | ForEach-Object {
-        Write-Host "[INFO] Signing $_..."
-        & gpg --batch --yes --default-key $GPG_KEY_ID --detach-sign $_.FullName
+    
+    # Sign all executables in both release directories
+    $allExes = @(
+        (Get-ChildItem -Path $portableReleaseDir -Filter "*.exe"),
+        (Get-ChildItem -Path $installerReleaseDir -Filter "*.exe")
+    )
+    
+    foreach ($exe in $allExes) {
+        Write-Host "[INFO] Signing $($exe.Name)..."
+        & gpg --batch --yes --default-key $GPG_KEY_ID --detach-sign $exe.FullName
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[WARNING] GPG signing failed for $_. Error: $LASTEXITCODE"
+            Write-Host "[WARNING] GPG signing failed for $($exe.Name). Error: $LASTEXITCODE"
         } else {
-            Write-Host "[INFO] $_ signed successfully."
-            # Signature files are already created in the release directory
+            Write-Host "[INFO] $($exe.Name) signed successfully."
         }
     }
 } else {
     Write-Host "[INFO] Signing skipped as requested."
 }
 
-# Step 6: Create ZIP archive
-$RELEASE_PACKAGE = "$PROJECT_NAME-$CURRENT_VERSION-Release.zip"
-Write-Host "[INFO] Creating release package: $RELEASE_PACKAGE"
-Compress-Archive -Path "release\*" -DestinationPath $RELEASE_PACKAGE -Force
+# Step 7: Create ZIP archives
+$PORTABLE_PACKAGE = "$PROJECT_NAME-$CURRENT_VERSION-Portable.zip"
+$INSTALLER_PACKAGE = "$PROJECT_NAME-$CURRENT_VERSION-Installer.zip"
+
+# Create portable package if files exist
+if (Test-Path "$portableReleaseDir\*.exe") {
+    Write-Host "[INFO] Creating portable release package: $PORTABLE_PACKAGE"
+    Compress-Archive -Path "$portableReleaseDir\*" -DestinationPath $PORTABLE_PACKAGE -Force
+    Write-Host "[INFO] Portable package created successfully."
+} else {
+    Write-Host "[WARNING] No portable executables found, skipping portable package creation."
+}
+
+# Create installer package if files exist
+if (Test-Path "$installerReleaseDir\*.exe") {
+    Write-Host "[INFO] Creating installer release package: $INSTALLER_PACKAGE"
+    Compress-Archive -Path "$installerReleaseDir\*" -DestinationPath $INSTALLER_PACKAGE -Force
+    Write-Host "[INFO] Installer package created successfully."
+} else {
+    Write-Host "[WARNING] No installer executables found, skipping installer package creation."
+}
 
 Write-Host ""
 Write-Host "===== Release process completed successfully! ====="
 Write-Host ""
-Write-Host "Release package: $RELEASE_PACKAGE"
+Write-Host "Release packages:"
+if (Test-Path $PORTABLE_PACKAGE) {
+    Write-Host "- Portable: $(Get-Location)\$PORTABLE_PACKAGE"
+}
+if (Test-Path $INSTALLER_PACKAGE) {
+    Write-Host "- Installer: $(Get-Location)\$INSTALLER_PACKAGE"
+}
 Write-Host ""
 Write-Host "Output files can be found in:"
-Write-Host "- Release directory: $(Get-Location)\release\"
-Write-Host "- Release package: $(Get-Location)\$RELEASE_PACKAGE"
+Write-Host "- Portable release directory: $(Get-Location)\$portableReleaseDir\"
+Write-Host "- Installer release directory: $(Get-Location)\$installerReleaseDir\"
