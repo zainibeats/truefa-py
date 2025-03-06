@@ -7,7 +7,6 @@ This directory contains various build scripts and development utilities for the 
 The development tools are organized into the following directories:
 
 - `build-tools/`: Scripts and files related to building the application
-- `docker-tests/`: Docker configuration and test scripts 
 - `vm-testing/`: Scripts for testing in virtual machine environments
 - Root directory: Core development utilities and test scripts
 
@@ -101,7 +100,7 @@ The repository contains various test scripts to ensure the application works cor
 2. **Rust Development**: After modifying Rust code, use `build_rust.py` to rebuild the crypto library
 3. **Building for Testing**: Use `build.ps1` with appropriate options for quick development builds
 4. **Final Builds**: Use `build_package.py` for creating optimized release builds
-5. **Testing**: Use appropriate test scripts based on your test environment (Docker, VM, local)
+5. **Testing**: Use appropriate test scripts based on your test environment (VM or local)
 
 ## Notes
 
