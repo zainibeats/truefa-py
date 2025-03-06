@@ -1,49 +1,37 @@
 # TrueFA-Py Documentation
 
-This directory contains comprehensive documentation for the TrueFA-Py project
+Welcome to the TrueFA-Py documentation. This directory contains comprehensive guides to help you use, understand, and contribute to TrueFA-Py.
 
 ## Documentation Index
 
-### Core Documentation
+### For Users
 
-- [BUILD_GUIDE.md](BUILD_GUIDE.md) - Detailed instructions for building TrueFA-Py
-- [SECURITY_GUIDE.md](SECURITY_GUIDE.md) - Security model and cryptography implementation
-- [TESTING_GUIDE.md](TESTING_GUIDE.md) - Testing infrastructure and results
+- [**User Guide**](USER_GUIDE.md) - Complete instructions for installing, configuring, and using TrueFA-Py, including a quick start section for new users.
 
-## Project Structure
+- [**Frequently Asked Questions**](FAQ.md) - Answers to common questions about TrueFA-Py, including general usage, security, troubleshooting, and technical details.
 
-TrueFA-Py is organized as follows:
+### For Developers
 
-```
-truefa-py/
-├── assets/                  # Application assets (icons, etc.)
-├── dev-tools/               # Development tools
-│   ├── build-tools/         # Build and packaging scripts
-│   ├── docker-tests/        # Docker testing configurations
-│   ├── vm-testing/          # VM testing tools
-│   └── ...                  # Core dev tools
-├── docs/                    # Documentation
-├── rust_crypto/             # Rust cryptography module
-├── src/                     # Python source code
-├── truefa_crypto/           # Cryptography module with fallbacks
-├── main.py                  # Application entry point
-├── requirements.txt         # Python dependencies
-└── README.md                # Project overview
-```
+- [**Developer Guide**](DEVELOPER_GUIDE.md) - Comprehensive information for developers, including setup instructions, project structure, build process, Rust integration details, testing procedures, security considerations, and troubleshooting tips.
 
-## Development Tools
+## Documentation Structure
 
-The `dev-tools` directory contains various scripts and utilities for development:
+We've consolidated our documentation into these core guides to make it easier to find the information you need:
 
-- **Build Tools**: Scripts for building the application and creating packages
-- **Docker Tests**: Configuration and scripts for testing in Docker containers
-- **VM Testing**: Tools for testing in Windows VMs
-- **Core Tools**: Utilities for development tasks
+1. **User Guide**: Everything end-users need to know to install and use TrueFA-Py effectively
+2. **Developer Guide**: Technical documentation for developers who want to build, modify, or contribute
+3. **FAQ**: Quick answers to common questions for both users and developers
 
-## Quick Start
+Each guide is designed to be comprehensive within its scope while remaining accessible and well-organized.
 
-For a quick start with development, refer to the [BUILD_GUIDE.md](BUILD_GUIDE.md) document.
+## Getting Started
 
-For testing the application, refer to the [TESTING_GUIDE.md](TESTING_GUIDE.md) document.
+- **New users**: Start with the [User Guide](USER_GUIDE.md)'s Quick Start section
+- **Developers**: Begin with the [Developer Guide](DEVELOPER_GUIDE.md)
+- **Looking for specific information**: Check the [FAQ](FAQ.md)
 
-For understanding the security model, refer to the [SECURITY_GUIDE.md](SECURITY_GUIDE.md) document.
+## Additional Resources
+
+- GitHub Repository: [TrueFA-Py](https://github.com/zainibeats/truefa-py)
+- Issue Tracker: [GitHub Issues](https://github.com/zainibeats/truefa-py/issues)
+- Release Notes: See the main repository README
