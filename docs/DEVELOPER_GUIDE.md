@@ -62,15 +62,14 @@ truefa-py/
 ├── assets/                  # Application assets (icons, etc.)
 ├── dev-tools/               # Development tools
 │   ├── build-tools/         # Build and packaging scripts
-│   └── docker/              # Docker testing configurations
+│   └── docker/              # Docker configurations
 ├── docs/                    # Documentation
 ├── rust_crypto/             # Rust cryptography module
 │   ├── src/                 # Rust source code
 │   └── Cargo.toml           # Rust package configuration
 ├── src/                     # Python source code
 │   ├── totp/                # TOTP implementation
-│   │   ├── auth.py          # Core TOTP functionality (pyzbar)
-│   │   └── auth_opencv.py   # Alternative TOTP implementation (OpenCV)
+│   │   └── auth_opencv.py   # TOTP implementation with OpenCV for QR scanning
 │   ├── truefa_crypto/       # Cryptography module with fallbacks
 │   └── vault/               # Secure vault implementation
 ├── main.py                  # Application entry point
@@ -172,74 +171,6 @@ TrueFA-Py relies on a native Rust implementation for critical cryptographic oper
 | `c_decrypt_master_key` | Decryption | Decrypts the master key with the vault key |
 | `c_create_secure_string` | Memory Security | Stores sensitive strings in protected memory |
 | `c_verify_signature` | Verification | Verifies cryptographic signatures |
-
-### Optimized Implementation
-
-The `c_generate_salt` function has been completely redesigned to address critical issues on Windows systems:
-
-```rust
-#[no_mangle]
-pub extern "C" fn c_generate_salt(
-    out: *mut u8,
-    out_max_len: size_t,
-    out_len: *mut size_t
-) -> bool {
-    // Safety checks
-    if out.is_null() || out_len.is_null() {
-        return false;
-    }
-    
-    // Generate 16 random bytes for the salt
-    let mut salt = [0u8; 16];
-    let mut rng = OsRng;
-    
-    // Fill the salt buffer with random bytes
-    if rng.try_fill_bytes(&mut salt).is_err() {
-        return false;
-    }
-    
-    // Base64 encode the salt
-    let encoded = base64::encode(&salt);
-    let encoded_bytes = encoded.as_bytes();
-    let encoded_len = encoded_bytes.len();
-    
-    // Check if output buffer is large enough
-    if encoded_len > out_max_len {
-        return false;
-    }
-    
-    // Copy the encoded salt to the output buffer
-    unsafe {
-        ptr::copy_nonoverlapping(encoded_bytes.as_ptr(), out, encoded_len);
-        *out_len = encoded_len;
-    }
-    
-    true
-}
-```
-
-### Python Integration with Timeout Protection
-
-The Python side now implements timeout protection for all Rust functions:
-
-```python
-def _run_with_timeout(func, timeout=DEFAULT_TIMEOUT, *args, **kwargs):
-    """Run a function with timeout protection."""
-    if timeout <= 0:
-        return func(*args, **kwargs)
-    
-    # Set up the alarm
-    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.alarm(int(timeout))
-    
-    try:
-        result = func(*args, **kwargs)
-        return result
-    finally:
-        # Reset the alarm and restore the old handler
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
-```
 
 ### Intelligent Fallback Mechanism
 
@@ -345,7 +276,7 @@ For security auditing, focus on:
 1. The Rust cryptography implementation in `rust_crypto/src/`
 2. Python-Rust binding in `src/truefa_crypto/__init__.py`
 3. Vault implementation in `src/vault/vault.py`
-4. Secret handling in `src/totp/auth.py`
+4. Secret handling in `src/totp/auth_opencv.py`
 
 ## Distribution
 
