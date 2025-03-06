@@ -24,27 +24,6 @@ The development tools are organized into the following directories:
 - `file_version_info.txt`: Windows version information for the executable
 - `installer.nsi`: NSIS installer script
 
-## Docker Testing (`/docker-tests`)
-
-### Docker Configuration Files
-- `Dockerfile.full`: Complete Docker environment for testing
-- `Dockerfile.minimal`: Minimal Docker configuration 
-- `Dockerfile.simple`: Simple Docker configuration for basic tests
-
-### Docker Test Scripts
-- `test_in_windows_container.bat`: Test the application in a Windows container
-- `test_minimal_container.bat`: Test using the minimal container
-- `test_simple_container.bat`: Test using the simple container
-- `test_script.ps1`: PowerShell script run within the Docker container
-
-## VM Testing (`/vm-testing`)
-
-### VM Test Scripts
-- `fresh_build_test.ps1`: Creates a fresh build and test environment
-- `test_exe_directly.ps1`: Tests the executable directly
-- `prepare_vm_test.ps1`: Prepares files for VM testing
-- `full_test_script.ps1`: Comprehensive test script for VMs
-
 ## Core Build Scripts
 
 ### build_package.py
