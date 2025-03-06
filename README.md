@@ -119,8 +119,11 @@ Docker provides an isolated, secure environment for running TrueFA-Py with prope
 # Build the Docker image using the Dockerfile in the project root
 docker build -t truefa-py .
 
-# Run TrueFA-Py in a container
-docker run -it --rm truefa-py
+# Run TrueFA-Py in a container with persistent storage and shared images
+docker run -it --rm \
+  -v /path/to/store/vault:/home/truefa/.truefa \
+  -v /path/to/your/images:/app/images \
+  truefa-py
 ```
 
 Benefits of using Docker:
@@ -129,14 +132,9 @@ Benefits of using Docker:
 - Consistent dependencies across different platforms
 - Automatic setup of all required libraries and tools
 - Enhanced privacy through containerization
+- Separate volumes for QR code images and vault data
 
-For persistent storage of your vault data, you can mount a volume:
-
-```bash
-docker run -it --rm -v /path/to/local/storage:/home/truefa/.truefa truefa-py
-```
-
-> **Note**: Our Docker setup uses Linux containers, not Windows containers. Make sure Docker Desktop is switched to Linux containers mode before building or running the image. Use the Dockerfile in the root directory for installation.
+> **Note**: Docker setup uses Linux containers, not Windows containers. Make sure Docker Desktop is switched to Linux containers mode before building or running the image. Use the Dockerfile in the root directory for installation.
 
 ### First-Time Setup
 
