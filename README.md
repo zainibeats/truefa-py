@@ -136,7 +136,7 @@ For persistent storage of your vault data, you can mount a volume:
 docker run -it --rm -v /path/to/local/storage:/home/truefa/.truefa truefa-py
 ```
 
-> **Note**: Our Docker setup uses Linux containers, not Windows containers. Make sure Docker Desktop is switched to Linux containers mode before building or running the image. Use the Dockerfile in the root directory for installation, not the testing Dockerfiles in dev-tools/docker/.
+> **Note**: Our Docker setup uses Linux containers, not Windows containers. Make sure Docker Desktop is switched to Linux containers mode before building or running the image. Use the Dockerfile in the root directory for installation.
 
 ### First-Time Setup
 
