@@ -57,11 +57,13 @@ Select option 4 from the main menu, enter your master password, select the desir
 Use option 5 from the main menu to export your encrypted vault. Keep this exported file secure, as it contains all your tokens (though they remain encrypted).
 
 ### How do I use Docker with TrueFA-Py?
-Our Docker implementation provides a secure, isolated environment:
-1. Build the image: `docker build -t truefa-py .`
-2. Run with volumes: `docker run -it --rm -v /path/to/vault:/home/truefa/.truefa -v /path/to/images:/app/images truefa-py`
-3. QR code images should be placed in your mapped images directory
-4. Vault data will persist in your mapped vault directory
+Our Docker implementation provides a secure, isolated environment for running TrueFA-Py:
+
+- For detailed Docker installation and usage instructions, see the [Docker section in the README](../README.md#docker)
+- The Docker implementation supports both quick non-persistent runs and persistent storage using Docker volumes
+- Place your QR code images in the mapped `images` folder for easy access within the container
+- Vault data is stored in a Docker volume named `truefa-vault` for persistence between container runs
+- Environment variables configure the data directory paths inside the container
 
 ### Can I transfer my tokens to another device?
 Yes, export your vault from the first device and then copy the exported file to the second device. You can then import it using the appropriate commands.
@@ -138,4 +140,4 @@ Yes, TrueFA-Py is compatible with any service that follows the TOTP standard (RF
 Updates are released as needed to fix bugs, add features, and improve security. Check the [GitHub repository](https://github.com/zainibeats/truefa-py) for the latest releases.
 
 ### How can I contact the developers directly?
-For security-related concerns, you can email [cheyenne@czaini.net](mailto:cheyenne@czaini.net). For other questions, please use the GitHub issues or discussions. 
+For security-related concerns, you can email [cheyenne@czaini.net](mailto:cheyenne@czaini.net). For other questions, please use the GitHub issues or discussions.
