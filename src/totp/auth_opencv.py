@@ -97,6 +97,7 @@ class TwoFactorAuth:
             self.secret = None
             self.continuous_thread = None
             self.should_stop = threading.Event()
+            self.is_generating = False  # Flag for continuous generation
             
             # Ensure OpenCV is available
             self._check_opencv()
