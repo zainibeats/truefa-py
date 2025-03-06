@@ -4,15 +4,60 @@ This guide provides comprehensive instructions for installing, configuring, and 
 
 ## Table of Contents
 
-1. [Introduction](#introduction)
-2. [Installation](#installation)
-3. [First-Time Setup](#first-time-setup)
-4. [Managing Authentication Tokens](#managing-authentication-tokens)
-5. [Using TOTP Codes](#using-totp-codes)
-6. [Vault Management](#vault-management)
-7. [Advanced Options](#advanced-options)
-8. [Troubleshooting](#troubleshooting)
-9. [FAQs](#faqs)
+1. [Quick Start](#quick-start)
+2. [Introduction](#introduction)
+3. [Installation](#installation)
+4. [First-Time Setup](#first-time-setup)
+5. [Managing Authentication Tokens](#managing-authentication-tokens)
+6. [Using TOTP Codes](#using-totp-codes)
+7. [Vault Management](#vault-management)
+8. [Security Features](#security-features)
+9. [Advanced Options](#advanced-options)
+10. [Troubleshooting](#troubleshooting)
+11. [FAQs](#faqs)
+
+## Quick Start
+
+Get started with TrueFA-Py in minutes:
+
+### 1. Installation
+
+**Windows (Portable - Recommended)**
+- Download `TrueFA-Py-Windows.zip`
+- Extract anywhere
+- Run `setup.bat`
+- Launch with `TrueFA-Py.bat`
+
+**Windows (Installer)**
+- Download `TrueFA-Py_Setup.exe`
+- Run installer
+- Launch from Start menu
+
+**Linux**
+```bash
+pip install truefa-py
+truefa-py
+```
+
+### 2. First Steps
+
+1. Create a strong master password when prompted
+2. Add your first token:
+   - Option 1: Load QR code from image
+   - Option 2: Enter secret key manually
+3. Save your token (Option 3)
+4. View saved tokens and generate codes (Option 4)
+
+### 3. Common Commands
+
+| Option | Purpose |
+|--------|---------|
+| 1 | Load QR code from image |
+| 2 | Enter secret manually |
+| 3 | Save current token |
+| 4 | View saved tokens |
+| 5 | Export vault backup |
+| 7 | Exit application |
 
 ## Introduction
 
@@ -27,6 +72,35 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application that 
 - **Offline Operation**: Generate codes without an internet connection
 - **Portable Mode**: Run the application without installation
 - **Vault Backup**: Export and back up your encrypted secrets
+
+## Security Features
+
+TrueFA-Py employs several layers of security to protect your authentication secrets:
+
+### Two-Layer Encryption
+
+1. **Master Password Layer**: Your master password is used with a random salt to derive an encryption key through PBKDF2 (100,000 iterations)
+2. **Secret Encryption Layer**: Each individual TOTP secret is encrypted with AES-GCM (Galois/Counter Mode), which provides both confidentiality and integrity protection
+
+### Key Security Features
+
+- **No Password Storage**: Your master password is never stored, only cryptographic derivatives
+- **Memory Protection**: Sensitive data is protected in memory when possible and zeroed when no longer needed
+- **Local-Only Operation**: No network communication for core operations, eliminating remote attack vectors
+- **Rust Implementation**: Critical cryptographic operations use a memory-safe Rust implementation
+- **Python Fallback**: Automatic fallback to secure Python implementations if needed
+
+### Secure Vault Design
+
+The vault storing your TOTP secrets:
+- Is encrypted at rest with strong encryption
+- Maintains data integrity through authenticated encryption
+- Prevents modification without the correct master password
+- Creates backups before critical operations to prevent data loss
+
+### Timeout Protection
+
+All cryptographic operations have timeout protection to prevent potential hanging issues, especially on Windows systems.
 
 ## Installation
 
