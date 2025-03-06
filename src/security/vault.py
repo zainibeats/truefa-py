@@ -688,7 +688,21 @@ class SecureVault:
             try:
                 with open(test_file, 'w') as f:
                     f.write('test')
-                os.remove(test_file)
+                # Make sure we remove the test file with elevated permissions if needed
+                try:
+                    os.remove(test_file)
+                except Exception:
+                    if platform.system() == "Windows":
+                        try:
+                            # Set file attributes to normal to remove read-only flags
+                            import ctypes
+                            from ctypes import windll
+                            kernel32 = windll.kernel32
+                            FILE_ATTRIBUTE_NORMAL = 0x80
+                            kernel32.SetFileAttributesW(test_file, FILE_ATTRIBUTE_NORMAL)
+                            os.remove(test_file)
+                        except Exception as e2:
+                            print(f"Critical error: Cannot remove test file ({test_file}): {e2}")
             except Exception as e:
                 print(f"WARNING: Crypto directory is not writable: {e}")
                 print(f"Path: {self.crypto_dir}")
@@ -702,12 +716,25 @@ class SecureVault:
                             os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
                             # Test if we can write here
                             test_file = os.path.join(self.crypto_dir, ".test")
-                            with open(test_file, 'w') as f:
-                                f.write('test')
-                            os.remove(test_file)
-                            print(f"Using AppData/Roaming crypto directory: {self.crypto_dir}")
-                            self.master_key_path = os.path.join(self.crypto_dir, "master.meta")
-                            return
+                            try:
+                                with open(test_file, 'w') as f:
+                                    f.write('test')
+                                try:
+                                    os.remove(test_file)
+                                except Exception:
+                                    if platform.system() == "Windows":
+                                        try:
+                                            # Set file attributes to normal
+                                            import ctypes
+                                            from ctypes import windll
+                                            kernel32 = windll.kernel32
+                                            FILE_ATTRIBUTE_NORMAL = 0x80
+                                            kernel32.SetFileAttributesW(test_file, FILE_ATTRIBUTE_NORMAL)
+                                            os.remove(test_file)
+                                        except Exception as e2:
+                                            print(f"Critical error: Cannot remove test file ({test_file}): {e2}")
+                            except Exception as e:
+                                raise Exception(f"Cannot write to fallback directory: {e}")
                 except Exception:
                     # If that doesn't work, continue to the next fallback
                     pass
@@ -723,7 +750,20 @@ class SecureVault:
                     test_file = os.path.join(self.crypto_dir, ".test")
                     with open(test_file, 'w') as f:
                         f.write('test')
-                    os.remove(test_file)
+                    try:
+                        os.remove(test_file)
+                    except Exception:
+                        if platform.system() == "Windows":
+                            try:
+                                # Set file attributes to normal
+                                import ctypes
+                                from ctypes import windll
+                                kernel32 = windll.kernel32
+                                FILE_ATTRIBUTE_NORMAL = 0x80
+                                kernel32.SetFileAttributesW(test_file, FILE_ATTRIBUTE_NORMAL)
+                                os.remove(test_file)
+                            except Exception as e2:
+                                print(f"Critical error: Cannot remove test file ({test_file}): {e2}")
                 except Exception as e:
                     print(f"CRITICAL ERROR: Cannot find writable location for crypto files: {e}")
                     print("The application may not function correctly.")
