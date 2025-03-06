@@ -30,6 +30,7 @@ import json
 import base64
 import secrets
 import tempfile
+import platform
 import subprocess
 from datetime import datetime
 from pathlib import Path
