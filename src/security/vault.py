@@ -23,104 +23,26 @@ from datetime import datetime
 import secrets
 from .secure_string import SecureString
 import platform
+import base64
+
+# Import our new modules
+from .vault_crypto import (
+    generate_salt, derive_master_key, encrypt_master_key, decrypt_master_key,
+    secure_random_bytes, verify_signature, lock_vault, unlock_vault,
+    is_vault_unlocked, vault_exists, create_vault, has_rust_crypto
+)
+from .vault_directory import create_secure_directory, secure_file_permissions
+from .vault_state import VaultStateManager
 
 def _create_secure_directory(path, fallback_path=None):
     """
     Create a secure directory with proper permissions.
     Falls back to alternate location if primary location is not writable.
     
-    Args:
-        path (str): Primary directory path to create
-        fallback_path (str, optional): Fallback directory path if primary fails
-        
-    Returns:
-        str: Path to the successfully created directory
+    This is a wrapper around the create_secure_directory function from vault_directory.py
+    to maintain backwards compatibility.
     """
-    try:
-        is_windows = platform.system() == "Windows"
-        
-        # Create directory first
-        os.makedirs(path, exist_ok=True)
-        
-        if is_windows:
-            try:
-                import win32security
-                import win32file
-                import ntsecuritycon as con
-                
-                # Get current user's SID
-                username = win32security.GetUserNameEx(win32security.NameSamCompatible)
-                user_sid, domain, type = win32security.LookupAccountName(None, username)
-                
-                # Create a new DACL with full control only for the current user
-                dacl = win32security.ACL()
-                dacl.AddAccessAllowedAce(
-                    win32security.ACL_REVISION,
-                    con.FILE_ALL_ACCESS,
-                    user_sid
-                )
-                
-                # Apply the security descriptor
-                security_desc = win32security.SECURITY_DESCRIPTOR()
-                security_desc.SetSecurityDescriptorDacl(1, dacl, 0)
-                win32security.SetFileSecurity(
-                    path, 
-                    win32security.DACL_SECURITY_INFORMATION,
-                    security_desc
-                )
-                
-                # Add SYSTEM access for better compatibility with Windows services
-                try:
-                    system_sid = win32security.GetBinarySid("S-1-5-18")  # SYSTEM SID
-                    dacl.AddAccessAllowedAce(
-                        win32security.ACL_REVISION,
-                        con.FILE_ALL_ACCESS,
-                        system_sid
-                    )
-                    security_desc.SetSecurityDescriptorDacl(1, dacl, 0)
-                    win32security.SetFileSecurity(
-                        path, 
-                        win32security.DACL_SECURITY_INFORMATION,
-                        security_desc
-                    )
-                except Exception as e:
-                    print(f"Note: Could not add SYSTEM access (not critical): {e}")
-            except ImportError:
-                # If pywin32 is not available, fall back to basic permissions
-                os.chmod(path, 0o700)
-        else:
-            # Unix-like systems
-            os.chmod(path, 0o700)
-        
-        # Verify we can write to it
-        test_file = os.path.join(path, ".test")
-        try:
-            with open(test_file, "w") as f:
-                f.write("test")
-            # Always clean up test file
-            try:
-                os.remove(test_file)
-            except Exception as e:
-                print(f"WARNING: Unable to remove test file: {e}")
-                # Instead of failing, just note it and continue
-                pass
-            return path
-        except (OSError, IOError) as e:
-            print(f"Warning: Cannot write to {path}: {e}")
-            if not fallback_path:
-                raise
-    except Exception as e:
-        print(f"Warning: Cannot create/secure {path}: {e}")
-        if not fallback_path:
-            raise
-            
-    # Try fallback path if provided
-    if fallback_path:
-        try:
-            return _create_secure_directory(fallback_path, None)  # Recursive call with no further fallback
-        except Exception as e:
-            print(f"Error creating fallback directory {fallback_path}: {e}")
-            raise
+    return create_secure_directory(path, fallback_path)
 
 def _get_app_directories():
     """
@@ -638,181 +560,55 @@ class SecureVault:
     
     def __init__(self, storage_path=None):
         """
-        Initialize a secure vault.
+        Initialize the secure vault with the given storage path.
         
         Args:
-            storage_path (str, optional): Path where vault metadata should be stored.
-                If not provided, uses the default location from config.
+            storage_path (str, optional): Path where vault files will be stored.
+                If None, the default location will be used.
+                
+        Security:
+        - Creates secure directories with restrictive permissions
+        - Sets up paths for config storage
         """
-        # Setup paths
-        if storage_path:
-            self.storage_path = storage_path
+        # Set up the vault directory
+        if storage_path is None:
+            # Use default locations
+            self.vault_dir = _get_app_directories()[0]
         else:
-            # Use default from config or create a fallback in user home
-            try:
-                self.storage_path = DATA_DIR
-            except (NameError, AttributeError):
-                # Fallback if we can't import from config
-                self.storage_path = os.path.expanduser('~/.truefa')
+            # Use the specified location
+            self.vault_dir = storage_path
         
-        # Ensure our storage path always exists
-        os.makedirs(self.storage_path, exist_ok=True)
+        self.vault_dir = _create_secure_directory(self.vault_dir)
         
-        # Check if we're running from an installed location that might have restricted access
-        is_installed = False
-        if getattr(sys, 'frozen', False):
-            # Running from PyInstaller bundle
-            exe_path = os.path.abspath(sys.executable).lower()
-            is_installed = any(p in exe_path for p in ["program files", "program files (x86)"])
-            
-        # Try the predefined secure location first
-        try:
-            self.crypto_dir = VAULT_CRYPTO_DIR
-        except (NameError, AttributeError):
-            # If VAULT_CRYPTO_DIR isn't available, use a fallback in HOME
-            self.crypto_dir = os.path.join(os.path.expanduser('~'), '.truefa', '.crypto')
+        # Initialize the vault state manager
+        self.state_manager = VaultStateManager(self.vault_dir)
+        self.vault_path = self.state_manager.vault_path
+        self.master_key_path = self.state_manager.master_key_path
+        self.state_file = self.state_manager.state_file
         
-        # Set up vault location within storage path
-        self.vault_dir = os.path.join(self.storage_path, '.vault')
-        self.vault_path = os.path.join(self.vault_dir, 'vault.meta')
-        self.master_key_path = os.path.join(self.crypto_dir, 'master.meta')
-        
-        # Ensure storage directories exist with proper permissions
-        try:
-            os.makedirs(self.storage_path, mode=0o700, exist_ok=True)
-            os.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
-            os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
-            
-            # Test if we can write to crypto directory
-            test_file = os.path.join(self.crypto_dir, ".test")
-            try:
-                with open(test_file, 'w') as f:
-                    f.write('test')
-                # Make sure we remove the test file with elevated permissions if needed
-                try:
-                    os.remove(test_file)
-                except Exception:
-                    if platform.system() == "Windows":
-                        try:
-                            # Set file attributes to normal to remove read-only flags
-                            import ctypes
-                            from ctypes import windll
-                            kernel32 = windll.kernel32
-                            FILE_ATTRIBUTE_NORMAL = 0x80
-                            kernel32.SetFileAttributesW(test_file, FILE_ATTRIBUTE_NORMAL)
-                            os.remove(test_file)
-                        except Exception as e2:
-                            print(f"Critical error: Cannot remove test file ({test_file}): {e2}")
-            except Exception as e:
-                print(f"WARNING: Crypto directory is not writable: {e}")
-                print(f"Path: {self.crypto_dir}")
-                
-                # First try using AppData/Roaming as a fallback
-                try:
-                    if platform.system() == "Windows":
-                        roaming_dir = os.environ.get('APPDATA')
-                        if roaming_dir:
-                            self.crypto_dir = os.path.join(roaming_dir, APP_NAME, '.crypto')
-                            os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
-                            # Test if we can write here
-                            test_file = os.path.join(self.crypto_dir, ".test")
-                            try:
-                                with open(test_file, 'w') as f:
-                                    f.write('test')
-                                try:
-                                    os.remove(test_file)
-                                except Exception:
-                                    if platform.system() == "Windows":
-                                        try:
-                                            # Set file attributes to normal
-                                            import ctypes
-                                            from ctypes import windll
-                                            kernel32 = windll.kernel32
-                                            FILE_ATTRIBUTE_NORMAL = 0x80
-                                            kernel32.SetFileAttributesW(test_file, FILE_ATTRIBUTE_NORMAL)
-                                            os.remove(test_file)
-                                        except Exception as e2:
-                                            print(f"Critical error: Cannot remove test file ({test_file}): {e2}")
-                            except Exception as e:
-                                raise Exception(f"Cannot write to fallback directory: {e}")
-                except Exception:
-                    # If that doesn't work, continue to the next fallback
-                    pass
-                
-                # Create an alternative crypto directory within the user's home as final fallback
-                self.crypto_dir = os.path.join(os.path.expanduser('~'), '.truefa', '.crypto')
-                self.master_key_path = os.path.join(self.crypto_dir, "master.meta")
-                os.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
-                print(f"Using fallback crypto directory: {self.crypto_dir}")
-                
-                # Verify the fallback is writable
-                try:
-                    test_file = os.path.join(self.crypto_dir, ".test")
-                    with open(test_file, 'w') as f:
-                        f.write('test')
-                    try:
-                        os.remove(test_file)
-                    except Exception:
-                        if platform.system() == "Windows":
-                            try:
-                                # Set file attributes to normal
-                                import ctypes
-                                from ctypes import windll
-                                kernel32 = windll.kernel32
-                                FILE_ATTRIBUTE_NORMAL = 0x80
-                                kernel32.SetFileAttributesW(test_file, FILE_ATTRIBUTE_NORMAL)
-                                os.remove(test_file)
-                            except Exception as e2:
-                                print(f"Critical error: Cannot remove test file ({test_file}): {e2}")
-                except Exception as e:
-                    print(f"CRITICAL ERROR: Cannot find writable location for crypto files: {e}")
-                    print("The application may not function correctly.")
-        except Exception as e:
-            print(f"Error creating vault directories: {e}")
-            print(f"Paths: storage={self.storage_path}, vault={self.vault_dir}, crypto={self.crypto_dir}")
-            # Continue anyway, we'll handle errors during specific operations
-        
-        # Vault state
-        self._initialized = False
-        self._master_key = None
+        # Internal state
+        self._is_locked = True
         self._is_unlocked = False
+        self._master_key = None
+        self._error_states = {
+            "bad_password_attempts": 0,
+            "tamper_attempts": 0,
+            "file_access_errors": 0,
+            "integrity_violations": 0,
+            "last_error_time": None
+        }
         
-        # Load vault configuration if it exists
-        self._load_vault_config()
+        # Set the vault path in the crypto module
+        self._load_vault_state()
 
-    def _check_fallback_markers(self):
-        """
-        Check for marker files indicating we should use fallback mode.
-        These would be created by cleanup utilities or after crashes.
-        """
-        marker_file = os.path.join(os.path.expanduser("~"), ".truefa", ".dll_crash")
-        if os.path.exists(marker_file):
-            if not self.fallback_mode:
-                print("WARNING: Found DLL crash marker file - forcing fallback mode")
-            self.fallback_mode = True
-        
-        # If not in fallback mode, create the marker directory in case we need it
-        if not self.fallback_mode:
-            marker_dir = os.path.join(os.path.expanduser("~"), ".truefa")
-            try:
-                os.makedirs(marker_dir, exist_ok=True)
-            except Exception as e:
-                print(f"Warning: Could not create marker directory: {e}")
-
-    def _load_vault_config(self):
-        """Load vault configuration from disk if it exists."""
+    def _load_vault_state(self):
+        """Load the vault state from disk."""
         try:
             if os.path.exists(self.vault_path):
-                try:
-                    with open(self.vault_path, 'r') as f:
-                        self._vault_config = json.load(f)
-                        self._initialized = True
-                        print(f"Successfully loaded vault configuration from {self.vault_path}")
-                except Exception as e:
-                    print(f"Error loading vault configuration: {e}")
-                    print(f"Path: {self.vault_path}")
-                    self._vault_config = None
-                    self._initialized = False
+                with open(self.vault_path, 'r') as f:
+                    self._vault_config = json.load(f)
+                    self._is_unlocked = True
+                    print(f"Successfully loaded vault configuration from {self.vault_path}")
             else:
                 print(f"Vault metadata not found at: {self.vault_path}")
                 # Try alternate locations as a fallback
@@ -827,7 +623,7 @@ class SecureVault:
                         try:
                             with open(alt_path, 'r') as f:
                                 self._vault_config = json.load(f)
-                                self._initialized = True
+                                self._is_unlocked = True
                                 # Update paths to use this location
                                 self.vault_path = alt_path
                                 self.vault_dir = os.path.dirname(alt_path)
@@ -839,18 +635,18 @@ class SecureVault:
                 
                 # If we're here, we didn't find a valid vault configuration
                 self._vault_config = None
-                self._initialized = False
+                self._is_unlocked = False
         except Exception as outer_e:
-            print(f"Unexpected error in _load_vault_config: {outer_e}")
+            print(f"Unexpected error in _load_vault_state: {outer_e}")
             self._vault_config = None
-            self._initialized = False
+            self._is_unlocked = False
 
     def is_initialized(self):
         """Check if the vault has been initialized."""
         # Re-check the vault configuration in case it was created after initialization
-        if not self._initialized:
-            self._load_vault_config()
-        return self._initialized
+        if not self._is_unlocked:
+            self._load_vault_state()
+        return self._is_unlocked
 
     def is_unlocked(self):
         """Check if the vault is currently unlocked."""
@@ -901,41 +697,40 @@ class SecureVault:
             try:
                 print(f"Creating vault directory: {self.vault_dir}")
                 os_module.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
-                print(f"Creating crypto directory: {self.crypto_dir}")
-                os_module.makedirs(self.crypto_dir, mode=0o700, exist_ok=True)
+                print(f"Creating crypto directory: {self.master_key_path}")
+                os_module.makedirs(os.path.dirname(self.master_key_path), mode=0o700, exist_ok=True)
                 
                 # Check if directories were actually created
                 if not os_module.path.exists(self.vault_dir):
                     print(f"ERROR: Failed to create vault directory at {self.vault_dir}")
                     return False
-                if not os_module.path.exists(self.crypto_dir):
-                    print(f"ERROR: Failed to create crypto directory at {self.crypto_dir}")
+                if not os_module.path.exists(os.path.dirname(self.master_key_path)):
+                    print(f"ERROR: Failed to create master key directory at {os.path.dirname(self.master_key_path)}")
                     return False
                 
                 print(f"Vault directory exists: {os_module.path.exists(self.vault_dir)}")
-                print(f"Crypto directory exists: {os_module.path.exists(self.crypto_dir)}")
+                print(f"Master key directory exists: {os_module.path.exists(os.path.dirname(self.master_key_path))}")
             except Exception as dir_error:
                 print(f"Error ensuring vault directories exist: {dir_error}")
                 print(f"Vault directory: {self.vault_dir}")
-                print(f"Crypto directory: {self.crypto_dir}")
+                print(f"Master key directory: {os.path.dirname(self.master_key_path)}")
                 
                 # Try a fallback approach with a different directory structure
                 print("Trying fallback with alternative directory structure...")
                 alt_vault_dir = os_module.path.join(os_module.path.expanduser("~"), ".truefa_vault")
-                alt_crypto_dir = os_module.path.join(alt_vault_dir, "crypto")
+                alt_master_key_dir = os_module.path.join(alt_vault_dir, "crypto")
                 
                 try:
                     os_module.makedirs(alt_vault_dir, mode=0o700, exist_ok=True)
-                    os_module.makedirs(alt_crypto_dir, mode=0o700, exist_ok=True)
+                    os_module.makedirs(alt_master_key_dir, mode=0o700, exist_ok=True)
                     
                     # Update paths to use fallback
                     self.vault_dir = alt_vault_dir
                     self.vault_path = os_module.path.join(self.vault_dir, "vault.meta")
-                    self.crypto_dir = alt_crypto_dir
-                    self.master_key_path = os_module.path.join(self.crypto_dir, "master.meta")
+                    self.master_key_path = os_module.path.join(alt_master_key_dir, "master.meta")
                     
                     print(f"Using fallback vault directory: {self.vault_dir}")
-                    print(f"Using fallback crypto directory: {self.crypto_dir}")
+                    print(f"Using fallback master key directory: {alt_master_key_dir}")
                 except Exception as alt_err:
                     print(f"Fallback directory creation also failed: {alt_err}")
                     return False
@@ -958,18 +753,18 @@ class SecureVault:
                 write_errors = True
                 
             try:
-                crypto_test = os_module.path.join(self.crypto_dir, ".test")
-                with open(crypto_test, 'w') as f:
+                master_key_test = os_module.path.join(os.path.dirname(self.master_key_path), ".test")
+                with open(master_key_test, 'w') as f:
                     f.write('test')
-                if os_module.path.exists(crypto_test):
-                    os_module.remove(crypto_test)
-                    print(f"Successfully wrote to crypto directory: {self.crypto_dir}")
+                if os_module.path.exists(master_key_test):
+                    os_module.remove(master_key_test)
+                    print(f"Successfully wrote to master key directory: {os.path.dirname(self.master_key_path)}")
                 else:
-                    print(f"ERROR: Test file not created in crypto directory: {self.crypto_dir}")
+                    print(f"ERROR: Test file not created in master key directory: {os.path.dirname(self.master_key_path)}")
                     write_errors = True
-            except Exception as crypto_err:
-                print(f"ERROR: Cannot write to crypto directory: {crypto_err}")
-                print(f"Path: {self.crypto_dir}")
+            except Exception as master_key_err:
+                print(f"ERROR: Cannot write to master key directory: {master_key_err}")
+                print(f"Path: {os.path.dirname(self.master_key_path)}")
                 write_errors = True
                 
             if write_errors:
@@ -980,7 +775,6 @@ class SecureVault:
             print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
                 
             # Mark the vault as initialized and unlocked immediately
-            self._initialized = True
             self._is_unlocked = True
             
             print("STEP 1: Generating vault salt...")
@@ -1344,6 +1138,15 @@ class SecureVault:
                     print("STEP 5: Storing master key metadata...")
                     # Store the master key metadata in the SECURE directory
                     try:
+                        # Ensure salt and encrypted_key are properly encoded as strings for JSON serialization
+                        # If they're already strings (base64-encoded), this won't change them
+                        # If they're bytes, this will convert them to base64 strings
+                        if isinstance(master_salt, bytes):
+                            master_salt = base64.b64encode(master_salt).decode('utf-8')
+                        
+                        if isinstance(encrypted_master_key, bytes):
+                            encrypted_master_key = base64.b64encode(encrypted_master_key).decode('utf-8')
+                            
                         master_meta = {
                             "salt": master_salt,
                             "encrypted_key": encrypted_master_key,
@@ -1539,6 +1342,10 @@ class SecureVault:
             if not encrypted_master_key:
                 return None
             
+            # Ensure encrypted_master_key is a string
+            if isinstance(encrypted_master_key, bytes):
+                encrypted_master_key = encrypted_master_key.decode('utf-8')
+                
             decrypted_master_key = truefa_crypto.decrypt_master_key(encrypted_master_key)
             
             # Ensure proper base64 padding
@@ -1616,6 +1423,10 @@ class SecureVault:
         
         if not master_salt:
             return False, "Vault configuration corrupted"
+            
+        # Ensure master_salt is a string
+        if isinstance(master_salt, bytes):
+            master_salt = master_salt.decode('utf-8')
         
         try:
             # Generate the current master key to verify it
@@ -1783,7 +1594,7 @@ class SecureVault:
         """Save the vault state to disk."""
         try:
             # Ensure the vault directory exists
-            os.makedirs(os.path.dirname(self.vault_file), exist_ok=True)
+            os.makedirs(os.path.dirname(self.vault_path), exist_ok=True)
             
             # Create the vault data
             vault_data = {
@@ -1794,7 +1605,7 @@ class SecureVault:
             }
             
             # Create a temporary file to avoid corruption if the process is interrupted
-            temp_file = f"{self.vault_file}.tmp"
+            temp_file = f"{self.vault_path}.tmp"
             
             # Write to the temporary file
             with open(temp_file, "w") as f:
@@ -1812,16 +1623,16 @@ class SecureVault:
             # Rename the temporary file to the final file name
             # This is an atomic operation on most file systems
             try:
-                if os.path.exists(self.vault_file):
+                if os.path.exists(self.vault_path):
                     # Make a backup first
-                    backup_file = f"{self.vault_file}.bak"
+                    backup_file = f"{self.vault_path}.bak"
                     if os.path.exists(backup_file):
                         os.remove(backup_file)
-                    os.rename(self.vault_file, backup_file)
+                    os.rename(self.vault_path, backup_file)
                     self._log.info(f"Created backup of vault file: {backup_file}")
                 
-                os.rename(temp_file, self.vault_file)
-                self._log.info(f"Saved vault state to {self.vault_file}")
+                os.rename(temp_file, self.vault_path)
+                self._log.info(f"Saved vault state to {self.vault_path}")
                 return True
             except Exception as e:
                 self._log.error(f"Failed to rename temporary file: {e}")
@@ -1831,7 +1642,7 @@ class SecureVault:
                     try:
                         # Copy instead of rename as a fallback
                         with open(temp_file, 'r') as src:
-                            with open(self.vault_file, 'w') as dst:
+                            with open(self.vault_path, 'w') as dst:
                                 dst.write(src.read())
                         os.remove(temp_file)
                         self._log.info(f"Recovered vault state using copy method")
