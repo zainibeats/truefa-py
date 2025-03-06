@@ -56,6 +56,13 @@ Select option 4 from the main menu, enter your master password, select the desir
 ### How do I back up my tokens?
 Use option 5 from the main menu to export your encrypted vault. Keep this exported file secure, as it contains all your tokens (though they remain encrypted).
 
+### How do I use Docker with TrueFA-Py?
+Our Docker implementation provides a secure, isolated environment:
+1. Build the image: `docker build -t truefa-py .`
+2. Run with volumes: `docker run -it --rm -v /path/to/vault:/home/truefa/.truefa -v /path/to/images:/app/images truefa-py`
+3. QR code images should be placed in your mapped images directory
+4. Vault data will persist in your mapped vault directory
+
 ### Can I transfer my tokens to another device?
 Yes, export your vault from the first device and then copy the exported file to the second device. You can then import it using the appropriate commands.
 
@@ -76,6 +83,9 @@ TrueFA-Py uses a Rust-based module for high-performance, memory-safe cryptograph
 
 ### What happens if the Rust module doesn't work on my system?
 TrueFA-Py automatically falls back to a pure Python implementation if the Rust module can't be loaded or encounters issues. You can also force this behavior with the `TRUEFA_USE_FALLBACK=1` environment variable.
+
+### Does the Docker version use the Rust cryptographic module?
+Yes, the Docker implementation includes the Rust cryptographic module. However, if there are any issues loading the module, it will automatically fall back to the Python implementation for reliability. The Docker container also includes all necessary dependencies for OpenCV and QR code scanning.
 
 ### How do I run TrueFA-Py in portable mode?
 Set the `TRUEFA_PORTABLE=1` environment variable before running the application, or use the included portable launcher in the Windows package.
