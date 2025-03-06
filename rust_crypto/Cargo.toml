@@ -7,6 +7,10 @@ edition = "2021"
 name = "truefa_crypto"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+export_all_symbols = [] # Ensures all symbols are exported properly for FFI
+
 [dependencies]
 pyo3 = { version = "0.18.3", features = ["extension-module", "abi3-py37"] }
 aes-gcm = "0.10.1"
