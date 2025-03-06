@@ -40,11 +40,11 @@ if ($Clean) {
 # Build Rust backend if requested
 if ($BuildRust) {
     Write-Host "Building Rust cryptography backend..."
-    python dev-tools\secure_build_fix.py
+    python "$PSScriptRoot\build_rust.py"
 }
 
 # Construct build command
-$buildCmd = "python dev-tools\build_package.py"
+$buildCmd = "python $PSScriptRoot\build_package.py"
 
 if ($Portable) { $buildCmd += " --portable" }
 if ($Installer) { $buildCmd += " --installer" }
