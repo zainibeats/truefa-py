@@ -105,6 +105,22 @@ def main():
                         else:
                             print("QR code processed successfully.")
                             
+                            # Generate codes in real-time immediately after successful QR scan
+                            print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
+                            try:
+                                # Pass debug_mode=True if DEBUG environment variable is set
+                                debug_mode = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+                                auth.continuous_generate(debug_mode=debug_mode)
+                            except KeyboardInterrupt:
+                                # Handle interruption cleanly by printing a newline and message
+                                print("\nStopped code generation.")
+                            except Exception as e:
+                                # Log any unexpected errors but continue program execution
+                                print(f"\nError during code generation: {e}")
+                                if debug_mode:
+                                    traceback.print_exc()
+                            
+                            # After code generation is stopped, ask if the user wants to save the secret
                             # If vault exists and is initialized, offer to auto-save
                             if secure_storage.vault.is_initialized():
                                 # Try to auto-unlock if needed
@@ -173,6 +189,22 @@ def main():
                         
                         print("Secret entered successfully.")
                         
+                        # Generate codes in real-time immediately after entering the secret
+                        print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
+                        try:
+                            # Pass debug_mode=True if DEBUG environment variable is set
+                            debug_mode = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+                            auth.continuous_generate(debug_mode=debug_mode)
+                        except KeyboardInterrupt:
+                            # Handle interruption cleanly by printing a newline and message
+                            print("\nStopped code generation.")
+                        except Exception as e:
+                            # Log any unexpected errors but continue program execution
+                            print(f"\nError during code generation: {e}")
+                            if debug_mode:
+                                traceback.print_exc()
+                                
+                        # After code generation is stopped, ask if the user wants to save the secret
                         # If vault exists and is initialized, offer to auto-save
                         if secure_storage.vault.is_initialized():
                             # Try to auto-unlock if needed
