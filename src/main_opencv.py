@@ -1,9 +1,9 @@
 """
-TrueFA-Py: TOTP Authenticator Application (OpenCV Edition)
+TrueFA-Py: TOTP Authenticator Application
 
 A robust and secure Two-Factor Authentication (2FA) application that 
 implements Time-based One-Time Password (TOTP) authentication according 
-to RFC 6238. This version uses OpenCV for QR code scanning instead of pyzbar.
+to RFC 6238. This application uses OpenCV for reliable QR code scanning.
 
 Key Features:
 - Secure extraction and storage of TOTP secrets from QR codes
@@ -71,7 +71,7 @@ def main():
         # Main application loop
         while True:
             # Display menu
-            print("\n=== TrueFA (OpenCV Edition) ===")
+            print("\n=== TrueFA ===")
             print("1. Load QR code from image")
             print("2. Enter secret key manually")
             print("3. Save current secret")
