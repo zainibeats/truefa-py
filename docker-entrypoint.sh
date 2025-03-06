@@ -14,7 +14,8 @@ fi
 if [ ! -d "/app/images" ]; then
     mkdir -p /app/images
 fi
-chmod 755 /app/images
+# Try to change permissions but don't fail if it doesn't work (for Windows hosts)
+chmod 755 /app/images || echo "Note: Could not change permissions on /app/images (this is normal when mounting from Windows)"
 echo "Images directory is at /app/images"
 echo "You can place QR code images here for scanning"
 
