@@ -62,14 +62,12 @@ truefa-py/
 ├── assets/                  # Application assets (icons, etc.)
 ├── dev-tools/               # Development tools
 │   ├── build-tools/         # Build and packaging scripts
-│   └── docker/              # Docker configurations
 ├── docs/                    # Documentation
 ├── rust_crypto/             # Rust cryptography module
 │   ├── src/                 # Rust source code
 │   └── Cargo.toml           # Rust package configuration
 ├── src/                     # Python source code
 │   ├── totp/                # TOTP implementation
-│   │   └── auth_opencv.py   # TOTP implementation with OpenCV for QR scanning
 │   ├── truefa_crypto/       # Cryptography module with fallbacks
 │   └── vault/               # Secure vault implementation
 ├── main.py                  # Application entry point
@@ -171,6 +169,17 @@ TrueFA-Py relies on a native Rust implementation for critical cryptographic oper
 | `c_decrypt_master_key` | Decryption | Decrypts the master key with the vault key |
 | `c_create_secure_string` | Memory Security | Stores sensitive strings in protected memory |
 | `c_verify_signature` | Verification | Verifies cryptographic signatures |
+
+### Docker Optimization
+
+For Docker builds, we use the `export_all_symbols` feature in Cargo.toml to ensure all necessary functions are properly exported:
+
+```bash
+# Building with exported symbols feature
+cargo build --release --features="export_all_symbols"
+```
+
+This feature helps prevent symbol-related errors in containerized environments where library loading may differ from standard installations.
 
 ### Intelligent Fallback Mechanism
 
@@ -288,6 +297,28 @@ For security auditing, focus on:
    ```
 
 2. Verify the installer in `dist/TrueFA-Py_Setup.exe`
+
+### Docker Distribution
+
+1. Build the Docker image:
+   ```bash
+   docker build -t truefa-py .
+   ```
+
+2. Run with development volumes:
+   ```bash
+   docker run -it --rm \
+     -v /path/to/store/vault:/home/truefa/.truefa \
+     -v /path/to/your/images:/app/images \
+     truefa-py
+   ```
+
+3. Key Docker features:
+   - OpenCV dependencies for QR code scanning
+   - Multi-stage build with optimized Rust library
+   - Volume mounts for images and vault data
+   - Non-root user for enhanced security
+   - Custom entrypoint script with fallback capabilities
 
 ### Portable Distribution
 
