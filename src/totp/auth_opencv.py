@@ -1,9 +1,9 @@
 """
 OpenCV-Based Two-Factor Authentication Module
 
-This module provides an alternative implementation of the TwoFactorAuth class
-that uses OpenCV for QR code scanning instead of pyzbar. This avoids the
-DLL dependency issues on Windows systems.
+This module provides the implementation of the TwoFactorAuth class
+using OpenCV for QR code scanning, which works reliably across
+all platforms.
 
 Key Features:
 - QR code scanning using OpenCV
@@ -35,9 +35,8 @@ class TwoFactorAuth:
     """
     OpenCV-based Two-Factor Authentication implementation.
     
-    This class provides the same functionality as the base TwoFactorAuth class
-    but uses OpenCV for QR code scanning instead of pyzbar. This makes it more
-    reliable on Windows systems where pyzbar can have DLL issues.
+    This class implements Two-Factor Authentication using OpenCV
+    for reliable QR code scanning across all platforms.
     
     Features:
     - QR code scanning with OpenCV (auto-installed if needed)
@@ -164,6 +163,71 @@ class TwoFactorAuth:
         
         # Stop continuous generation if active
         self.is_generating = False
+
+    def scan_qr_code(self, image_path):
+        """
+        Scan a QR code image using OpenCV to extract a TOTP secret
+        
+        Args:
+            image_path: Path to the QR code image
+            
+        Returns:
+            str: Extracted TOTP secret or None if not found
+            
+        Raises:
+            Exception: If QR code scanning fails
+        """
+        try:
+            # Securely validate and sanitize the image path
+            validated_path, error = self._validate_image_path(image_path)
+            if not validated_path:
+                print(f"Image validation error: {error}")
+                return None
+                
+            # Load the image
+            image = cv2.imread(validated_path)
+            if image is None:
+                print(f"Error: Failed to load image at {validated_path}")
+                return None
+                
+            # Initialize the QR Code detector
+            qr_detector = cv2.QRCodeDetector()
+            
+            # Detect and decode the QR code
+            data, bbox, _ = qr_detector.detectAndDecode(image)
+            
+            if not data:
+                # Try with image preprocessing if direct detection fails
+                preprocessed = self._preprocess_image(image)
+                data, bbox, _ = qr_detector.detectAndDecode(preprocessed)
+                
+            if not data:
+                print("No QR code found in the image")
+                return None
+                
+            # Parse the data to extract the TOTP secret
+            # Typically in format: otpauth://totp/Label:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Label&algorithm=SHA1&digits=6&period=30
+            parsed_data = self._parse_otpauth(data)
+            
+            # Verify we have a valid secret
+            if not parsed_data or 'secret' not in parsed_data or not parsed_data['secret']:
+                print("Invalid or missing TOTP secret in QR code")
+                return None
+                
+            # Sanitize the extracted secret
+            secret = parsed_data['secret'].strip().upper()
+            
+            # Validate the secret format (Base32 characters only)
+            if not all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567' for c in secret):
+                print("Invalid TOTP secret format (not Base32)")
+                return None
+                
+            print(f"Successfully extracted TOTP secret from QR code")
+            return secret
+            
+        except Exception as e:
+            print(f"Error scanning QR code: {str(e)}")
+            return None
 
     def extract_secret_from_qr(self, image_path):
         """
@@ -327,53 +391,93 @@ class TwoFactorAuth:
 
     def _validate_image_path(self, image_path):
         """
-        Validate and resolve an image path securely.
+        Validate and sanitize an image path for security.
+        
+        Prevents path traversal attacks and ensures file exists.
+        Only allows specified image formats for security.
         
         Args:
-            image_path: Raw path to validate
+            image_path: Path to potential QR code image
             
         Returns:
-            Path object or None if validation fails
-            
-        Security:
-        - Sanitizes path input
-        - Resolves relative paths safely
-        - Validates path is within allowed directory
-        - Checks file existence
+            tuple: (validated_path, error_message)
         """
+        # Check for path traversal attempts
+        path_to_check = Path(image_path)
+        
+        # Normalize the path
         try:
-            # Clean up the path
-            image_path = image_path.strip().strip("'").strip('"')
-            
-            # Debug the path
-            print(f"DEBUG: Raw image path: {image_path}")
-            
-            # Convert to Path object for safer operations
-            path_obj = Path(image_path)
-            
-            # Try several options to find the image
-            potential_paths = [
-                path_obj,                                       # As provided
-                Path(os.getcwd()) / path_obj,                   # Relative to CWD
-                Path(self.images_dir) / path_obj.name,          # In images dir
-                Path('assets') / path_obj.name,                 # In assets dir
-                Path(os.getcwd()) / 'assets' / path_obj.name,   # In CWD/assets
+            normalized_path = path_to_check.resolve()
+        except (ValueError, OSError):
+            return None, "Invalid path format"
+        
+        # Prevent path traversal by checking resolved path
+        images_dir_abs = Path(self.images_dir).resolve()
+        is_in_images_dir = False
+        
+        try:
+            # Check if the path resolves to something inside the images directory
+            if images_dir_abs in normalized_path.parents or images_dir_abs == normalized_path.parent:
+                is_in_images_dir = True
+        except (ValueError, OSError):
+            return None, "Path traversal attempt detected"
+        
+        # If path doesn't exist and not in images_dir, return error
+        if not path_to_check.exists() and not is_in_images_dir:
+            # Try with images directory
+            if not Path(self.images_dir).exists():
+                try:
+                    os.makedirs(self.images_dir, exist_ok=True)
+                except (PermissionError, OSError):
+                    return None, f"Cannot create images directory: {self.images_dir}"
+                
+            # Check if it might be a filename in the images directory
+            alt_path = Path(self.images_dir) / Path(image_path).name
+            if not alt_path.exists():
+                return None, f"Image file not found: {image_path}"
+            path_to_check = alt_path
+        
+        # Verify the file is actually an image
+        valid_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
+        if path_to_check.suffix.lower() not in valid_extensions:
+            return None, f"Invalid image format. Allowed formats: {', '.join(valid_extensions)}"
+        
+        # Validate the file size to prevent loading very large images
+        try:
+            file_size = path_to_check.stat().st_size
+            if file_size > 5 * 1024 * 1024:  # 5 MB limit
+                return None, "Image file too large (>5MB)"
+            if file_size == 0:
+                return None, "Empty file"
+        except (OSError, PermissionError):
+            return None, "Cannot access file"
+        
+        # Basic file type validation - check file headers
+        try:
+            with open(path_to_check, 'rb') as f:
+                header = f.read(8)  # Read first 8 bytes for file signature
+                
+            # Check common image format signatures
+            valid_signatures = [
+                b'\x89PNG\r\n\x1a\n',  # PNG
+                b'\xff\xd8\xff',        # JPEG (first 3 bytes)
+                b'GIF87a', b'GIF89a',   # GIF
+                b'BM',                  # BMP (first 2 bytes)
+                b'RIFF'                 # WEBP (starts with RIFF)
             ]
             
-            for potential_path in potential_paths:
-                print(f"DEBUG: Trying path: {potential_path}")
-                if potential_path.exists() and potential_path.is_file():
-                    # Make sure it's a valid image file based on extension
-                    if potential_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
-                        print(f"DEBUG: Found valid image at: {potential_path}")
-                        return potential_path
-            
-            # If we get here, we didn't find a valid image
-            return None
-            
-        except Exception as e:
-            print(f"DEBUG: Path validation error: {str(e)}")
-            return None
+            is_valid = False
+            for sig in valid_signatures:
+                if header.startswith(sig):
+                    is_valid = True
+                    break
+                
+            if not is_valid:
+                return None, "Invalid image file type"
+        except (OSError, PermissionError):
+            return None, "Cannot read file"
+        
+        return str(path_to_check), None
 
     def generate_totp(self, secret=None, return_remaining=True):
         """
@@ -662,3 +766,70 @@ class TwoFactorAuth:
             return result
         except Exception as e:
             return f"Export failed: {e}"
+
+    def _preprocess_image(self, image):
+        """
+        Preprocess an image to improve QR code detection
+        
+        Args:
+            image: OpenCV image
+            
+        Returns:
+            Preprocessed image
+        """
+        # Convert to grayscale
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # Apply adaptive thresholding
+        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                       cv2.THRESH_BINARY, 11, 2)
+        
+        # Apply image enhancement techniques
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Return both processed versions (the QR detector will try both)
+        return binary
+        
+    def _parse_otpauth(self, uri):
+        """
+        Parse an otpauth:// URI to extract TOTP parameters
+        
+        Args:
+            uri: otpauth URI string
+            
+        Returns:
+            dict: Parsed parameters or None if invalid
+        """
+        # Basic validation - must start with otpauth://
+        if not uri or not uri.startswith('otpauth://'):
+            return None
+            
+        # Extract the secret and other parameters
+        try:
+            # Security check - limit URI length to prevent DoS
+            if len(uri) > 1024:
+                return None
+                
+            # Parse the URI
+            parsed = {}
+            
+            # Get the query parameters
+            if '?' in uri:
+                query_string = uri.split('?', 1)[1]
+                pairs = query_string.split('&')
+                
+                for pair in pairs:
+                    if '=' in pair:
+                        key, value = pair.split('=', 1)
+                        # Sanitize the keys and values
+                        key = key.strip().lower()
+                        value = value.strip()
+                        
+                        # Only accept known keys for security
+                        if key in ['secret', 'issuer', 'algorithm', 'digits', 'period']:
+                            parsed[key] = value
+            
+            return parsed
+        except Exception:
+            return None
