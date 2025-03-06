@@ -432,23 +432,29 @@ pub extern "C" fn c_lock_vault() -> bool {
 
 #[no_mangle]
 pub extern "C" fn c_generate_salt(out_ptr: *mut u8, out_len: *mut usize) -> bool {
-    Python::with_gil(|_py| {
-        match generate_salt() {
-            Ok(salt) => {
-                let bytes = salt.as_bytes();
-                unsafe {
-                    if bytes.len() <= *out_len {
-                        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
-                        *out_len = bytes.len();
-                        true
-                    } else {
-                        false
-                    }
+    // Generate raw random bytes first
+    let mut salt_bytes = [0u8; 16]; // Same size as in generate_salt()
+    
+    // Fill with random data
+    match OsRng.try_fill_bytes(&mut salt_bytes) {
+        Ok(_) => {
+            // Base64 encode the salt
+            let encoded = base64::encode(&salt_bytes);
+            let encoded_bytes = encoded.as_bytes();
+            
+            // Copy to output buffer if there's enough space
+            unsafe {
+                if encoded_bytes.len() <= *out_len {
+                    std::ptr::copy_nonoverlapping(encoded_bytes.as_ptr(), out_ptr, encoded_bytes.len());
+                    *out_len = encoded_bytes.len();
+                    true
+                } else {
+                    false
                 }
-            },
-            Err(_) => false,
-        }
-    })
+            }
+        },
+        Err(_) => false,
+    }
 }
 
 #[no_mangle]
