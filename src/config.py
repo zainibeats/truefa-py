@@ -63,6 +63,19 @@ def get_data_directory():
     Returns:
         str: Full path to the application data directory
     """
+    # Check environment variable override first (useful for Docker)
+    env_data_dir = os.environ.get('TRUEFA_DATA_DIR')
+    if env_data_dir:
+        os.makedirs(env_data_dir, exist_ok=True)
+        return env_data_dir
+
+    # Check if we're in portable mode
+    if os.environ.get('TRUEFA_PORTABLE', '').lower() in ('1', 'true', 'yes'):
+        # Use current directory for portable mode
+        portable_dir = os.path.join(os.getcwd(), '.truefa')
+        os.makedirs(portable_dir, exist_ok=True)
+        return portable_dir
+
     # Always use user directory for data storage, regardless of installation type
     if platform.system() == "Windows":
         # Use %APPDATA% on Windows (C:\Users\username\AppData\Roaming\TrueFA)
@@ -106,6 +119,12 @@ def get_secure_data_directory():
     - Non-synced location to prevent cloud exposure
     - Validation of permissions after creation
     """
+    # Check environment variable override for secure data directory
+    env_secure_dir = os.environ.get('TRUEFA_SECURE_DIR')
+    if env_secure_dir:
+        os.makedirs(env_secure_dir, exist_ok=True)
+        return env_secure_dir
+
     if platform.system() == "Windows":
         # On Windows, we'll use %LOCALAPPDATA% with restrictive ACLs
         # This is better than APPDATA because it's not synced and can have stricter permissions
@@ -172,10 +191,14 @@ def get_secure_data_directory():
 # Application directories
 DATA_DIR = get_data_directory()
 SECURE_DATA_DIR = get_secure_data_directory()
-VAULT_FILE = os.path.join(DATA_DIR, "vault.dat")
-VAULT_CRYPTO_DIR = os.path.join(SECURE_DATA_DIR, "crypto")
-EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
-TEMP_DIR = os.path.join(DATA_DIR, "temp")
+
+# Check environment variable override for vault file path
+VAULT_FILE = os.environ.get('TRUEFA_VAULT_FILE') or os.path.join(DATA_DIR, "vault.dat")
+VAULT_CRYPTO_DIR = os.environ.get('TRUEFA_CRYPTO_DIR') or os.path.join(SECURE_DATA_DIR, "crypto")
+
+# Check environment variable override for exports directory
+EXPORTS_DIR = os.environ.get('TRUEFA_EXPORTS_DIR') or os.path.join(DATA_DIR, "exports")
+TEMP_DIR = os.environ.get('TRUEFA_TEMP_DIR') or os.path.join(DATA_DIR, "temp")
 
 # Create necessary directories
 os.makedirs(EXPORTS_DIR, exist_ok=True)
