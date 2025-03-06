@@ -698,22 +698,22 @@ class SecureVault:
                 print(f"Creating vault directory: {self.vault_dir}")
                 os_module.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
                 print(f"Creating crypto directory: {self.master_key_path}")
-                os_module.makedirs(os.path.dirname(self.master_key_path), mode=0o700, exist_ok=True)
+                os_module.makedirs(os_module.path.dirname(self.master_key_path), mode=0o700, exist_ok=True)
                 
                 # Check if directories were actually created
                 if not os_module.path.exists(self.vault_dir):
                     print(f"ERROR: Failed to create vault directory at {self.vault_dir}")
                     return False
-                if not os_module.path.exists(os.path.dirname(self.master_key_path)):
-                    print(f"ERROR: Failed to create master key directory at {os.path.dirname(self.master_key_path)}")
+                if not os_module.path.exists(os_module.path.dirname(self.master_key_path)):
+                    print(f"ERROR: Failed to create master key directory at {os_module.path.dirname(self.master_key_path)}")
                     return False
                 
                 print(f"Vault directory exists: {os_module.path.exists(self.vault_dir)}")
-                print(f"Master key directory exists: {os_module.path.exists(os.path.dirname(self.master_key_path))}")
+                print(f"Master key directory exists: {os_module.path.exists(os_module.path.dirname(self.master_key_path))}")
             except Exception as dir_error:
                 print(f"Error ensuring vault directories exist: {dir_error}")
                 print(f"Vault directory: {self.vault_dir}")
-                print(f"Master key directory: {os.path.dirname(self.master_key_path)}")
+                print(f"Master key directory: {os_module.path.dirname(self.master_key_path)}")
                 
                 # Try a fallback approach with a different directory structure
                 print("Trying fallback with alternative directory structure...")
@@ -753,18 +753,18 @@ class SecureVault:
                 write_errors = True
                 
             try:
-                master_key_test = os_module.path.join(os.path.dirname(self.master_key_path), ".test")
+                master_key_test = os_module.path.join(os_module.path.dirname(self.master_key_path), ".test")
                 with open(master_key_test, 'w') as f:
                     f.write('test')
                 if os_module.path.exists(master_key_test):
                     os_module.remove(master_key_test)
-                    print(f"Successfully wrote to master key directory: {os.path.dirname(self.master_key_path)}")
+                    print(f"Successfully wrote to master key directory: {os_module.path.dirname(self.master_key_path)}")
                 else:
-                    print(f"ERROR: Test file not created in master key directory: {os.path.dirname(self.master_key_path)}")
+                    print(f"ERROR: Test file not created in master key directory: {os_module.path.dirname(self.master_key_path)}")
                     write_errors = True
             except Exception as master_key_err:
                 print(f"ERROR: Cannot write to master key directory: {master_key_err}")
-                print(f"Path: {os.path.dirname(self.master_key_path)}")
+                print(f"Path: {os_module.path.dirname(self.master_key_path)}")
                 write_errors = True
                 
             if write_errors:
@@ -808,9 +808,9 @@ class SecureVault:
                             print("WARNING: Salt generation timed out with executor")
                             # Create a crash marker to force fallback in future runs
                             try:
-                                marker_dir = os.path.join(os.path.expanduser("~"), ".truefa")
-                                os.makedirs(marker_dir, exist_ok=True)
-                                marker_path = os.path.join(marker_dir, ".dll_crash")
+                                marker_dir = os_module.path.join(os_module.path.expanduser("~"), ".truefa")
+                                os_module.makedirs(marker_dir, exist_ok=True)
+                                marker_path = os_module.path.join(marker_dir, ".dll_crash")
                                 with open(marker_path, "w") as f:
                                     import datetime
                                     f.write(f"Salt generation timeout at {datetime.datetime.now()}\n")
@@ -837,8 +837,8 @@ class SecureVault:
                                     # Check if Windows 10 or 11
                                     if win_ver.startswith("10.0."):
                                         # Check if the crash marker exists
-                                        crash_marker = os.path.join(os.path.expanduser("~"), ".truefa", ".dll_crash")
-                                        if os.path.exists(crash_marker):
+                                        crash_marker = os_module.path.join(os_module.path.expanduser("~"), ".truefa", ".dll_crash")
+                                        if os_module.path.exists(crash_marker):
                                             print("WARNING: Found previous crash marker - using Python fallback")
                                             fresh_windows = True
                             except Exception:
@@ -847,7 +847,7 @@ class SecureVault:
                             # If we detected potential issues with a fresh Windows install,
                             # skip directly to the fallback implementation
                             if fresh_windows:
-                                salt_result.salt = base64.b64encode(os.urandom(32)).decode('utf-8')
+                                salt_result.salt = base64.b64encode(os_module.urandom(32)).decode('utf-8')
                                 print(f"Used direct Python fallback for salt: {salt_result.salt[:5]}...")
                             else:
                                 # Try the Rust implementation with a very short timeout
@@ -861,7 +861,7 @@ class SecureVault:
                             
                             # Fallback directly if the thread had an error
                             try:
-                                salt_result.salt = base64.b64encode(os.urandom(32)).decode('utf-8')
+                                salt_result.salt = base64.b64encode(os_module.urandom(32)).decode('utf-8')
                                 print(f"Used fallback after error for salt: {salt_result.salt[:5]}...")
                                 salt_result.error = None
                             except Exception as fallback_err:
@@ -900,7 +900,7 @@ class SecureVault:
                     import base64
                     import os
                     # Use os.urandom directly for better performance
-                    vault_salt = base64.b64encode(os.urandom(32)).decode('utf-8')
+                    vault_salt = base64.b64encode(os_module.urandom(32)).decode('utf-8')
                     print(f"Generated fallback salt: {vault_salt[:5]}...")
                 
                 print(f"Time elapsed for salt generation: {time.time() - start_time:.2f} seconds")
@@ -909,7 +909,7 @@ class SecureVault:
                 # Ensure we always have a vault salt even if everything fails
                 import base64
                 import os
-                vault_salt = base64.b64encode(os.urandom(32)).decode('utf-8')
+                vault_salt = base64.b64encode(os_module.urandom(32)).decode('utf-8')
                 print(f"Generated emergency fallback salt: {vault_salt[:5]}...")
                 # Continue with the process - don't return False
             
