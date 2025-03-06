@@ -25,9 +25,13 @@ FROM python:3.10-slim
 # Install system dependencies:
 # - gnupg2: Required for secure export functionality
 # - libgl1-mesa-glx: Required for OpenCV
+# - libxext6: Additional dependency for OpenCV display functionality
+# - libglib2.0-0: Required for OpenCV threading operations
 RUN apt-get update && apt-get install -y \
     gnupg2 \
     libgl1-mesa-glx \
+    libxext6 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -108,7 +112,8 @@ ENV HOME=/home/truefa \
     GNUPGHOME=/home/truefa/.gnupg \
     PYTHONPATH=/app \
     TRUEFA_FALLBACK_TIMEOUT=30000 \
-    TRUEFA_DEBUG_CRYPTO=1
+    TRUEFA_DEBUG_CRYPTO=1 \
+    PYTHONUNBUFFERED=1
 
 # Set working directory
 WORKDIR /app
@@ -117,4 +122,4 @@ WORKDIR /app
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # Start the application
-CMD ["python", "-m", "src.main_opencv"]
+CMD ["python", "main.py"]
