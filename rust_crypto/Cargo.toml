@@ -8,7 +8,7 @@ name = "truefa_crypto"
 crate-type = ["cdylib"]
 
 [features]
-default = []
+default = ["export_all_symbols"]  # Enable export_all_symbols by default
 export_all_symbols = [] # Ensures all symbols are exported properly for FFI
 
 [dependencies]
