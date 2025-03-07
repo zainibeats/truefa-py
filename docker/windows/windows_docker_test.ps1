@@ -1,11 +1,15 @@
-# PowerShell script to test TrueFA-Py in a Windows Docker container
-# This consolidated script supports testing both the Rust cryptography module and Python fallback
+# PowerShell script to test TrueFA-Py Rust implementation in a Windows Docker container
+# This script specifically tests the Rust cryptography implementation for vault creation and persistence
 
 # Set error action
 $ErrorActionPreference = "Stop"
 
-Write-Host "TrueFA-Py Windows Docker Test" -ForegroundColor Cyan
+Write-Host "TrueFA-Py Windows Docker Test - Rust Implementation" -ForegroundColor Cyan
 Write-Host "==================================" -ForegroundColor Cyan
+
+# Get the script directory
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 
 # Ensure Docker is in Windows container mode
 Write-Host "Checking Docker configuration..." -ForegroundColor Cyan
@@ -17,13 +21,40 @@ if ($dockerInfo -match "OSType:\s+linux") {
     exit 1
 }
 
-# Clean up any existing test containers
-Write-Host "Cleaning up any existing test containers..." -ForegroundColor Yellow
+# Check if the Rust DLL exists
+$dllPath = Join-Path $projectRoot "rust_crypto\target\release\truefa_crypto.dll"
+if (-not (Test-Path $dllPath)) {
+    Write-Host "Rust DLL not found at $dllPath" -ForegroundColor Yellow
+    Write-Host "Building Rust DLL..." -ForegroundColor Cyan
+    
+    # Build the Rust DLL
+    Push-Location (Join-Path $projectRoot "rust_crypto")
+    cargo build --release --features="export_all_symbols"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Failed to build Rust DLL! Using pre-built DLL if available." -ForegroundColor Red
+        # Continue with the test, but the Docker container will need a pre-built DLL
+    } else {
+        Write-Host "Rust DLL built successfully!" -ForegroundColor Green
+    }
+    Pop-Location
+}
+
+# Clean up any existing test containers and volumes
+Write-Host "Cleaning up any existing test containers and volumes..." -ForegroundColor Yellow
 docker container ls -a -q -f "name=truefa-test-*" | ForEach-Object { docker container rm $_ -f }
+docker volume rm truefa-test-vault -f 2>$null
+docker volume rm truefa-test-images -f 2>$null
+
+# Create persistent volumes
+Write-Host "Creating persistent volumes..." -ForegroundColor Green
+docker volume create truefa-test-vault
+docker volume create truefa-test-images
 
 # Build the Docker image
-Write-Host "Building Windows test Docker image..." -ForegroundColor Green
-docker build -t truefa-py-windows-test -f Dockerfile.windows.test .
+Write-Host "Building Windows test Docker image for Rust testing..." -ForegroundColor Green
+$dockerfilePath = Join-Path $scriptDir "Dockerfile.windows"
+Set-Location $projectRoot
+docker build -t truefa-py-windows-test -f $dockerfilePath .
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error: Docker build failed with exit code $LASTEXITCODE" -ForegroundColor Red
@@ -32,51 +63,47 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Docker image built successfully!" -ForegroundColor Green
 
-# Check if we should run with Rust DLL
-$rustMode = $false
-if ($args.Contains("-rust")) {
-    $rustMode = $true
-    $testMode = "rust"
-    
-    # Check if DLL exists
-    if (Test-Path "src\truefa_crypto\truefa_crypto.dll") {
-        Write-Host "Creating container with Rust DLL..." -ForegroundColor Green
-        docker create --name truefa-test-container truefa-py-windows-test
-        
-        # Copy the DLL into the container
-        docker cp "src\truefa_crypto\truefa_crypto.dll" truefa-test-container:"/app/src/truefa_crypto/truefa_crypto.dll"
-        
-        # Commit the changes to a new image
-        docker commit truefa-test-container truefa-py-windows-test-with-dll
-        
-        # Remove the temporary container
-        docker rm truefa-test-container
-        
-        # Use the new image for testing
-        $imageToUse = "truefa-py-windows-test-with-dll"
-    } else {
-        Write-Host "Rust DLL not found, running in fallback mode" -ForegroundColor Yellow
-        $rustMode = $false
-        $testMode = "fallback"
-        $imageToUse = "truefa-py-windows-test"
-    }
-} else {
-    $testMode = "fallback"
-    $imageToUse = "truefa-py-windows-test"
-}
-
-# Run the test
-Write-Host "Running test in Windows Docker container..." -ForegroundColor Green
-Write-Host "Test mode: $testMode" -ForegroundColor Cyan
-
-# Run the container
-docker run --name truefa-test-run --rm -e "TRUEFA_TEST_MODE=$testMode" $imageToUse
+# Run the test container
+Write-Host "Running test container with Rust implementation..." -ForegroundColor Green
+docker run --name truefa-test-run `
+    -v truefa-test-vault:C:/data/.truefa `
+    -v truefa-test-images:C:/data/images `
+    -e TRUEFA_USE_FALLBACK=0 `
+    -e TRUEFA_DEBUG_CRYPTO=1 `
+    --rm truefa-py-windows-test
 
 # Check the result
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Test failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    
+    # Run again with fallback enabled for comparison
+    Write-Host "Retrying with Python fallback enabled for comparison..." -ForegroundColor Yellow
+    docker run --name truefa-test-fallback `
+        -v truefa-test-vault:C:/data/.truefa `
+        -v truefa-test-images:C:/data/images `
+        -e TRUEFA_USE_FALLBACK=1 `
+        -e TRUEFA_DEBUG_CRYPTO=1 `
+        --rm truefa-py-windows-test
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Python fallback test passed but Rust implementation failed." -ForegroundColor Yellow
+        Write-Host "This confirms there's an issue specifically with the Rust implementation on Windows." -ForegroundColor Yellow
+    } else {
+        Write-Host "Both Rust and Python fallback tests failed." -ForegroundColor Red
+    }
+    
+    # Clean up volumes on failure
+    Write-Host "Cleaning up test volumes..." -ForegroundColor Yellow
+    docker volume rm truefa-test-vault -f
+    docker volume rm truefa-test-images -f
+    
     exit 1
 } else {
-    Write-Host "Test completed successfully!" -ForegroundColor Green
+    Write-Host "Rust implementation test completed successfully!" -ForegroundColor Green
+    
+    # Keep volumes for inspection if needed
+    Write-Host "Test volumes 'truefa-test-vault' and 'truefa-test-images' are preserved for inspection." -ForegroundColor Cyan
+    Write-Host "Run 'docker volume rm truefa-test-vault truefa-test-images' to clean up." -ForegroundColor Cyan
+    
     exit 0
 } 
