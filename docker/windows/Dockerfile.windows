@@ -1,0 +1,81 @@
+# Windows Docker container for TrueFA-Py
+# Uses Windows Server Core with Python and Rust pre-installed
+
+# Start with Windows Server Core and Python
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Set shell to PowerShell
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Install Chocolatey package manager
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+# Install Python 3.10
+RUN choco install -y python --version=3.10.11
+
+# Install Git
+RUN choco install -y git --version=2.41.0
+
+# Install Rust using rustup-init directly
+RUN Invoke-WebRequest -Uri https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe -OutFile rustup-init.exe; \
+    ./rustup-init.exe -y --default-toolchain stable --no-modify-path; \
+    Remove-Item -Force rustup-init.exe
+
+# Update environment PATH
+RUN $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine'); \
+    $env:PATH = $env:PATH + ';C:\Users\ContainerAdministrator\.cargo\bin'; \
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine)
+
+# Install Microsoft Visual C++ Redistributable
+RUN choco install -y vcredist140
+
+# Install Rust stable toolchain
+RUN rustup install stable-msvc; \
+    rustup default stable-msvc; \
+    rustup component add rust-std
+
+# Create app directory
+WORKDIR C:/app
+
+# Copy the entire repository
+COPY . .
+
+# Install Python dependencies
+RUN python -m pip install --upgrade pip; \
+    python -m pip install -r requirements.txt
+
+# Set up build environment and compile Rust library
+WORKDIR C:/app/rust_crypto
+RUN cargo build --release --features="export_all_symbols"
+
+# Ensure the Rust library is available
+RUN if (Test-Path "C:/app/rust_crypto/target/release/truefa_crypto.dll") { \
+        New-Item -ItemType Directory -Path "C:/app/truefa_crypto" -Force; \
+        Copy-Item "C:/app/rust_crypto/target/release/truefa_crypto.dll" -Destination "C:/app/truefa_crypto/"; \
+    } else { \
+        Write-Error "Rust library compilation failed"; \
+        exit 1; \
+    }
+
+# Copy the Python binding file from the repo
+COPY docker-crypto-init.py C:/app/truefa_crypto/__init__.py
+
+# Create necessary directories
+WORKDIR C:/app
+RUN New-Item -ItemType Directory -Path "images" -Force
+RUN New-Item -ItemType Directory -Path ".truefa/exports" -Force
+
+# Set environment variables
+ENV TRUEFA_FALLBACK_TIMEOUT=30000
+ENV TRUEFA_DEBUG_CRYPTO=1
+ENV TRUEFA_USE_FALLBACK=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=C:/app
+
+# Volume for QR code images
+VOLUME C:/app/images
+
+# Define the entry point
+ENTRYPOINT ["python", "main.py"] 
