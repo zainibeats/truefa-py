@@ -217,8 +217,6 @@ rust_crypto/target/
 !TrueFA_installer.spec
 
 # Test files
-test_*.py
-*_test.py
 inspect_dll.py
 build_and_test.py
 vault_test.py
