@@ -1,0 +1,170 @@
+# TrueFA-Py Windows Testing Container
+# A consolidated test environment for TrueFA-Py on Windows
+
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Set shell to PowerShell
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Install Chocolatey package manager
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+# Install Python 3.10
+RUN choco install -y python --version=3.10.11
+
+# Install Microsoft Visual C++ Redistributable (needed for running the DLL)
+RUN choco install -y vcredist140
+
+# Create app directory
+WORKDIR C:/app
+
+# Copy necessary files
+COPY requirements.txt requirements.txt
+COPY test_vault_creation.py test_vault_creation.py
+COPY docker-crypto-init.py docker-crypto-init.py
+
+# Install Python dependencies
+RUN python -m pip install --upgrade pip; \
+    python -m pip install -r requirements.txt
+
+# Create directory structure and initialize the test environment
+RUN New-Item -ItemType Directory -Path "src/truefa_crypto" -Force; \
+    Copy-Item "docker-crypto-init.py" -Destination "src/truefa_crypto/__init__.py"; \
+    New-Item -ItemType Directory -Path ".truefa/exports" -Force; \
+    New-Item -ItemType File -Path "test_environment.py" -Value @"
+import os
+import sys
+import platform
+import ctypes
+from ctypes import cdll
+import importlib
+
+def check_environment():
+    print(f"TrueFA-Py Test Environment")
+    print(f"===========================")
+    print(f"Python: {sys.version}")
+    print(f"Platform: {platform.platform()}")
+    print(f"Architecture: {platform.architecture()}")
+    
+    # Check environment variables
+    test_mode = os.environ.get('TRUEFA_TEST_MODE', 'fallback')
+    print(f"Test mode: {test_mode}")
+    
+    if test_mode == 'fallback':
+        print("Testing Python fallback implementation...")
+        return test_python_fallback()
+    else:
+        print("Testing Rust crypto implementation...")
+        return test_rust_implementation()
+
+def test_python_fallback():
+    """Test the Python fallback implementation"""
+    try:
+        os.environ['TRUEFA_USE_FALLBACK'] = '1'
+        sys.path.insert(0, os.path.join(os.getcwd()))
+        from src.truefa_crypto import generate_salt, secure_random_bytes
+        
+        print("\nBasic functionality test:")
+        salt = generate_salt()
+        print(f"Generated salt: {salt[:10]}... (length: {len(salt)})")
+        
+        random_bytes = secure_random_bytes(32)
+        print(f"Generated random bytes length: {len(random_bytes)}")
+        
+        print("Python fallback implementation working correctly!")
+        return True
+    except Exception as e:
+        print(f"ERROR with Python fallback implementation: {e}")
+        return False
+
+def test_rust_implementation():
+    """Test the Rust crypto implementation if available"""
+    # Reset fallback flag
+    if 'TRUEFA_USE_FALLBACK' in os.environ:
+        del os.environ['TRUEFA_USE_FALLBACK']
+    
+    dll_path = os.path.join(os.getcwd(), 'src', 'truefa_crypto', 'truefa_crypto.dll')
+    print(f"\nChecking for Rust DLL at: {dll_path}")
+    
+    if os.path.exists(dll_path):
+        print(f"DLL exists at {dll_path}")
+        try:
+            lib = cdll.LoadLibrary(dll_path)
+            print("Successfully loaded Rust DLL!")
+            
+            # Check for key functions
+            function_names = [
+                'c_secure_random_bytes',
+                'c_generate_salt',
+                'c_create_vault',
+                'c_is_vault_unlocked',
+                'c_vault_exists',
+                'c_unlock_vault',
+                'c_lock_vault'
+            ]
+            
+            missing = []
+            for func_name in function_names:
+                if hasattr(lib, func_name):
+                    print(f"Found function: {func_name}")
+                else:
+                    missing.append(func_name)
+                    print(f"Missing function: {func_name}")
+            
+            if missing:
+                print(f"WARNING: {len(missing)} functions are missing from the DLL")
+                return False
+                
+            # Test importing the module and creating test data
+            sys.path.insert(0, os.path.join(os.getcwd()))
+            # Invalidate any previous imports
+            if 'src.truefa_crypto' in sys.modules:
+                importlib.reload(sys.modules['src.truefa_crypto'])
+            
+            from src.truefa_crypto import generate_salt, secure_random_bytes
+            salt = generate_salt()
+            print(f"Generated salt using Rust: {salt[:10]}... (length: {len(salt)})")
+            
+            random_bytes = secure_random_bytes(32)
+            print(f"Generated random bytes using Rust: {len(random_bytes)} bytes")
+            
+            print("Rust implementation working correctly!")
+            return True
+        except Exception as e:
+            print(f"ERROR with Rust implementation: {e}")
+            return False
+    else:
+        print("Rust DLL not found, cannot test Rust implementation")
+        return False
+
+def run_vault_test():
+    """Run the vault creation test"""
+    print("\nRunning vault creation test:")
+    try:
+        from test_vault_creation import test_vault_creation
+        result = test_vault_creation()
+        return result
+    except Exception as e:
+        print(f"ERROR running vault test: {e}")
+        return False
+
+if __name__ == "__main__":
+    env_check = check_environment()
+    vault_test = run_vault_test()
+    
+    print("\nTest Summary:")
+    print(f"Environment Check: {'PASSED' if env_check else 'FAILED'}")
+    print(f"Vault Creation Test: {'PASSED' if vault_test else 'FAILED'}")
+    
+    success = env_check and vault_test
+    sys.exit(0 if success else 1)
+"@
+
+# Setup environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=C:/app
+
+# Set the entry point to run the test environment script
+ENTRYPOINT ["python", "test_environment.py"] 
