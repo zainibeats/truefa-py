@@ -49,10 +49,10 @@ Write-Host "Your data will be saved in '$vaultDir'" -ForegroundColor Cyan
 $imageExists = docker images -q truefa-py 2>$null
 if (-not $imageExists) {
     Write-Host "Warning: truefa-py Docker image not found. Make sure you've built it first with:" -ForegroundColor Yellow
-    Write-Host "docker build -t truefa-py ." -ForegroundColor Yellow
+    Write-Host "docker build -t truefa-py -f docker/Dockerfile ." -ForegroundColor Yellow
     $buildNow = Read-Host "Would you like to build the Docker image now? (y/n)"
     if ($buildNow -eq 'y') {
-        docker build -t truefa-py .
+        docker build -t truefa-py -f docker/Dockerfile .
     } else {
         exit 1
     }
