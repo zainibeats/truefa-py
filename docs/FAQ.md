@@ -84,10 +84,20 @@ Not currently. TrueFA-Py focuses on TOTP-based authentication rather than U2F or
 TrueFA-Py uses a Rust-based module for high-performance, memory-safe cryptographic operations. This provides enhanced security and performance compared to pure Python implementations.
 
 ### What happens if the Rust module doesn't work on my system?
-TrueFA-Py automatically falls back to a pure Python implementation if the Rust module can't be loaded or encounters issues. You can also force this behavior with the `TRUEFA_USE_FALLBACK=1` environment variable.
+TrueFA-Py includes a robust fallback system:
+
+1. The application first attempts to load the Rust DLL from multiple locations
+2. If the DLL can't be found or loaded, it automatically switches to the Python implementation
+3. Even if the DLL loads but individual functions fail, the system will fall back to Python for those functions
+4. The application's functionality remains identical regardless of which implementation is used
+
+You can also force the Python implementation by setting the `TRUEFA_USE_FALLBACK=1` environment variable.
 
 ### Does the Docker version use the Rust cryptographic module?
-Yes, the Docker implementation includes the Rust cryptographic module. However, if there are any issues loading the module, it will automatically fall back to the Python implementation for reliability. The Docker container also includes all necessary dependencies for OpenCV and QR code scanning.
+Yes, the Docker implementation includes the Rust cryptographic module. However, if there are any issues loading the module, it will automatically fall back to the Python implementation for reliability.
+
+### How do I know which implementation my installation is using?
+In verbose mode (or with `TRUEFA_DEBUG_CRYPTO=1`), TrueFA-Py will log which implementation is being used for cryptographic operations. You can also check the startup logs to see if the Rust DLL was successfully loaded.
 
 ### How do I run TrueFA-Py in portable mode?
 Set the `TRUEFA_PORTABLE=1` environment variable before running the application, or use the included portable launcher in the Windows package.
@@ -95,15 +105,22 @@ Set the `TRUEFA_PORTABLE=1` environment variable before running the application,
 ## Troubleshooting
 
 ### The application hangs when I try to create or unlock my vault
-This was an issue in older versions due to the Rust `c_generate_salt` function. Recent versions have completely redesigned this function to eliminate hanging issues. Make sure you're using the latest release.
+Our recent updates have completely resolved this issue by:
+1. Redesigning the Rust `c_generate_salt` function to eliminate hanging issues
+2. Adding timeout detection to automatically fall back to Python implementation
+3. Implementing improved error handling throughout the codebase
 
-If you still experience hanging, try running with `TRUEFA_USE_FALLBACK=1` to use the Python implementation.
+If you experience any hanging with the latest version, please report it as an issue on GitHub.
 
 ### I can't scan QR codes on Windows
-TrueFA-Py uses OpenCV for QR code scanning which provides reliable operation across all platforms including Windows.
+TrueFA-Py uses OpenCV for QR code scanning which provides reliable operation across all platforms including Windows. The Windows installer includes all necessary dependencies for this functionality.
 
 ### I'm getting "DLL not found" errors
-Ensure that the Visual C++ Redistributable 2015-2022 is installed. The `setup.bat` script in the Windows package should install this automatically.
+This is normal and not a problem. TrueFA-Py will automatically fall back to the Python implementation if the DLL cannot be found. However, if you want to use the Rust implementation for better performance:
+
+1. Ensure that the Visual C++ Redistributable 2015-2022 is installed
+2. Check that the `truefa_crypto.dll` file exists in the application directory
+3. Verify that your antivirus isn't blocking the DLL
 
 ### I've forgotten my master password
 Unfortunately, if you've forgotten your master password and don't have a backup, there's no way to recover your stored secrets. You'll need to reset your vault and set up your tokens again.

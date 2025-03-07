@@ -170,38 +170,42 @@ TrueFA-Py relies on a native Rust implementation for critical cryptographic oper
 | `c_create_secure_string` | Memory Security | Stores sensitive strings in protected memory |
 | `c_verify_signature` | Verification | Verifies cryptographic signatures |
 
-### Docker Support and Persistence
+### Cross-Platform Compatibility
 
-TrueFA-Py provides robust Docker support with persistent storage options:
+TrueFA-Py employs a comprehensive strategy to ensure functionality across different platforms and environments:
 
-#### Docker for Developers
+#### Windows Compatibility Improvements
 
-For basic Docker installation and usage instructions, see the [Docker section in the README](../README.md#docker).
+Recent improvements to the Windows implementation include:
 
-When developing Docker-related features, note the following:
+1. **Enhanced DLL Loading**: The application now searches for the Rust DLL in multiple locations with a robust priority system
+2. **Function-Level Fallback**: Individual functions are monitored for timeouts or errors
+3. **Improved Error Detection**: Better error handling when functions fail or DLL cannot be loaded
+4. **Environment Variable Controls**: Fine-grained control through environment variables like `TRUEFA_USE_FALLBACK`
 
-- The Docker implementation uses volumes for vault data persistence and bind mounts for accessing local files
-- The `run_docker_persistent.ps1` script handles volume initialization and proper permissions
-- Environment variables configure data directory paths and runtime behavior
+These improvements ensure TrueFA-Py works reliably across different Windows versions and configurations.
 
-#### Docker Build Optimization
+#### Docker Support and Windows Containers
 
-For Docker builds, we use the `export_all_symbols` feature in Cargo.toml to ensure all necessary functions are properly exported:
+TrueFA-Py includes Docker support for Windows containers:
 
-```bash
-# Building with exported symbols feature
-cargo build --release --features="export_all_symbols"
-```
+- Windows container-based testing environment
+- Support for both Rust DLL and Python fallback testing
+- Integrated testing for vault creation and cryptographic operations
+- Automatic detection of available implementations
 
-This feature helps prevent symbol-related errors in containerized environments where library loading may differ from standard installations.
+For detailed Windows testing information, see the [Windows Testing](WINDOWS_TESTING.md) documentation.
 
 ### Intelligent Fallback Mechanism
 
-TrueFA-Py implements an intelligent fallback system that automatically detects issues with the Rust implementation and falls back to Python:
+TrueFA-Py implements an intelligent fallback system that automatically detects issues with the Rust implementation:
 
 1. **Function-level tracking**: Each Rust function is monitored for timeouts or failures
 2. **Predictive fallback**: Once a function times out, future calls bypass it
 3. **Manual override**: Set `TRUEFA_USE_FALLBACK=1` to force Python implementation
+4. **Transparent behavior**: Application logic remains the same regardless of implementation
+
+This ensures that even in environments where the Rust implementation cannot be loaded or encounters issues, the application continues to function correctly.
 
 ### DLL Loading Strategy
 
@@ -212,6 +216,9 @@ The application searches for the Rust DLL in multiple locations:
 3. Module directory
 4. User's home `.truefa` directory
 5. Current working directory
+6. System library paths
+
+This multi-location search strategy maximizes compatibility across different deployment scenarios.
 
 ## Testing
 
@@ -221,10 +228,10 @@ Run unit tests with pytest:
 
 ```bash
 # Run all tests
-pytest tests/
+pytest dev-tools/tests/
 
-# Run specific test category
-pytest tests/test_crypto.py
+# Run specific test
+pytest dev-tools/tests/test_vault_creation.py
 ```
 
 ### Integration Testing
@@ -251,10 +258,11 @@ print(f"Fallback salt: {fallback_salt}")
 
 ### Automated Test Scripts
 
-The `dev-tools` directory contains automated test scripts:
+The `dev-tools/tests` directory contains automated test scripts:
 
 - `create_test_qr.py`: Creates test QR codes for validation
-- `test_script.ps1`: Tests functionality across different environments
+- `test_vault_creation.py`: Tests vault creation and management
+- `docker-crypto-init.py`: Initializes and tests cryptographic operations in Docker environments
 
 ### Windows Compatibility Testing
 
@@ -262,7 +270,7 @@ Test compatibility across different Windows versions:
 
 ```powershell
 # Run the Windows compatibility check
-.\windows_compatibility_check.ps1
+.\docker\windows\windows_docker_test.ps1
 ```
 
 ## Security Considerations
@@ -316,7 +324,7 @@ For security auditing, focus on:
 
 1. Build the Docker image:
    ```bash
-   docker build -t truefa-py .
+   docker build -t truefa-py -f docker/Dockerfile .
    ```
 
 2. Run with development volumes:
@@ -363,24 +371,4 @@ For security auditing, focus on:
 
 **Solution**:
 - Use the `-Clean` option to start with a fresh build
-- Check PyInstaller logs in the `build` directory
-- Ensure all dependencies are installed (`pip install -r requirements.txt`)
-- Verify the Rust DLL is correctly built
-
-#### Testing Failures
-
-**Symptoms**: Tests fail, especially on specific platforms
-
-**Solution**:
-- Check compatibility with the platform/Python version
-- Use isolated testing environments
-- Review test logs for specific error messages
-
-#### Function Hanging
-
-**Symptoms**: Application hangs when calling Rust functions
-
-**Solution**:
-- Use the optimized implementation with timeout protection
-- Set `TRUEFA_USE_FALLBACK=1` to use Python implementation
-- Check for deadlocks in the Rust code 
+- Check PyInstaller logs in the `

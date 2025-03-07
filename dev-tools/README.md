@@ -7,10 +7,15 @@ This directory contains various build scripts and development utilities for the 
 The development tools are organized into the following directories:
 
 - `build-tools/`: Scripts and files related to building the application
-- `vm-testing/`: Scripts for testing in virtual machine environments
-- Root directory: Core development utilities and test scripts
+- `tests/`: All test-related scripts and utilities
+- Root directory: Core development utilities and build scripts
 
-## Build Tools (`/build-tools`)
+Docker-related files are located in a separate directory:
+
+- `docker/`: Docker configuration files and scripts
+  - `docker/windows/`: Windows-specific Docker files
+
+## Build Tools (`build-tools/`)
 
 ### PyInstaller Specification Files
 - `TrueFA-Py.spec`: PyInstaller spec for the windowed application
@@ -81,18 +86,34 @@ Set up script for development environment:
 python dev-tools/setup.py
 ```
 
-## Test Scripts
+## Test Scripts (`tests/`)
 
-The repository contains various test scripts to ensure the application works correctly in different environments:
+The `tests` directory contains testing scripts and utilities:
 
-- `test_crypto_loading.py`: Tests loading of the cryptographic module
-- `test_exe_compatibility.py`: Tests executable compatibility
-- `test_fixes.py`: Tests fixes for various issues
-- `test_secure_dirs.py`: Tests secure directory handling
-- `test_secure_storage.py`: Tests secure storage functionality
-- `test_secure_string.py`: Tests secure string handling
+- `create_test_qr.py`: Creates test QR codes for testing
 - `test_vault_creation.py`: Tests vault creation and management
-- `vault_test.py`: Tests vault functionality
+- `docker-crypto-init.py`: Initializes crypto module for Docker tests
+
+Additional tests mentioned in documentation but not yet implemented:
+
+- Tests for cryptographic module loading
+- Tests for executable compatibility
+- Tests for secure directory handling
+- Tests for secure storage functionality
+
+## Docker Configuration
+
+Docker-related files are located in the `docker` directory:
+
+- `docker/Dockerfile`: Main Dockerfile for Linux containers
+- `docker/docker-entrypoint.sh`: Container entry point script
+- `docker/run_docker.ps1`: Script to run Docker container with local mounts
+- `docker/run_docker_persistent.ps1`: Script to run container with persistent storage
+
+Windows testing files:
+
+- `docker/windows/Dockerfile.windows`: Windows container configuration for testing
+- `docker/windows/windows_docker_test.ps1`: Script to run tests in Windows containers
 
 ## Development Workflow
 
@@ -100,7 +121,7 @@ The repository contains various test scripts to ensure the application works cor
 2. **Rust Development**: After modifying Rust code, use `build_rust.py` to rebuild the crypto library
 3. **Building for Testing**: Use `build.ps1` with appropriate options for quick development builds
 4. **Final Builds**: Use `build_package.py` for creating optimized release builds
-5. **Testing**: Use appropriate test scripts based on your test environment (VM or local)
+5. **Testing**: Use appropriate test scripts from the `dev-tools/tests` directory
 
 ## Notes
 

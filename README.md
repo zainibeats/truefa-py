@@ -17,13 +17,9 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 
 ### Windows
 
-- Windows 10 or higher is recommended
-- Visual C++ Redistributable 2015-2022 must be installed 
-  - Automatically installed by the setup script
-  - Can be downloaded from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-- Use the bundled launcher script that properly configures the environment
+TrueFA-Py provides two deployment options for Windows systems:
 
-#### Quick Install
+#### Quick Install (Recommended)
 - Download the latest `TrueFA-Py_Setup.exe` from the [releases page](https://github.com/zainibeats/truefa-py/releases)
 - Run the installer and follow the instructions
 - Launch from the Start Menu or Desktop shortcut
@@ -32,24 +28,30 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 - Download `TrueFA-Py-Portable.zip` from the [releases page](https://github.com/zainibeats/truefa-py/releases)
 - Extract and run `TrueFA-Py.exe`
 
+#### System Requirements
+- Windows 10 or higher is recommended
+- Visual C++ Redistributable 2015-2022 must be installed 
+  - Automatically installed by the setup script
+  - Can be downloaded from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+
 ### Docker
 
 #### Quick Run (Non-Persistent)
 ```bash
 # Basic run with temporary volumes (PowerShell)
-.\run_docker.ps1
+.\docker\run_docker.ps1
 ```
 
 #### Persistent Storage Run
 ```bash
 # Run with persistent vault data and local images folder (PowerShell)
-.\run_docker_persistent.ps1
+.\docker\run_docker_persistent.ps1
 ```
 
 #### Manual Configuration
 ```bash
 # Build the Docker image
-docker build -t truefa-py .
+docker build -t truefa-py -f docker/Dockerfile .
 
 # Run with persistent storage
 docker run -it --rm \
@@ -64,7 +66,6 @@ docker run -it --rm \
 - The `/app/images` directory in the container is mapped to a local `images` folder
 - Place your QR code images in the local `images` folder
 - Vault data is stored in a Docker volume for persistence
-- Use the Python fallback implementation in Docker for better compatibility
 
 ### From Source
 ```bash
@@ -74,21 +75,22 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Development
+## Cross-Platform Compatibility
 
-See the [Developer Guide](docs/DEVELOPER_GUIDE.md) for complete development setup, building instructions, and architecture details.
+TrueFA-Py is designed with robust cross-platform compatibility:
 
-### Quick Build
-```powershell
-# Complete package build (portable and installer)
-.\dev-tools\build.ps1 -BuildRust -Clean -Portable -Installer
-```
+- **Rust Cryptography DLL**: Provides high-performance, memory-safe cryptographic operations on Windows
+- **Python Fallback Implementation**: Automatically activates when the Rust DLL cannot be loaded
+- **Intelligent Detection**: Seamlessly switches to the appropriate implementation based on your environment
+
+This dual-implementation approach ensures the application works flawlessly across different Windows systems and other platforms.
 
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md) - Installation, configuration, and usage
 - [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and technical details
 - [FAQ](docs/FAQ.md) - Common questions and troubleshooting
+- [Windows Testing](docs/WINDOWS_TESTING.md) - Details on Windows compatibility testing
 
 ## Security Architecture
 
