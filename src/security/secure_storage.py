@@ -921,40 +921,119 @@ class SecureStorage:
 
     def _ensure_secure_directory(self, directory_path):
         """
-        Ensure the specified directory exists with secure permissions.
+        Ensure the directory exists and has secure permissions.
+
+        Args:
+            directory_path (str): Path to the directory to check/create.
+
+        Returns:
+            bool: True if the directory is secure, False otherwise.
+        """
+        directory = Path(directory_path)
+        
+        # Check if directory exists, create if not
+        if not directory.exists():
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                self._set_secure_permissions(directory)
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Cannot create directory at {directory}: {e}")
+                return self._try_alternate_directories(directory_path)
+        
+        # Verify directory is writable by creating and removing a test file
+        test_file = directory / ".test"
+        try:
+            with open(test_file, "w") as f:
+                f.write("test")
+            test_file.unlink()  # Remove test file
+            return True
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Cannot write to {directory}: {e}")
+            return self._try_alternate_directories(directory_path)
+    
+    def _try_alternate_directories(self, original_path):
+        """
+        Try alternate directories when the primary one fails.
         
         Args:
-            directory_path: Path to the directory to create/check
+            original_path (str): The original path that failed
+            
+        Returns:
+            bool: True if an alternate directory was successfully set up
+        """
+        logger.info("Trying alternate secure directories...")
+        
+        # Define alternate locations in priority order
+        alternates = [
+            os.path.join(os.path.expanduser("~"), ".truefa", ".secure"),
+            os.path.join(os.path.expanduser("~"), ".truefa"),
+            os.path.join(tempfile.gettempdir(), "truefa_secure")
+        ]
+        
+        for alt_path in alternates:
+            if alt_path != original_path:  # Skip the original path
+                try:
+                    # Create directory if needed
+                    alt_dir = Path(alt_path)
+                    alt_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Try to write a test file
+                    test_file = alt_dir / ".test"
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    test_file.unlink()  # Remove test file
+                    
+                    # Found a working directory
+                    logger.info(f"Using fallback secure directory: {alt_path}")
+                    print(f"Using fallback secure directory: {alt_path}")
+                    
+                    # Update the storage path
+                    if alt_path.endswith(".secure"):
+                        self.storage_path = str(alt_dir.parent)
+                    else:
+                        self.storage_path = alt_path
+                    
+                    return True
+                except (OSError, PermissionError) as e:
+                    logger.debug(f"Failed alternate directory {alt_path}: {e}")
+                    continue
+        
+        # If we get here, all alternate directories failed
+        logger.error("All secure directory alternatives failed")
+        return False
+
+    def _set_secure_permissions(self, path):
+        """
+        Set secure permissions on a path.
+        
+        Args:
+            path (Path): Path to set permissions on
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            # Create directory if it doesn't exist
-            if not os.path.exists(directory_path):
-                os.makedirs(directory_path, exist_ok=True)
-                
-            # Set secure permissions (0o700 = user read/write/execute only)
-            # This may fail on Windows, so we'll handle the exception
-            try:
-                os.chmod(directory_path, 0o700)
-            except Exception as e:
-                print(f"Warning: Could not set secure permissions on {directory_path}: {e}")
-                print("This is normal on some Windows systems. Continuing with default permissions.")
-                
-            # Verify we can write to the directory
-            test_file = os.path.join(directory_path, ".test")
-            try:
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                os.remove(test_file)
-                return True
-            except Exception as e:
-                # If we can't write to the directory, try a different approach
-                print(f"WARNING: Unable to write to {directory_path}: {e}")
-                print("Attempting to continue without write verification...")
-                return True  # Return True anyway to allow the application to continue
-                
+            # 0o700 = read, write, execute only for owner
+            if platform.system() != "Windows":
+                # On Unix systems, use os.chmod
+                os.chmod(path, 0o700)
+            else:
+                # On Windows, use icacls if available
+                try:
+                    # This only works on Windows
+                    import subprocess
+                    username = os.environ.get('USERNAME')
+                    if username:
+                        subprocess.run(
+                            ["icacls", str(path), "/grant", f"{username}:(OI)(CI)F", "/T"],
+                            capture_output=True,
+                            check=True
+                        )
+                    return True
+                except (ImportError, subprocess.SubprocessError) as e:
+                    logger.warning(f"Could not set Windows permissions: {e}")
+                    return True  # Continue even if Windows permissions fail
+            return True
         except Exception as e:
-            print(f"Error ensuring secure directory {directory_path}: {e}")
-            return False
+            logger.warning(f"Failed to set secure permissions: {e}")
+            return True  # Continue even if permissions fail
