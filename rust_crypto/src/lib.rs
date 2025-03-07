@@ -552,7 +552,9 @@ pub extern "C" fn c_decrypt_master_key(encrypted_ptr: *const u8, encrypted_len: 
     })
 }
 
-#[no_mangle]
+/// Create a secure string object from raw data
+/// This function is exported for FFI
+#[cfg_attr(feature = "export_all_symbols", no_mangle)]
 pub extern "C" fn c_create_secure_string(data_ptr: *const u8, data_len: usize) -> *mut SecureString {
     let data = unsafe {
         std::slice::from_raw_parts(data_ptr, data_len)
