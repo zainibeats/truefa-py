@@ -612,6 +612,44 @@ class SecureStorage:
             print(f"Error loading secret: {e}")
             return None
 
+    def get_secret(self, name):
+        """
+        Alias for load_secret method for compatibility with main.py.
+        
+        Args:
+            name (str): Name of the secret to load
+            
+        Returns:
+            dict or None: Loaded secret data if successful, None otherwise
+        """
+        return self.load_secret(name)
+
+    def get_secret_path(self, name):
+        """
+        Get the file path for a saved secret.
+        
+        Args:
+            name (str): Name of the secret
+            
+        Returns:
+            str or None: Full path to the secret file if vault is initialized, None otherwise
+        """
+        if not self.vault.is_initialized():
+            return None
+            
+        # Sanitize filename
+        name = name.strip()
+        valid_chars = "-_.() abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        name = ''.join(c for c in name if c in valid_chars)
+        
+        if not name:
+            return None
+            
+        secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+        if os.path.exists(secret_path):
+            return secret_path
+        return None
+
     def save_secret(self, name, secret=None, password=None):
         """
         Save an encrypted secret to storage.

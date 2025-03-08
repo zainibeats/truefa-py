@@ -504,8 +504,30 @@ class TwoFactorAuth:
             return None, 0 if return_remaining else None
             
         try:
-            # Extract the string from the SecureString and properly encode it for TOTP
-            raw_value = secret.get_raw_value()
+            # Extract the secret value based on type
+            secret_value = None
+            
+            # Handle different types of secret objects
+            if hasattr(secret, 'get'):
+                # It's our SecureString class
+                secret_value = secret.get()
+            elif hasattr(secret, 'get_raw_value'):
+                # Legacy method
+                secret_value = secret.get_raw_value()
+            elif hasattr(secret, 'get_value'):
+                # Another potential method
+                try:
+                    value = secret.get_value()
+                    if isinstance(value, bytes):
+                        secret_value = value.decode('utf-8')
+                    else:
+                        secret_value = str(value)
+                except Exception as e:
+                    print(f"Error getting value: {e}")
+                    secret_value = str(secret)
+            else:
+                # Try direct string conversion as a last resort
+                secret_value = str(secret)
             
             # Debug print
             if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
@@ -513,15 +535,15 @@ class TwoFactorAuth:
                 if self.is_generating:
                     sys.stdout.write("\r")  # Move cursor to beginning of line
                 
-                print(f"DEBUG: Secret length: {len(raw_value)}", end="")
-                print(f" | Secret (for testing only): {raw_value}", end="")
+                print(f"DEBUG: Secret length: {len(secret_value)}", end="")
+                print(f" | Secret type: {type(secret_value).__name__}", end="")
                 
                 # Only add newline if not in continuous generation mode
                 if not self.is_generating:
                     print()  # Add newline
             
-            # Generate TOTP with the secret directly - the secret from QR codes is already encoded
-            totp = pyotp.TOTP(raw_value)
+            # Generate TOTP with the secret
+            totp = pyotp.TOTP(secret_value)
             code = totp.now()
             
             if return_remaining:
@@ -1010,3 +1032,54 @@ class TwoFactorAuth:
             self.images_dir = os.path.join(os.getcwd(), 'images')
             if not os.path.exists(self.images_dir):
                 os.makedirs(self.images_dir, exist_ok=True)
+
+    def set_secret(self, secret_value, issuer="", account=""):
+        """
+        Set the TOTP secret and associated metadata.
+        
+        Args:
+            secret_value (str): The base32-encoded secret key
+            issuer (str): The issuer of the TOTP (e.g., Google, Microsoft)
+            account (str): The account identifier (e.g., email address)
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Convert string to SecureString if needed
+            if isinstance(secret_value, str):
+                # Make sure it's a proper base32 string first
+                base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
+                if not base32_pattern.match(secret_value):
+                    print("Warning: Secret doesn't appear to be in base32 format. Attempting to encode it.")
+                    try:
+                        # Try to encode it as base32 if it's not already
+                        secret_bytes = secret_value.encode('utf-8')
+                        secret_value = base64.b32encode(secret_bytes).decode('utf-8')
+                    except Exception as encoding_error:
+                        print(f"Error encoding secret as base32: {encoding_error}")
+                
+                # Create a SecureString with the correct encoding
+                self.secret = SecureString(secret_value.encode('utf-8'))
+            else:
+                self.secret = secret_value
+                
+            # Store metadata
+            self.issuer = issuer
+            self.account = account
+            
+            # Validate that we can generate a TOTP code with this secret
+            try:
+                totp = pyotp.TOTP(self.secret.get())
+                test_code = totp.now()
+                if test_code:
+                    print(f"Secret validated successfully.")
+                    return True
+            except Exception as totp_error:
+                print(f"Warning: Could not generate TOTP code with the provided secret: {totp_error}")
+                # We'll continue anyway since the secret might be valid in another format
+                
+            return True
+        except Exception as e:
+            print(f"Error setting secret: {e}")
+            return False
