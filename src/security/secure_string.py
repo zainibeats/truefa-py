@@ -113,28 +113,48 @@ class SecureString:
     
     def get(self):
         """
-        Retrieve the actual sensitive string value.
+        Get the actual string value. USE THIS METHOD SPARINGLY.
         
-        This method provides controlled access to the underlying sensitive data.
-        It should only be called when the value is immediately needed for
+        This method exposes the sensitive string value, which should be used only for
         cryptographic operations and should never be stored in regular variables.
         
         Returns:
-            str: The actual sensitive string value
+            bytes or str: The actual sensitive data (bytes if binary, str if text)
             
         Security Notes:
             - Use this method sparingly and only when absolutely necessary
             - Never store the returned value in regular variables
             - Clear any variables containing this value as soon as possible
         """
-        # For testing, directly return the string value
+        # For testing, directly return the value
         if hasattr(self, '_debug_value'):
-            if isinstance(self._debug_value, bytes):
-                return self._debug_value.decode('utf-8')
-            return str(self._debug_value)
+            return self._debug_value  # Return as is, without attempting to decode
             
-        # Otherwise decode the bytes
-        return self.value_bytes.decode('utf-8')
+        # Otherwise return the bytes
+        return self.value_bytes  # Return raw bytes
+    
+    def get_value(self):
+        """
+        Get the raw value as bytes. USE THIS METHOD SPARINGLY.
+        
+        This is the preferred method for getting the actual value for cryptographic operations.
+        
+        Returns:
+            bytes: The raw bytes of the sensitive data
+            
+        Security Notes:
+            - Use this method sparingly and only when absolutely necessary
+            - Never store the returned value in regular variables
+            - Clear any variables containing this value as soon as possible
+        """
+        # For testing, ensure we return bytes
+        if hasattr(self, '_debug_value'):
+            if isinstance(self._debug_value, str):
+                return self._debug_value.encode('utf-8')
+            return self._debug_value
+            
+        # Return the bytes
+        return self.value_bytes
     
     def get_raw_value(self):
         """
