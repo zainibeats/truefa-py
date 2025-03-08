@@ -11,6 +11,9 @@ import platform
 import tempfile
 import shutil
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 def is_running_in_docker():
     """
@@ -54,6 +57,7 @@ def create_secure_directory(path, fallback_path=None):
     running_in_docker = is_running_in_docker()
     docker_with_windows_mount = running_in_docker and platform.system() != "Windows"
     
+    # First, attempt to create and secure the primary directory
     try:
         # Create the directory if it doesn't exist
         if not os.path.exists(path):
@@ -65,72 +69,71 @@ def create_secure_directory(path, fallback_path=None):
                 current_mode = os.stat(path).st_mode & 0o777
                 if current_mode != 0o700:
                     os.chmod(path, 0o700)
-            except PermissionError as e:
-                if docker_with_windows_mount:
-                    print(f"Warning: Could not set permissions on {path} - this is expected when mounting from Windows to Docker")
-                else:
-                    raise
+            except PermissionError:
+                # Can't set permissions, but directory might still be usable
+                logger.warning(f"Cannot set secure permissions on {path}")
         
-        # Test if we can write to the directory
-        test_file = os.path.join(path, ".test_write")
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.remove(test_file)
-        
-        return path
+        # Test if the directory is writable by creating and removing a test file
+        test_file = os.path.join(path, '.test')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            logger.info(f"Successfully created secure directory: {path}")
+            return path
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Cannot write to {path}: {str(e)}")
+            # Fall through to fallback logic
+    except Exception as e:
+        logger.warning(f"Failed to create primary secure directory {path}: {str(e)}")
+        # Fall through to fallback logic
     
-    except (OSError, PermissionError) as e:
-        print(f"Error creating secure directory at {path}: {e}")
+    # If we get here, the primary path failed
+    
+    # If no fallback was provided, create one based on HOME directory
+    if not fallback_path:
+        home_dir = os.path.expanduser("~")
         
-        # Try fallback location if provided
-        if fallback_path:
-            try:
-                print(f"Trying fallback location: {fallback_path}")
-                fallback_path = os.path.abspath(os.path.expanduser(fallback_path))
-                
-                if not os.path.exists(fallback_path):
-                    os.makedirs(fallback_path, mode=0o700, exist_ok=True)
-                
-                # On POSIX systems, verify and set proper permissions
-                if platform.system() != "Windows":
-                    try:
-                        current_mode = os.stat(fallback_path).st_mode & 0o777
-                        if current_mode != 0o700:
-                            os.chmod(fallback_path, 0o700)
-                    except PermissionError as e:
-                        if docker_with_windows_mount:
-                            print(f"Warning: Could not set permissions on {fallback_path} - this is expected when mounting from Windows to Docker")
-                        else:
-                            raise
-                
-                # Test if we can write to the directory
-                test_file = os.path.join(fallback_path, ".test_write")
-                with open(test_file, "w") as f:
-                    f.write("test")
-                os.remove(test_file)
-                
-                return fallback_path
-            
-            except (OSError, PermissionError) as fallback_error:
-                print(f"Error creating fallback directory: {fallback_error}")
-                
-                # If running in Docker with a Windows mount, create a temporary directory as last resort
-                if docker_with_windows_mount:
-                    print("Running in Docker with Windows host mount, creating temporary directory inside container")
-                    temp_dir = os.path.join(tempfile.gettempdir(), "truefa_temp_vault")
-                    os.makedirs(temp_dir, mode=0o700, exist_ok=True)
-                    return temp_dir
-                
-                raise OSError(f"Cannot create a secure directory at either {path} or {fallback_path}")
+        # Create platform-specific fallback paths
+        if platform.system() == "Windows":
+            fallback_path = os.path.join(home_dir, ".truefa", ".secure")
         else:
-            # If running in Docker with a Windows mount, create a temporary directory as last resort
-            if docker_with_windows_mount:
-                print("Running in Docker with Windows host mount, creating temporary directory inside container")
-                temp_dir = os.path.join(tempfile.gettempdir(), "truefa_temp_vault")
-                os.makedirs(temp_dir, mode=0o700, exist_ok=True)
-                return temp_dir
-                
-            raise OSError(f"Cannot create secure directory at {path} and no fallback provided")
+            # On Unix-like systems, use ~/.local/share/truefa/secure
+            fallback_path = os.path.join(home_dir, ".local", "share", "truefa", ".secure")
+            
+            # If running as root, use a safer location
+            if os.getuid() == 0:  # Root user
+                fallback_path = os.path.join("/var", "lib", "truefa", ".secure")
+    
+    # Try the fallback path
+    try:
+        # Create the fallback directory if it doesn't exist
+        if not os.path.exists(fallback_path):
+            os.makedirs(fallback_path, mode=0o700, exist_ok=True)
+        
+        # On POSIX systems, verify and set proper permissions
+        if platform.system() != "Windows":
+            try:
+                current_mode = os.stat(fallback_path).st_mode & 0o777
+                if current_mode != 0o700:
+                    os.chmod(fallback_path, 0o700)
+            except PermissionError:
+                logger.warning(f"Cannot set secure permissions on fallback path {fallback_path}")
+        
+        # Test if the directory is writable
+        test_file = os.path.join(fallback_path, '.test')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            logger.info(f"Using fallback secure directory: {fallback_path}")
+            return fallback_path
+        except (PermissionError, OSError) as e:
+            logger.error(f"Cannot write to fallback path {fallback_path}: {str(e)}")
+            raise OSError(f"Cannot create a secure directory: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to create fallback secure directory {fallback_path}: {str(e)}")
+        raise OSError(f"Cannot create a secure directory: {str(e)}")
 
 def secure_file_permissions(file_path):
     """
