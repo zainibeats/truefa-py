@@ -7,9 +7,11 @@ Simplified main entry point for the terminal application.
 
 import os
 import sys
+import time
 import argparse
 import traceback
 import getpass
+from datetime import datetime
 
 # Make sure the src directory is in the path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -26,7 +28,7 @@ try:
         # Initialize the authenticator and secure storage once
         try:
             auth = TwoFactorAuth()
-            secure_storage = SecureStorage()
+            storage = SecureStorage()
             
             # Process command-line arguments for non-interactive operations
             parser = argparse.ArgumentParser(description="TrueFA-Py OpenCV Edition")
@@ -52,18 +54,19 @@ try:
             # Process create-vault flag
             if args.create_vault:
                 if args.vault_dir:
-                    secure_storage.vault_dir = args.vault_dir
-                return secure_storage.create_vault()
+                    storage.vault_dir = args.vault_dir
+                master_password = getpass.getpass("Enter master password: ")
+                return storage.create_vault(master_password)
             
             # Set vault directory if specified
             if args.vault_dir:
                 print(f"Setting vault directory to: {args.vault_dir}")
-                secure_storage.vault_dir = args.vault_dir
+                storage.vault_dir = args.vault_dir
             
             # Check for existing vault
             vault_exists = False
             try:
-                vault_exists = secure_storage.check_vault_exists()
+                vault_exists = storage.vault_exists()
             except:
                 pass
                 
@@ -72,23 +75,22 @@ try:
             while True:
                 try:
                     # Display menu
-                    print("=== TrueFA ===")
+                    print("\n=== TrueFA ===")
                     print("1. Load QR code from image")
                     print("2. Enter secret key manually")
                     print("3. Save current secret")
                     print("4. View saved secrets")
                     print("5. Export secrets")
                     print("6. Clear screen")
-                    print("7. Create or initialize vault")
-                    print("8. Exit")
+                    print("7. Exit")
                     print()
                     
                     # Get user choice
-                    choice = input("Enter your choice (1-8): ")
+                    choice = input("\nEnter your choice (1-7): ")
                     
                     # Process choice
-                    if choice in ["1", "2", "3", "4", "5", "6", "7", "8"]:
-                        if choice == "8":
+                    if choice in ["1", "2", "3", "4", "5", "6", "7"]:
+                        if choice == "7":
                             # Exit
                             print("Exiting TrueFA. Goodbye!")
                             break
@@ -97,20 +99,62 @@ try:
                             # Clear the screen
                             clear_screen()
                             
-                        elif choice == "7":
-                            # Create or initialize vault
-                            print("\nCreating new vault...")
-                            custom_dir = input("Enter a custom directory for the vault (leave empty for default): ")
-                            if custom_dir:
-                                secure_storage.vault_dir = custom_dir
+                        elif choice == "3":
+                            # Handle saving current secret
+                            if not hasattr(auth, 'secret') or auth.secret is None:
+                                print("No secret to save. Please load a QR code or enter a secret first.")
+                                continue
+                                
+                            # Get issuer and account from authenticator
+                            issuer = getattr(auth, "issuer", "")
+                            account = getattr(auth, "account", "")
                             
-                            print("\nYou need to set a master password to protect your vault.")
-                            success = secure_storage.create_vault()
-                            if success == 0:
-                                print("Vault created successfully!")
-                                vault_exists = True
-                            else:
-                                print(f"Failed to create vault. Error code: {success}")
+                            # Prompt for a custom name or use default
+                            default_name = f"{issuer}-{account}" if issuer and account else "unnamed"
+                            name = input(f"Enter a name for this secret [{default_name}]: ")
+                            if not name:
+                                name = default_name
+                            
+                            # Check if vault is initialized
+                            try:
+                                vault_initialized = storage.vault.is_initialized()
+                            except:
+                                vault_initialized = False
+                                
+                            if not vault_initialized:
+                                print("No vault found. Creating a new vault...")
+                                master_password = getpass.getpass("Enter a new master password for your vault: ")
+                                confirm_password = getpass.getpass("Confirm master password: ")
+                                
+                                if master_password != confirm_password:
+                                    print("Passwords do not match.")
+                                    continue
+                                    
+                                if not storage.create_vault(master_password):
+                                    print("Failed to create vault.")
+                                    continue
+                                    
+                            # Unlock the vault if needed
+                            if not storage.is_unlocked:
+                                master_password = getpass.getpass("Enter your vault master password: ")
+                                if not storage.unlock(master_password):
+                                    print("Failed to unlock vault. Secret not saved.")
+                                    continue
+                                    
+                            # Save the secret
+                            try:
+                                secret_data = {
+                                    "secret": auth.secret.get_value().decode('utf-8') if hasattr(auth.secret, 'get_value') else str(auth.secret),
+                                    "issuer": issuer,
+                                    "account": account
+                                }
+                                result = storage.save_secret(name, secret_data)
+                                if result:
+                                    print(f"Error: {result}")
+                                else:
+                                    print(f"Secret '{name}' saved successfully.")
+                            except Exception as e:
+                                print(f"An error occurred: {e}")
                         
                         elif choice == "1":
                             # Handle QR code loading
@@ -146,7 +190,7 @@ try:
                                     save_choice = input("Would you like to save this secret to your vault? (y/n): ")
                                     if save_choice.lower() == 'y':
                                         if not vault_exists:
-                                            print("No vault exists. Create a vault first using option 7.")
+                                            print("No vault exists. Create a vault first using option 3.")
                                             continue
                                         
                                         try:
@@ -156,7 +200,7 @@ try:
                                                 'issuer': auth.issuer if hasattr(auth, 'issuer') else "",
                                                 'account': auth.account if hasattr(auth, 'account') else ""
                                             }
-                                            success = secure_storage.save_secret(auth.current_secret)
+                                            success = storage.save_secret(auth.current_secret)
                                             if success:
                                                 print("Secret saved successfully!")
                                             else:
@@ -197,7 +241,7 @@ try:
                             save_choice = input("Would you like to save this secret to your vault? (y/n): ")
                             if save_choice.lower() == 'y':
                                 if not vault_exists:
-                                    print("No vault exists. Create a vault first using option 7.")
+                                    print("No vault exists. Create a vault first using option 3.")
                                     continue
                                 
                                 try:
@@ -207,89 +251,132 @@ try:
                                         'issuer': issuer,
                                         'account': account
                                     }
-                                    success = secure_storage.save_secret(auth.current_secret)
+                                    success = storage.save_secret(auth.current_secret)
                                     if success:
                                         print("Secret saved successfully!")
                                     else:
                                         print("Failed to save secret.")
                                 except Exception as e:
                                     print(f"Error saving secret: {str(e)}")
-                                
-                        elif choice == "3":
-                            # Save current secret
-                            if not vault_exists:
-                                print("No vault exists. Create a vault first using option 7.")
-                                continue
-                                
-                            if hasattr(auth, 'secret') and auth.secret:
-                                try:
-                                    # Construct a dictionary like the current_secret structure if it doesn't exist
-                                    if not hasattr(auth, 'current_secret') or not auth.current_secret:
-                                        auth.current_secret = {
-                                            'secret': auth.secret.get_raw_value() if hasattr(auth.secret, 'get_raw_value') else str(auth.secret),
-                                            'issuer': auth.issuer if hasattr(auth, 'issuer') else "",
-                                            'account': auth.account if hasattr(auth, 'account') else ""
-                                        }
-                                    
-                                    success = secure_storage.save_secret(auth.current_secret)
-                                    if success:
-                                        print("Secret saved successfully!")
-                                    else:
-                                        print("Failed to save secret.")
-                                except Exception as e:
-                                    print(f"Error saving secret: {str(e)}")
-                            else:
-                                print("No secret loaded. Please load a QR code or enter a secret first.")
                                 
                         elif choice == "4":
-                            # View saved secrets
-                            if not vault_exists:
-                                print("No vault exists. Create a vault first using option 7.")
-                                continue
-                                
+                            # Handle viewing saved secrets
+                            
+                            # Check if vault exists
                             try:
-                                secrets = secure_storage.list_secrets()
-                                if not secrets:
-                                    print("No saved secrets found.")
+                                vault_initialized = storage.vault.is_initialized()
+                            except:
+                                vault_initialized = False
+                            
+                            if not vault_initialized:
+                                print("No vault found. Please create a vault first.")
+                                continue
+                            
+                            # Unlock vault if needed
+                            if not storage.is_unlocked:
+                                master_password = getpass.getpass("Enter your vault master password: ")
+                                if not storage.unlock(master_password):
+                                    print("Failed to unlock vault.")
                                     continue
+                            
+                            # List secrets
+                            secrets_list = storage.list_secrets()
+                            if not secrets_list:
+                                print("No saved secrets found.")
+                                continue
+                            
+                            print("\nAvailable secrets:")
+                            for i, name in enumerate(secrets_list, 1):
+                                print(f"{i}. {name}")
+                            
+                            # Add option for currently loaded secret
+                            if hasattr(auth, 'secret') and auth.secret:
+                                print(f"{len(secrets_list) + 1}. Currently loaded secret")
+                            
+                            # Prompt for selection
+                            try:
+                                selection = input("\nEnter number to view code: ")
+                                selection = int(selection)
+                                
+                                if selection > 0 and selection <= len(secrets_list):
+                                    # Load selected secret
+                                    name = secrets_list[selection - 1]
+                                    secret_data = storage.get_secret(name)
                                     
-                                print("Available secrets:")
-                                for idx, secret in enumerate(secrets, 1):
-                                    print(f"{idx}. {secret}")
-                                    
-                                if not secrets:
-                                    continue
-                                    
-                                try:
-                                    select = input("Enter the number of the secret to view (or 'c' to cancel): ")
-                                    if select.lower() == 'c':
-                                        continue
-                                        
-                                    idx = int(select) - 1
-                                    if 0 <= idx < len(secrets):
-                                        secret_data = secure_storage.get_secret(secrets[idx])
-                                        if secret_data:
-                                            # Create a secure string and set attributes
-                                            secret_key = secret_data.get("secret", "")
-                                            secure_secret = SecureString(secret_key)
-                                            auth.secret = secure_secret
-                                            auth.issuer = secret_data.get("issuer", "")
-                                            auth.account = secret_data.get("account", "")
-                                            
-                                            # Generate codes in real-time
-                                            print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
-                                            try:
-                                                auth.continuous_generate()
-                                            except KeyboardInterrupt:
-                                                print("\nStopped code generation.")
-                                        else:
-                                            print("Failed to load secret.")
+                                    # Set the secret in the authenticator
+                                    if hasattr(auth, 'set_secret') and callable(getattr(auth, 'set_secret')):
+                                        auth.set_secret(
+                                            secret_data.get("secret", ""),
+                                            issuer=secret_data.get("issuer", ""),
+                                            account=secret_data.get("account", "")
+                                        )
                                     else:
-                                        print("Invalid selection.")
-                                except ValueError:
-                                    print("Invalid input. Please enter a number.")
+                                        # Direct attribute setting if set_secret method is not available
+                                        auth.secret = SecureString(secret_data.get("secret", "").encode('utf-8'))
+                                        auth.issuer = secret_data.get("issuer", "")
+                                        auth.account = secret_data.get("account", "")
+                                    
+                                    issuer = secret_data.get("issuer", "")
+                                    account = secret_data.get("account", "")
+                                    if issuer and account:
+                                        print(f"Loaded secret for: {issuer} ({account})")
+                                    else:
+                                        print(f"Loaded secret: {name}")
+                                    
+                                    # Generate codes in real-time
+                                    print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
+                                    try:
+                                        if hasattr(auth, 'continuous_generate') and callable(getattr(auth, 'continuous_generate')):
+                                            auth.continuous_generate()
+                                        else:
+                                            # Fallback implementation if continuous_generate is not available
+                                            import time
+                                            try:
+                                                while True:
+                                                    code = auth.generate_totp()
+                                                    remaining = 30 - (int(time.time()) % 30)
+                                                    print(f"Code: {code} (expires in {remaining}s)", end="\r")
+                                                    time.sleep(1)
+                                            except KeyboardInterrupt:
+                                                pass
+                                    except KeyboardInterrupt:
+                                        print("\nStopped code generation.")
+                                
+                                elif selection == len(secrets_list) + 1 and hasattr(auth, 'secret') and auth.secret:
+                                    # Use currently loaded secret
+                                    issuer = getattr(auth, "issuer", "")
+                                    account = getattr(auth, "account", "")
+                                    
+                                    if issuer and account:
+                                        print(f"Using current secret for: {issuer} ({account})")
+                                    else:
+                                        print("Using currently loaded secret")
+                                        
+                                    # Generate codes in real-time
+                                    print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
+                                    try:
+                                        if hasattr(auth, 'continuous_generate') and callable(getattr(auth, 'continuous_generate')):
+                                            auth.continuous_generate()
+                                        else:
+                                            # Fallback implementation if continuous_generate is not available
+                                            import time
+                                            try:
+                                                while True:
+                                                    code = auth.generate_totp()
+                                                    remaining = 30 - (int(time.time()) % 30)
+                                                    print(f"Code: {code} (expires in {remaining}s)", end="\r")
+                                                    time.sleep(1)
+                                            except KeyboardInterrupt:
+                                                pass
+                                    except KeyboardInterrupt:
+                                        print("\nStopped code generation.")
+                                else:
+                                    print("Invalid selection.")
+                                
+                            except ValueError:
+                                print("Please enter a valid number.")
                             except Exception as e:
-                                print(f"Error loading secrets: {str(e)}")
+                                print(f"An error occurred: {e}")
                                 
                         elif choice == "5":
                             # Export secrets
@@ -330,10 +417,10 @@ try:
                                 print("No secret loaded. Please load a QR code or enter a secret first.")
                                 continue
                     else:
-                        print("Invalid choice. Please enter a number between 1 and 8.")
+                        print("Invalid choice. Please enter a number between 1 and 7.")
                         
                 except KeyboardInterrupt:
-                    print("\nOperation cancelled. Exiting.")
+                    print("\nOperation cancelled.")
                     break
                 except Exception as e:
                     print(f"An error occurred: {str(e)}")
