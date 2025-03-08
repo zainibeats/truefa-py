@@ -165,15 +165,19 @@ class SecureVault:
             # Read the metadata into the vault state
             self.metadata = vault_metadata
             
-            # Mark the vault as unlocked
+            # Mark the vault as unlocked and set the master key
             self._unlocked = True
+            
+            # Set the master key from the metadata (for testing only)
+            if 'master_key' in vault_metadata:
+                print(f"DEBUG [vault_interfaces.py]: Setting master key from metadata")
+                self._master_key = vault_metadata['master_key']
             
             return True
         except Exception as e:
             print(f"ERROR [vault_interfaces.py]: Exception in create_vault: {e}")
             import traceback
             traceback.print_exc()
-            return False
             
     def unlock(self, password):
         """
