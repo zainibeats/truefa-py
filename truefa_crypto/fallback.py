@@ -1,163 +1,170 @@
 """
-TrueFA Crypto Module - Python Fallback Implementation
+Fallback Implementations for TrueFA Crypto
 
-This provides a Python-based fallback implementation of the Rust crypto module.
-It is used when the Rust module cannot be loaded.
+This module provides pure Python implementations of the cryptographic functions
+that would normally be provided by the Rust DLL. These are used as a fallback
+when the DLL cannot be loaded.
 
-WARNING: This implementation is less secure than the Rust version!
-It does not provide the same level of memory protection and may leave sensitive
-data in memory longer than necessary.
+WARNING: These implementations may be less secure than the Rust implementations
+due to lack of memory zeroing and other security features that the Rust DLL provides.
 """
 
 import os
+import time
 import base64
-import hashlib
-from typing import Optional, List, Union, Any
-import secrets
-import binascii
 import warnings
+import hashlib
+import hmac
+from .secure_string import SecureString, create_secure_string, secure_random_bytes
 
-# Issue a warning when using this fallback implementation
-warnings.warn(
-    "Using Python fallback implementation for crypto operations. Security is REDUCED.",
-    UserWarning, stacklevel=2
-)
+# Emit a warning when this module is loaded
+warnings.warn("Using Python fallback implementation for crypto operations. Security is REDUCED.")
 
-# Class to simulate the Rust SecureString functionality
-class SecureString:
-    def __init__(self, data: Union[str, bytes]):
-        if isinstance(data, str):
-            self._data = data.encode('utf-8')
-        else:
-            self._data = data
-            
-    def __str__(self) -> str:
-        return self._data.decode('utf-8')
-        
-    def clear(self) -> None:
-        # In Python we can't really securely clear memory
-        # This is just a best-effort attempt
-        self._data = b''
-
-# Global vault state (simulates the Rust VaultKeyCache)
-_vault_key = None
-_vault_initialized = False
-_vault_unlocked = False
-
-def secure_random_bytes(size: int) -> bytes:
-    """Generate cryptographically secure random bytes."""
-    print(f"DUMMY CALL: secure_random_bytes(({size},), {{}})")
-    return secrets.token_bytes(size)
-
-def create_secure_string(data: bytes) -> int:
-    """Create a secure string object (simulated with an integer handle)."""
-    print(f"DUMMY CALL: create_secure_string(({data},), {{}})")
-    return 12345  # Dummy handle
-
-def secure_string_to_string(handle: int) -> bytes:
-    """Convert a secure string handle to a regular string."""
-    print(f"DUMMY CALL: secure_string_to_string(({handle},), {{}})")
-    return b"dummy_string"
-
-def secure_string_clear(handle: int) -> None:
-    """Clear a secure string from memory."""
-    print(f"DUMMY CALL: secure_string_clear(({handle},), {{}})")
-    pass
-
-def is_vault_unlocked() -> bool:
-    """Check if the vault is currently unlocked."""
-    print(f"DUMMY CALL: is_vault_unlocked((), {{}})")
-    return _vault_unlocked
-
-def vault_exists() -> bool:
-    """Check if a vault has been initialized."""
-    print(f"DUMMY CALL: vault_exists((), {{}})")
-    return _vault_initialized
-
-def create_vault(password: str) -> str:
-    """Create a new vault with the given master password."""
-    print(f"DUMMY CALL: create_vault(({password},), {{}})")
-    global _vault_initialized, _vault_unlocked
-    _vault_initialized = True
-    _vault_unlocked = True
-    return "dummy_salt"
-
-def unlock_vault(password: str, salt: str) -> bool:
-    """Attempt to unlock the vault with the given password and salt."""
-    print(f"DUMMY CALL: unlock_vault(({password}, {salt}), {{}})")
-    global _vault_unlocked
-    _vault_unlocked = True
-    return True
-
-def lock_vault() -> None:
-    """Lock the vault by clearing the active key."""
-    print(f"DUMMY CALL: lock_vault((), {{}})")
-    global _vault_unlocked
-    _vault_unlocked = False
-
-def generate_salt() -> str:
-    """Generate a cryptographically secure random salt for key derivation."""
-    print(f"Running Python fallback implementation of generate_salt")
-    try:
-        # Try to use the most secure method available (secrets)
-        import secrets
-        salt = secrets.token_bytes(32)  # Use 32 bytes (256 bits) for stronger security
-        print("Generated salt using secrets module")
-    except Exception as e:
-        # If secrets module fails, fall back to os.urandom
-        print(f"Secrets module failed: {e}, falling back to os.urandom")
-        import os
-        salt = os.urandom(32)
-        print("Generated salt using os.urandom")
+def encrypt_data(data, key):
+    """
+    Encrypt data using AES-GCM.
     
-    # Encode as base64 for string representation
-    import base64
-    result = base64.b64encode(salt).decode('utf-8')
-    print(f"Salt generation complete: {result[:5]}...")
-    return result
+    Args:
+        data (bytes): Data to encrypt
+        key (bytes): Encryption key
+        
+    Returns:
+        bytes: Encrypted data with nonce prepended
+    """
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise ImportError("cryptography package is required for encryption")
+    
+    # Generate a random nonce
+    nonce = os.urandom(12)
+    
+    # Create AES-GCM cipher with the key
+    cipher = AESGCM(key)
+    
+    # Encrypt the data
+    ciphertext = cipher.encrypt(nonce, data, None)
+    
+    # Return nonce + ciphertext
+    return nonce + ciphertext
 
-def derive_master_key(master_password: str, salt_b64: str) -> str:
-    """Derive a master key from a password and salt using a KDF."""
-    print(f"DUMMY CALL: derive_master_key(({master_password}, {salt_b64}), {{}})")
-    salt = base64.b64decode(salt_b64)
-    key = hashlib.scrypt(
-        master_password.encode('utf-8'),
+def decrypt_data(encrypted_data, key):
+    """
+    Decrypt data using AES-GCM.
+    
+    Args:
+        encrypted_data (bytes): Encrypted data with nonce prepended
+        key (bytes): Decryption key
+        
+    Returns:
+        bytes: Decrypted data
+    """
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise ImportError("cryptography package is required for decryption")
+    
+    # Extract nonce (first 12 bytes) and ciphertext
+    nonce = encrypted_data[:12]
+    ciphertext = encrypted_data[12:]
+    
+    # Create AES-GCM cipher with the key
+    cipher = AESGCM(key)
+    
+    try:
+        # Decrypt the data
+        plaintext = cipher.decrypt(nonce, ciphertext, None)
+        return plaintext
+    except Exception as e:
+        raise ValueError(f"Decryption failed: {str(e)}")
+
+def derive_key(password, salt=None, iterations=100000):
+    """
+    Derive a key from a password using PBKDF2.
+    
+    Args:
+        password (str or bytes): The password
+        salt (bytes, optional): The salt. If None, a random salt is generated.
+        iterations (int, optional): Number of iterations for key derivation
+        
+    Returns:
+        tuple: (key, salt) where key is the derived key and salt is the salt used
+    """
+    try:
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.primitives import hashes
+    except ImportError:
+        raise ImportError("cryptography package is required for key derivation")
+    
+    # Convert password to bytes if it's a string
+    if isinstance(password, str):
+        password = password.encode('utf-8')
+    
+    # If salt is not provided, generate a random one
+    if salt is None:
+        salt = os.urandom(16)
+    
+    # Create PBKDF2 with SHA-256
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,  # 256 bits
         salt=salt,
-        n=16384,
-        r=8,
-        p=1,
-        dklen=32
+        iterations=iterations,
     )
-    return base64.b64encode(key).decode('utf-8')
+    
+    # Derive the key
+    key = kdf.derive(password)
+    
+    return key, salt
 
-def encrypt_master_key(master_key_b64: str) -> str:
-    """Encrypt the master key using the vault key."""
-    print(f"DUMMY CALL: encrypt_master_key(({master_key_b64},), {{}})")
-    # In a real implementation, this would use AES-GCM or similar
-    # Here we just encode it differently
-    try:
-        nonce = secrets.token_bytes(12)
-        master_key = base64.b64decode(master_key_b64)
-        # XOR with a dummy key (not actually secure)
-        dummy_key = b'X' * len(master_key)
-        ciphertext = bytes(a ^ b for a, b in zip(master_key, dummy_key))
-        result = nonce + ciphertext
-        return base64.b64encode(result).decode('utf-8')
-    except Exception as e:
-        print(f"Error in encrypt_master_key: {e}")
-        return ""
+def hash_password(password, salt=None):
+    """
+    Hash a password for storage using PBKDF2.
+    
+    Args:
+        password (str or bytes): The password to hash
+        salt (bytes, optional): The salt. If None, a random salt is generated.
+        
+    Returns:
+        tuple: (hash, salt) where hash is the hashed password and salt is the salt used
+    """
+    # This is essentially the same as derive_key
+    return derive_key(password, salt)
 
-def decrypt_master_key(encrypted_key_b64: str) -> str:
-    """Decrypt the encrypted master key using the vault key."""
-    print(f"DUMMY CALL: decrypt_master_key(({encrypted_key_b64},), {{}})")
-    try:
-        encrypted_data = base64.b64decode(encrypted_key_b64)
-        nonce = encrypted_data[:12]
-        ciphertext = encrypted_data[12:]
-        # XOR with a dummy key (not actually secure)
-        dummy_key = b'X' * len(ciphertext)
-        plaintext = bytes(a ^ b for a, b in zip(ciphertext, dummy_key))
-        return base64.b64encode(plaintext).decode('utf-8')
-    except Exception as e:
-        print(f"Error in decrypt_master_key: {e}")
-        return ""
+def verify_password(password, password_hash, salt):
+    """
+    Verify a password against a stored hash.
+    
+    Args:
+        password (str or bytes): The password to verify
+        password_hash (bytes): The stored password hash
+        salt (bytes): The salt used to generate the hash
+        
+    Returns:
+        bool: True if the password matches, False otherwise
+    """
+    # Generate hash of the provided password using the same salt
+    calculated_hash, _ = hash_password(password, salt)
+    
+    # Compare with the stored hash
+    return calculated_hash == password_hash
+
+def create_hmac(data, key):
+    """
+    Create an HMAC for the provided data using the key.
+    
+    Args:
+        data (bytes): The data to create an HMAC for
+        key (bytes): The key to use for the HMAC
+        
+    Returns:
+        bytes: The HMAC
+    """
+    # Convert data to bytes if it's a string
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    
+    # Create HMAC using SHA-256
+    h = hmac.new(key, data, hashlib.sha256)
+    
+    return h.digest()
