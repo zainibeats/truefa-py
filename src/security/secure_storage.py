@@ -164,6 +164,16 @@ class SecureStorage:
             self.master_hash = None
 
     @property
+    def is_initialized(self):
+        """
+        Check if the vault is initialized
+        
+        Returns:
+            bool: True if the vault is initialized, False otherwise
+        """
+        return self.vault.is_initialized if hasattr(self, 'vault') and self.vault else False
+
+    @property
     def is_unlocked(self):
         """Check if the storage is unlocked."""
         return self._unlocked
@@ -231,8 +241,9 @@ class SecureStorage:
             return False
         
         # Add debug for vault path
-        print(f"DEBUG: Vault path: {self.vault.vault_path}")
-        print(f"DEBUG: Vault file exists: {os.path.exists(self.vault.vault_path)}")
+        vault_file = os.path.join(self.vault.vault_dir, "vault.json")
+        print(f"DEBUG: Vault file path: {vault_file}")
+        print(f"DEBUG: Vault file exists: {os.path.exists(vault_file)}")
         
         # Try to unlock the vault
         try:
@@ -868,7 +879,7 @@ class SecureStorage:
             print(f"DEBUG [secure_storage.py]: Secret data prepared for encryption (length: {len(secret_data)})")
             
             # Get the encryption key (master key)
-            master_key = self.vault._master_key
+            master_key = self.vault.get_master_key()
             if not master_key:
                 print("DEBUG [secure_storage.py]: No master key available")
                 return "Vault master key not available"
@@ -879,8 +890,16 @@ class SecureStorage:
             try:
                 # Try to use the Rust implementation first
                 from .. import truefa_crypto
-                encrypted_data = truefa_crypto.encrypt_with_key(secret_data, master_key)
-                print("DEBUG [secure_storage.py]: Used truefa_crypto for encryption")
+                
+                # Check if encrypt_with_key exists, otherwise use encrypt_data
+                if hasattr(truefa_crypto, 'encrypt_with_key'):
+                    encrypted_data = truefa_crypto.encrypt_with_key(secret_data, master_key)
+                    print("DEBUG [secure_storage.py]: Used truefa_crypto.encrypt_with_key for encryption")
+                elif hasattr(truefa_crypto, 'encrypt_data'):
+                    encrypted_data = truefa_crypto.encrypt_data(secret_data, master_key)
+                    print("DEBUG [secure_storage.py]: Used truefa_crypto.encrypt_data for encryption")
+                else:
+                    raise ImportError("No encryption function found in truefa_crypto")
             except Exception as e:
                 print(f"DEBUG [secure_storage.py]: Error using truefa_crypto: {e}")
                 print("DEBUG [secure_storage.py]: Falling back to AES encryption")
