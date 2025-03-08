@@ -80,15 +80,30 @@ def _find_dll():
         
         # Installation locations
         os.path.join(os.path.dirname(__file__), "truefa_crypto.dll"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "truefa_crypto.dll")
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "truefa_crypto.dll"),
+        
+        # Additional Docker locations
+        os.path.join(os.path.dirname(sys.executable), "truefa_crypto.dll"),
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "_internal", "truefa_crypto.dll"),
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "_internal", "truefa_crypto", "truefa_crypto.dll"),
     ]
+    
+    # For Docker, add special locations
+    if "ContainerAdministrator" in os.path.expanduser("~"):
+        docker_locations = [
+            "C:\\TrueFA\\truefa_crypto.dll",
+            "C:\\TrueFA\\truefa_crypto\\truefa_crypto.dll"
+        ]
+        possible_locations.extend(docker_locations)
     
     for location in possible_locations:
         if os.path.exists(location):
             print(f"DLL found at: {location}")
             return location
-            
+    
     print("DLL not found in any standard location")
+    for location in possible_locations:
+        print(f"DLL not found at: {location}")
     return None
 
 _dll_path = _find_dll()
@@ -102,9 +117,40 @@ logging.basicConfig(level=logging.INFO)
 # Add additional paths to system PATH to help find dependencies
 def _enhance_dll_search_paths():
     try:
-        os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ.get("PATH", "")
-    except:
-        pass
+        # Add all potential DLL locations to PATH
+        current_path = os.environ.get("PATH", "")
+        
+        # Add the directory containing the DLL to PATH
+        if _dll_path:
+            dll_dir = os.path.dirname(_dll_path)
+            if dll_dir and dll_dir not in current_path:
+                os.environ["PATH"] = dll_dir + os.pathsep + current_path
+        
+        # Add _MEIPASS directory if running from PyInstaller bundle
+        if hasattr(sys, '_MEIPASS'):
+            if sys._MEIPASS not in current_path:
+                os.environ["PATH"] = sys._MEIPASS + os.pathsep + os.environ["PATH"]
+        
+        # Add special directories for Docker
+        if "ContainerAdministrator" in os.path.expanduser("~"):
+            docker_dirs = [
+                "C:\\TrueFA",
+                "C:\\TrueFA\\truefa_crypto",
+                os.path.join(os.path.dirname(sys.executable))
+            ]
+            
+            for docker_dir in docker_dirs:
+                if os.path.exists(docker_dir) and docker_dir not in current_path:
+                    os.environ["PATH"] = docker_dir + os.pathsep + os.environ["PATH"]
+        
+        # Add the directory containing this module
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        if module_dir not in current_path:
+            os.environ["PATH"] = module_dir + os.pathsep + os.environ["PATH"]
+        
+        print(f"Enhanced DLL search paths: {os.environ['PATH']}")
+    except Exception as e:
+        print(f"Error enhancing DLL search paths: {e}")
 
 _enhance_dll_search_paths()
 
@@ -311,8 +357,8 @@ def _safe_dll_call(func_name, fallback_func, *args, **kwargs):
     thread = threading.Thread(target=worker)
     thread.daemon = True
     
-    # Use a short timeout
-    timeout = 2.0  # 2 seconds should be enough for most functions
+    # Use a longer timeout for Docker environments (10 seconds instead of 2)
+    timeout = 10.0 if "ContainerAdministrator" in os.path.expanduser("~") else 2.0
     
     logger.info(f"Calling {func_name} with {timeout}s timeout")
     thread.start()
@@ -320,6 +366,25 @@ def _safe_dll_call(func_name, fallback_func, *args, **kwargs):
     
     if not completed.is_set():
         logger.warning(f"Call to {func_name} timed out after {timeout} seconds")
+        
+        # In Docker, we'll try again with a longer timeout before giving up
+        if "ContainerAdministrator" in os.path.expanduser("~") and timeout < 20.0:
+            logger.info(f"Docker environment detected - trying again with longer timeout")
+            # Create a new thread with a longer timeout
+            completed = threading.Event()
+            thread = threading.Thread(target=worker)
+            thread.daemon = True
+            timeout = 20.0  # Double the timeout for the second attempt
+            
+            thread.start()
+            completed.wait(timeout)
+            
+            if completed.is_set() and not error and result is not None:
+                logger.info(f"Second attempt with longer timeout succeeded")
+                return result
+        
+        # Only set _detected_dll_issue to true after multiple failures
+        # This helps prevent premature fallback
         _detected_dll_issue = True
         
         # Update marker file
@@ -351,13 +416,23 @@ def _load_dll():
     
     # Try to load the Rust DLL
     try:
+        # In Docker - clean any previous marker files
+        if "ContainerAdministrator" in os.path.expanduser("~"):
+            try:
+                if os.path.exists(FALLBACK_MARKER_PATH):
+                    os.remove(FALLBACK_MARKER_PATH)
+                    print(f"Removed previous DLL issue marker in Docker environment")
+            except Exception as clean_error:
+                print(f"Error cleaning marker file: {clean_error}")
+        
         logger.info(f"Attempting to load DLL from {_dll_path}")
         
-        # Check if DLL exists
-        if not _dll_path or not os.path.exists(_dll_path):
-            logger.error(f"DLL path is invalid or file doesn't exist: {_dll_path}")
-            raise FileNotFoundError(f"DLL not found at {_dll_path}")
-            
+        # If _dll_path is None (DLL not found), give up immediately
+        if _dll_path is None:
+            logger.error("No DLL found, using Python fallback")
+            _lib = _DummyModule()
+            return _lib
+        
         print(f"Loading DLL from {_dll_path}")
         
         # Load the DLL
@@ -537,7 +612,7 @@ def generate_salt():
         start_time = time.time()
         print(f"Starting salt generation at {time.strftime('%H:%M:%S')}")
         
-        # We'll use our safe calling method instead of the complex threading code
+        # We'll use our enhanced safe calling method with better timeout handling
         result = _safe_dll_call("c_generate_salt", _fallback_generate_salt)
         
         # Process result
@@ -546,6 +621,18 @@ def generate_salt():
         
         if not result:
             logger.warning("Salt generation returned null result")
+            
+            # In Docker - try the Rust function directly one more time
+            if "ContainerAdministrator" in os.path.expanduser("~"):
+                print("Docker environment detected - trying direct Rust call")
+                try:
+                    direct_result = _lib.c_generate_salt()
+                    if direct_result:
+                        print(f"Direct Rust call successful after {time.time() - start_time:.2f} seconds")
+                        return direct_result.decode('utf-8') if isinstance(direct_result, bytes) else direct_result
+                except Exception as direct_error:
+                    print(f"Direct Rust call failed: {direct_error}")
+            
             return _fallback_generate_salt()
         
         return result.decode('utf-8') if isinstance(result, bytes) else result
