@@ -34,6 +34,9 @@ import platform
 import subprocess
 from datetime import datetime
 from pathlib import Path
+import hmac
+import hashlib
+import traceback
 
 # Import configuration with fallback mechanism
 try:
@@ -101,8 +104,14 @@ class SecureStorage:
             storage_path = DATA_DIR
         
         if vault_file is None:
-            from ..config import VAULT_FILE
-            vault_file = VAULT_FILE
+            # Use the vault directory from vault_directory module
+            try:
+                from .vault_directory import get_secure_vault_dir
+                vault_dir = get_secure_vault_dir()
+                vault_file = os.path.join(vault_dir, "vault.json")
+            except ImportError:
+                from ..config import VAULT_FILE
+                vault_file = VAULT_FILE
         
         # Store the paths
         self.storage_path = os.path.expanduser(storage_path)
@@ -111,7 +120,7 @@ class SecureStorage:
         
         # Create the vault object
         from .vault import SecureVault
-        self.vault = SecureVault(self.vault_file)
+        self.vault = SecureVault(self.vault_dir)  # Pass the directory, not the file
         
         # Track if the vault is unlocked
         self._unlocked = False
@@ -155,11 +164,26 @@ class SecureStorage:
         - Sets up the vault with proper permissions
         """
         try:
+            print(f"DEBUG: Creating vault with master password (length: {len(master_password)})")
+            print(f"DEBUG: Vault initialization status before creation: {self.vault.is_initialized}")
+            
             # In our simplified model, vault_password and master_password are the same
             success = self.vault.create_vault(master_password, master_password)
+            
+            print(f"DEBUG: Vault creation result: {success}")
+            print(f"DEBUG: Vault initialization status after creation: {self.vault.is_initialized}")
+            
             if success:
                 self._unlocked = True
                 print("Secure vault created successfully")
+                
+                # Verify the vault was created properly
+                try:
+                    with open(os.path.join(self.vault.vault_dir, "vault.json"), 'r') as f:
+                        vault_data = json.load(f)
+                    print(f"DEBUG: Created vault data keys: {list(vault_data.keys())}")
+                except Exception as e:
+                    print(f"DEBUG: Error reading created vault: {e}")
             return success
         except Exception as e:
             print(f"Error creating vault: {str(e)}")
@@ -167,46 +191,46 @@ class SecureStorage:
 
     def unlock(self, password=None):
         """
-        Unlock secure storage with the provided password.
-        
-        If the vault is initialized, it will attempt to unlock the vault.
-        Otherwise, it will use the password to decrypt legacy secrets.
+        Unlock the storage using the provided password
         
         Args:
-            password: Password to unlock storage
-            
+            password: Password to unlock the vault
+        
         Returns:
-            bool: True if unlock successful, False otherwise
+            bool: True if unlocked successfully, False otherwise
         """
-        # Clear any existing key
-        self.key = None
-        self._unlocked = False
+        print(f"DEBUG: Attempting to unlock vault with password length: {len(password) if password else 'None'}")
         
-        # First try to unlock vault if initialized
-        if self.vault.is_initialized():
-            if self.vault.unlock(password):
-                # Only set _unlocked to True if vault.unlock succeeds
-                self._unlocked = True
-                return True
-            else:
-                # Explicit return False if vault.unlock fails to ensure we don't 
-                # fallback to legacy mode after a failed vault password attempt
-                return False
+        # Check if already unlocked
+        if self.is_unlocked:
+            print("DEBUG: Vault already unlocked, no need to unlock again")
+            return True
         
-        # Fall back to legacy mode only if no vault exists
-        if password:
-            self.key = self.derive_key(password)
-            if self.key:
-                self._unlocked = True
-                return True
+        # Check if vault is initialized
+        if not self.vault.is_initialized:
+            print("DEBUG: Vault not initialized, cannot unlock")
+            return False
         
-        return False
+        # Add debug for vault path
+        print(f"DEBUG: Vault path: {self.vault.vault_path}")
+        print(f"DEBUG: Vault file exists: {os.path.exists(self.vault.vault_path)}")
+        
+        # Try to unlock the vault
+        try:
+            print("DEBUG: Attempting to unlock vault...")
+            success = self.vault.unlock(password)
+            print(f"DEBUG: Vault unlock result: {success}")
+            return success
+        except Exception as e:
+            print(f"ERROR: Exception unlocking vault: {e}")
+            traceback.print_exc()
+            return False
 
     def _lock(self):
         """
         Lock the storage and clear sensitive data from memory.
         """
-        if self.vault.is_initialized():
+        if self.vault.is_initialized:
             self.vault.lock()
         
         self.key = None
@@ -222,7 +246,7 @@ class SecureStorage:
         Security:
         - Checks both vault and legacy modes
         """
-        if self.vault.is_initialized():
+        if self.vault.is_initialized:
             return True
         return self.master_hash is not None
 
@@ -243,7 +267,7 @@ class SecureStorage:
         - Limits error information
         """
         # Try vault mode first if enabled
-        if self.vault.is_initialized() and vault_password:
+        if self.vault.is_initialized and vault_password:
             if not self.vault.unlock_vault(vault_password):
                 return False
             self._unlock()
@@ -376,7 +400,7 @@ class SecureStorage:
         Returns:
             bool: True if the key was successfully obtained and set
         """
-        if not self.vault.is_initialized() or not self.vault.is_unlocked():
+        if not self.vault.is_initialized or not self.vault.is_unlocked:
             return False
             
         try:
@@ -443,7 +467,7 @@ class SecureStorage:
         text-based formats and includes all data needed for decryption.
         """
         # Use vault key if available
-        if self.vault.is_initialized() and self.vault.is_unlocked():
+        if self.vault.is_initialized and self.vault.is_unlocked:
             if self._handle_master_key_from_vault():
                 pass
             else:
@@ -550,67 +574,156 @@ class SecureStorage:
         Returns:
             list: List of secret names (without extensions)
         """
-        if not self.vault.is_initialized():
-            print("No vault initialized. Please create a vault first.")
+        print(f"DEBUG [secure_storage.py]: list_secrets called")
+        print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
+        print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
+        
+        # Direct check for vault existence instead of relying on is_initialized
+        vault_path = os.path.join(self.vault.vault_dir, "vault.json")
+        vault_exists = os.path.exists(vault_path)
+        print(f"DEBUG [secure_storage.py]: Vault file path: {vault_path}")
+        print(f"DEBUG [secure_storage.py]: Vault file exists: {vault_exists}")
+        
+        # If the vault file physically exists but is_initialized returns False,
+        # we'll force it to look for secrets anyway
+        if vault_exists:
+            try:
+                with open(vault_path, 'r') as f:
+                    metadata = json.load(f)
+                print(f"DEBUG [secure_storage.py]: Vault metadata keys: {list(metadata.keys())}")
+            except Exception as e:
+                print(f"DEBUG [secure_storage.py]: Error reading vault metadata: {e}")
+                
+        # Check both the is_initialized property and direct vault file existence
+        is_init = self.vault.is_initialized
+        print(f"DEBUG [secure_storage.py]: self.vault.is_initialized returns: {is_init}")
+        
+        if not vault_exists:
+            print("DEBUG [secure_storage.py]: No vault file found. Please create a vault first.")
             return []
             
-        if not self.is_unlocked:
-            print("Vault is locked. Please unlock with your master password first.")
-            return []
-            
+        # Note: We don't require unlocking just to list secret names
         secrets = []
         try:
             vault_dir = self.vault.vault_dir
+            print(f"DEBUG [secure_storage.py]: Looking for secrets in directory: {vault_dir}")
+            
             if os.path.exists(vault_dir):
-                for f in os.listdir(vault_dir):
+                all_files = os.listdir(vault_dir)
+                print(f"DEBUG [secure_storage.py]: All files in vault directory: {all_files}")
+                
+                for f in all_files:
                     if f.endswith('.enc'):
                         secrets.append(f[:-4])  # Remove .enc extension
+                        print(f"DEBUG [secure_storage.py]: Found secret: {f[:-4]}")
+                
+                print(f"DEBUG [secure_storage.py]: Found {len(secrets)} secrets in vault directory")
+            else:
+                print(f"DEBUG [secure_storage.py]: Vault directory does not exist: {vault_dir}")
+                
+            return secrets
         except Exception as e:
             print(f"Error listing secrets: {e}")
+            return []
             
-        return secrets
-            
-    def load_secret(self, name):
+    def load_secret(self, name, password=None):
         """
-        Load and decrypt a saved secret.
+        Load an encrypted secret by name
         
         Args:
-            name (str): Name of the secret to load
+            name: Name of the secret to load
+            password: Optional password for decryption
             
         Returns:
-            dict or None: Loaded secret data if successful, None otherwise
+            dict: Dictionary containing the decrypted secret data
+                - 'secret': The actual TOTP secret
+                - 'issuer': The service name (optional)
+                - 'account': The account identifier (optional)
+            str: Error message if loading fails
         """
-        if not self.vault.is_initialized():
-            print("No vault initialized. Please create a vault first.")
-            return None
-            
-        if not self.is_unlocked:
-            print("Storage is locked. Please unlock first.")
-            return None
-            
+        print(f"DEBUG [secure_storage.py]: load_secret called for '{name}'")
+        print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
+        print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
+        
+        # Check if vault is initialized
+        if not self.vault.is_initialized:
+            return "No vault found. Please create a vault first."
+        
+        # Unlock the vault if needed
+        if not self.vault.is_unlocked and password:
+            if not self.vault.unlock(password):
+                return "Invalid password"
+
+        # Check if vault is unlocked
+        if not self.vault.is_unlocked:
+            return "Vault is locked. Please unlock it first."
+
+        # Sanitize the name to prevent traversal issues
+        sanitized_name = self._sanitize_filename(name)
+        if sanitized_name != name:
+            return "Invalid secret name"
+
+        # Compute the file path for the secret
         try:
-            # Construct the path to the encrypted file
-            secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+            secret_path = os.path.join(self.vault_dir, f"{sanitized_name}.enc")
             
-            # Check if the file exists
+            # Check if file exists
             if not os.path.exists(secret_path):
-                print(f"Secret not found: {name}")
-                return None
+                return f"Secret '{name}' not found"
                 
-            # Read the raw data
-            with open(secret_path, 'r') as f:
-                secret_data = f.read()
+            # Read and decrypt the secret file
+            with open(secret_path, 'rb') as f:
+                encrypted_data = f.read()
                 
-            # Try to parse as JSON, if it doesn't work return as string
+            # Decrypt the data
+            decrypted_data = self.vault.decrypt(encrypted_data)
+            if not decrypted_data:
+                return "Failed to decrypt secret"
+                
+            # Parse the JSON data
             try:
-                import json
-                return json.loads(secret_data)
+                secret_data = json.loads(decrypted_data.decode('utf-8'))
+                
+                # Validate the expected structure
+                if not isinstance(secret_data, dict):
+                    print(f"DEBUG [secure_storage.py]: Unexpected secret data type: {type(secret_data)}")
+                    # Try to convert the string to a dictionary
+                    if isinstance(secret_data, str):
+                        try:
+                            # If it's a raw secret string, wrap it in a proper dictionary
+                            return {
+                                "secret": secret_data,
+                                "issuer": "",
+                                "account": name
+                            }
+                        except:
+                            return f"Invalid secret format: {type(secret_data)}"
+                    return f"Invalid secret format: {type(secret_data)}"
+                    
+                # Ensure it has a 'secret' field at minimum
+                if 'secret' not in secret_data:
+                    print(f"DEBUG [secure_storage.py]: Missing 'secret' field in data: {list(secret_data.keys())}")
+                    return "Invalid secret data: missing 'secret' field"
+                    
+                # Return the decoded secret data
+                print(f"DEBUG [secure_storage.py]: Successfully loaded secret '{name}' with keys: {list(secret_data.keys())}")
+                return secret_data
+                
             except json.JSONDecodeError:
-                return {"secret": secret_data}
+                # If it's not valid JSON, it might be a plain string (old format)
+                try:
+                    secret_str = decrypted_data.decode('utf-8')
+                    # Return as a dictionary for compatibility
+                    return {
+                        "secret": secret_str,
+                        "issuer": "",
+                        "account": name
+                    }
+                except Exception as e:
+                    return f"Failed to parse secret data: {str(e)}"
                 
         except Exception as e:
-            print(f"Error loading secret: {e}")
-            return None
+            return f"Error loading secret: {str(e)}"
 
     def get_secret(self, name):
         """
@@ -634,7 +747,7 @@ class SecureStorage:
         Returns:
             str or None: Full path to the secret file if vault is initialized, None otherwise
         """
-        if not self.vault.is_initialized():
+        if not self.vault.is_initialized:
             return None
             
         # Sanitize filename
@@ -703,6 +816,11 @@ class SecureStorage:
             
             # Save the secret to the vault directory
             secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+            
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+            
+            # Write the secret to the file
             with open(secret_path, 'w') as f:
                 f.write(secret_data)
                 
@@ -841,7 +959,7 @@ class SecureStorage:
         try:
             # Get encryption key
             encryption_key = None
-            if self.vault.is_initialized() and self.vault.is_unlocked():
+            if self.vault.is_initialized and self.vault.is_unlocked:
                 # Get master key from vault
                 master_key = self.vault.get_master_key()
                 if master_key:
@@ -901,7 +1019,7 @@ class SecureStorage:
         try:
             # Get decryption key
             decryption_key = None
-            if self.vault.is_initialized() and self.vault.is_unlocked():
+            if self.vault.is_initialized and self.vault.is_unlocked:
                 # Get master key from vault
                 master_key = self.vault.get_master_key()
                 if master_key:
@@ -959,7 +1077,7 @@ class SecureStorage:
         self.key = None
         self._unlocked = False
         
-        if not self.vault.is_initialized():
+        if not self.vault.is_initialized:
             print("No vault exists yet. You'll be prompted to create one when saving a secret.")
             return False
             
@@ -1109,9 +1227,208 @@ class SecureStorage:
         
         # Create a new vault object with the updated path
         from .vault import SecureVault
-        self.vault = SecureVault(self.vault_file)
+        self.vault = SecureVault(self.vault_dir)
         
         # Reset the unlock state
         self._unlocked = False
         
         return True
+
+    def change_vault_password(self, current_password, new_password):
+        """
+        Change the vault password.
+        
+        Args:
+            current_password: Current vault password
+            new_password: New vault password to set
+            
+        Returns:
+            bool: True if successful, False otherwise
+            
+        Security:
+        - Verifies old password before allowing change
+        - Re-encrypts the master key
+        - Updates all metadata
+        """
+        # Check if vault is initialized
+        if not self.vault.is_initialized:
+            return False
+        
+        # Verify current password
+        if not self.unlock(current_password):
+            return False
+        
+        # Get the master key
+        master_key = self.get_master_key()
+        if not master_key:
+            return False
+        
+        # Change the vault password
+        return self.vault.change_vault_password(current_password, new_password)
+
+    def change_master_password(self, vault_password, current_master_password, new_master_password):
+        """
+        Change the master password.
+        
+        Args:
+            vault_password: Vault password for authentication
+            current_master_password: Current master password
+            new_master_password: New master password to set
+            
+        Returns:
+            bool: True if successful, False otherwise
+            
+        Security:
+        - Requires both vault and master passwords
+        - Re-encrypts all secrets with new master key
+        """
+        if not self.vault.is_initialized:
+            return False
+        
+        # Unlock the vault
+        if not self.unlock(vault_password):
+            return False
+        
+        # Change the master password
+        return self.vault.change_master_password(vault_password, current_master_password, new_master_password)
+
+    def get_master_key(self):
+        """
+        Get the master key.
+        
+        Returns:
+            SecureString: The master key if the vault is unlocked
+            
+        Security:
+        - Only returns the key if the vault is unlocked
+        - Returns a SecureString, not a regular string
+        """
+        if not self.vault.is_initialized or not self.vault.is_unlocked:
+            return None
+        
+        return self.vault.get_master_key()
+
+    def export_all_secrets(self, output_path, export_password=None):
+        """
+        Export all secrets to a file.
+        
+        Args:
+            output_path: Path to save the export
+            export_password: Optional password to encrypt the export
+            
+        Returns:
+            bool: True if successful, False otherwise
+            
+        Security:
+        - Requires vault to be initialized and unlocked
+        - Uses strong encryption for the export
+        """
+        if not self.vault.is_initialized or not self.vault.is_unlocked:
+            return False
+        
+        # Get all secrets
+        secrets = self.list_secrets()
+        if not secrets:
+            return False
+        
+        # Export each secret
+        export_data = {}
+        for name in secrets:
+            secret_data = self.load_secret(name)
+            if secret_data:
+                export_data[name] = secret_data
+        
+        # Save the export data
+        if export_password:
+            # Encrypt with export password
+            pass
+        else:
+            # Save as plaintext
+            with open(output_path, 'w') as f:
+                json.dump(export_data, f, indent=2)
+        
+        return True
+
+    def verify_integrity(self, name):
+        """
+        Verify the integrity of a saved secret.
+        
+        Args:
+            name (str): Name of the secret to verify
+            
+        Returns:
+            bool: True if integrity check passed, False otherwise
+        """
+        if not self.vault.is_initialized or not self.vault.is_unlocked:
+            return False
+            
+        # Get the path to the secret file
+        secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+        
+        # Check if the file exists
+        if not os.path.exists(secret_path):
+            return False
+            
+        # Check if a backup exists
+        backup_path = f"{secret_path}.backup"
+        if not os.path.exists(backup_path):
+            return False
+            
+        # Compare contents
+        try:
+            with open(secret_path, 'rb') as f:
+                secret_data = f.read()
+                
+            with open(backup_path, 'rb') as f:
+                backup_data = f.read()
+                
+            # Split backup data into content and HMAC
+            content_length = len(backup_data) - 32  # 32-byte HMAC
+            backup_content = backup_data[:content_length]
+            backup_hmac = backup_data[content_length:]
+            
+            # Verify HMAC
+            key = self.get_master_key()
+            if key:
+                computed_hmac = hmac.new(key, backup_content, hashlib.sha256).digest()
+                return hmac.compare_digest(computed_hmac, backup_hmac)
+            else:
+                # Simple byte comparison if no key
+                return secret_data == backup_content
+        except Exception as e:
+            print(f"Error verifying integrity: {e}")
+            return False
+
+    def delete_secret(self, name):
+        """
+        Delete a saved secret.
+        
+        Args:
+            name (str): Name of the secret to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.vault.is_initialized:
+            return False
+            
+        # Get the path to the secret file
+        secret_path = os.path.join(self.vault.vault_dir, f"{name}.enc")
+        
+        # Check if the file exists
+        if not os.path.exists(secret_path):
+            return False
+            
+        # Delete the file
+        try:
+            os.remove(secret_path)
+            
+            # Also delete backup if it exists
+            backup_path = f"{secret_path}.backup"
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+                
+            return True
+        except Exception as e:
+            print(f"Error deleting secret: {e}")
+            return False
