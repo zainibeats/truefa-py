@@ -158,71 +158,36 @@ try:
                         elif choice == "3":
                             # Handle saving current secret
                             if auth.secret is None:
-                                print("No secret currently loaded. Please load a secret first.")
+                                print("No secret to save. Please load a QR code or enter a secret first.")
                                 continue
                                 
                             # Get a name for the secret
-                            default_name = f"{auth.issuer}-{auth.account}" if auth.issuer and auth.account else None
-                            name = input(f"Enter a name for this secret [{default_name}]: ").strip()
-                            if not name and default_name:
-                                name = default_name
-                            
-                            # Check if vault exists
-                            print(f"Vault initialized: {storage.is_initialized}")
-                            
-                            # If vault doesn't exist, create it
-                            if not storage.is_initialized:
-                                # Get a master password for the vault
-                                while True:
-                                    master_password = getpass.getpass("Create a master password for your vault: ")
-                                    
-                                    # Validate password length
-                                    if len(master_password) < 8:
-                                        print("Password must be at least 8 characters long.")
-                                        continue
-                                    
-                                    # Confirm the password
-                                    confirm_password = getpass.getpass("Confirm master password: ")
-                                    if master_password != confirm_password:
-                                        print("Passwords do not match. Please try again.")
-                                        continue
-                                    
-                                    # Create the vault
-                                    try:
-                                        print("Creating new vault...")
-                                        if storage.create_vault(master_password):
-                                            print("Vault created successfully.")
-                                            vault_authenticated = True
-                                            break
-                                        else:
-                                            print("Failed to create vault. Please try again.")
-                                            continue
-                                    except Exception as e:
-                                        print(f"Error creating vault: {e}")
-                                        traceback.print_exc()
-                                        continue
-                            
-                            # If vault exists but not authenticated, unlock it
-                            elif not vault_authenticated:
-                                master_password = getpass.getpass("Enter your vault master password: ")
-                                try:
-                                    if storage.unlock(master_password):
-                                        print("Vault unlocked successfully.")
-                                        vault_authenticated = True
-                                    else:
-                                        print("Failed to unlock vault with the provided password.")
-                                except Exception as e:
-                                    print(f"Error unlocking vault: {e}")
-                                    traceback.print_exc()
-                                continue
-                            
-                            # Now save the secret
+                            suggested_name = f"{auth.issuer}-{auth.account}" if auth.issuer and auth.account else "unnamed"
+                            name = input(f"Enter a name for this secret [{suggested_name}]: ").strip()
+                            if not name:
+                                name = suggested_name
+                                
                             try:
-                                auth.save_secret(name)
-                                print(f"Secret saved as '{name}'.")
-                                debug_vault_status(storage)
+                                # Check if vault is initialized
+                                print(f"Vault initialized: {storage.is_initialized}")
+                                
+                                # Prepare the secret data
+                                secret_data = {
+                                    "secret": auth.secret.get_raw_value(),
+                                    "issuer": auth.issuer,
+                                    "account": auth.account
+                                }
+                                
+                                # Save the secret
+                                error = auth.save_secret(name, secret_data)
+                                if error:
+                                    print(f"Error: {error}")
+                                else:
+                                    print(f"Secret saved as '{name}'.")
+                                    debug_vault_status(storage)
                             except Exception as e:
-                                print(f"Error saving secret: {e}")
+                                print(f"An error occurred: {e}")
+                                traceback.print_exc()
                         
                         elif choice == "1":
                             # Load QR code from image
@@ -296,29 +261,28 @@ try:
                                 
                                 # Enhanced debugging to check vault properties
                                 if hasattr(storage, 'vault'):
-                                    print(f"DEBUG: Vault dir: {storage.vault.vault_dir}")
-                                    vault_path = os.path.join(storage.vault.vault_dir, "vault.json")
+                                    print(f"DEBUG: Vault dir: {storage.vault_dir}")
+                                    vault_path = os.path.join(storage.vault_dir, "vault.json")
                                     print(f"DEBUG: Vault file path: {vault_path}")
                                     print(f"DEBUG: Vault file exists: {os.path.exists(vault_path)}")
                                     
-                                    # Check the contents of the vault file
+                                    # Check metadata if file exists
                                     if os.path.exists(vault_path):
                                         try:
                                             with open(vault_path, 'r') as f:
                                                 metadata = json.load(f)
-                                            print(f"DEBUG: Vault metadata keys: {list(metadata.keys())}")
+                                                print(f"DEBUG: Vault metadata keys: {list(metadata.keys())}")
                                         except Exception as e:
                                             print(f"DEBUG: Error reading vault file: {e}")
                                 
                                 # Now check the is_initialized property
-                                vault_initialized = storage.vault.is_initialized if hasattr(storage, 'vault') else False
-                                print(f"DEBUG: Vault initialization status: {vault_initialized}")
+                                print(f"DEBUG: Vault initialization status: {storage.is_initialized}")
                             except Exception as e:
-                                print(f"DEBUG: Error checking vault initialization: {e}")
-                                vault_initialized = False
+                                print(f"DEBUG: Error checking vault: {e}")
+                                traceback.print_exc()
                                 
-                            # If no vault is found, show a message
-                            if not vault_initialized:
+                            # Check if vault exists
+                            if not storage.is_initialized:
                                 print("No vault found. Please create a vault first.")
                                 continue
                             
