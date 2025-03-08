@@ -246,8 +246,15 @@ class PythonCrypto:
             # Encrypt the master key with the vault key
             print(f"DEBUG [vault_crypto.py]: Encrypting master key...")
             try:
-                encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
-                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto for encryption")
+                # Check which encryption function is available
+                if hasattr(truefa_crypto, 'encrypt_with_key'):
+                    encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
+                    print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_with_key for encryption")
+                elif hasattr(truefa_crypto, 'encrypt_data'):
+                    encrypted_master_key = truefa_crypto.encrypt_data(master_key_b64, vault_key)
+                    print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_data for encryption")
+                else:
+                    raise ImportError("No encryption function found in truefa_crypto")
             except Exception as e:
                 print(f"DEBUG [vault_crypto.py]: Error using truefa_crypto for encryption: {e}")
                 print(f"DEBUG [vault_crypto.py]: Using simple symmetric encryption...")
@@ -415,8 +422,15 @@ def create_vault(password, vault_path):
         # Encrypt the master key with the vault key
         print(f"DEBUG [vault_crypto.py]: Encrypting master key...")
         try:
-            encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
-            print(f"DEBUG [vault_crypto.py]: Used truefa_crypto for encryption")
+            # Check which encryption function is available
+            if hasattr(truefa_crypto, 'encrypt_with_key'):
+                encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
+                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_with_key for encryption")
+            elif hasattr(truefa_crypto, 'encrypt_data'):
+                encrypted_master_key = truefa_crypto.encrypt_data(master_key_b64, vault_key)
+                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_data for encryption")
+            else:
+                raise ImportError("No encryption function found in truefa_crypto")
         except Exception as e:
             print(f"DEBUG [vault_crypto.py]: Error using truefa_crypto for encryption: {e}")
             print(f"DEBUG [vault_crypto.py]: Using simple symmetric encryption...")
