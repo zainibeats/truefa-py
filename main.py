@@ -169,87 +169,81 @@ try:
                                     print("Passwords do not match.")
                                     continue
                                     
-                                try:
-                                    # Use fallback Python implementation for crypto in Docker
-                                    if os.environ.get("DOCKER_CONTAINER") == "1" or os.path.exists("/.dockerenv") or "ContainerAdministrator" in os.path.expanduser("~"):
-                                        os.environ["TRUEFA_USE_FALLBACK"] = "1"
-                                        print("Using Python fallback implementation in Docker environment")
-                                    
-                                    # Create a simple file with metadata to ensure vault exists
-                                    # This is a basic fallback for Docker environments
-                                    print(f"Creating vault at {storage.vault_dir}")
-                                    
-                                    # Direct fallback for Docker
-                                    if "ContainerAdministrator" in os.path.expanduser("~"):
-                                        try:
-                                            os.makedirs(storage.vault_dir, exist_ok=True)
-                                            vault_meta_path = os.path.join(storage.vault_dir, "vault.json")
+                                # Use fallback Python implementation for crypto in Docker
+                                if os.environ.get("DOCKER_CONTAINER") == "1" or os.path.exists("/.dockerenv") or "ContainerAdministrator" in os.path.expanduser("~"):
+                                    os.environ["TRUEFA_USE_FALLBACK"] = "1"
+                                    print("Using Python fallback implementation in Docker environment")
+                                
+                                # Direct fallback for Docker environments
+                                if "ContainerAdministrator" in os.path.expanduser("~"):
+                                    try:
+                                        # Import all modules needed for the entire function here
+                                        import json
+                                        import hashlib
+                                        import base64
+                                        import re
+                                        
+                                        print(f"Creating vault at {storage.vault_dir}")
+                                        os.makedirs(storage.vault_dir, exist_ok=True)
+                                        vault_meta_path = os.path.join(storage.vault_dir, "vault.json")
+                                        
+                                        # Create vault metadata with password hash
+                                        password_hash = hashlib.sha256(master_password.encode()).hexdigest()
+                                        vault_meta = {
+                                            "version": "1.0",
+                                            "created": datetime.now().isoformat(),
+                                            "password_hash": password_hash
+                                        }
+                                        
+                                        with open(vault_meta_path, 'w') as f:
+                                            json.dump(vault_meta, f)
                                             
-                                            # Create vault metadata with password hash for verification
-                                            import hashlib
-                                            password_hash = hashlib.sha256(master_password.encode()).hexdigest()
-                                            
-                                            with open(vault_meta_path, 'w') as f:
-                                                vault_meta = {
-                                                    "version": "1.0",
-                                                    "created": datetime.now().isoformat(),
-                                                    "password_hash": password_hash
-                                                }
-                                                json.dump(vault_meta, f)
-                                                
-                                            print(f"Created basic vault metadata at {vault_meta_path}")
-                                            vault_initialized = True
-                                            vault_authenticated = True  # Set authenticated since we just created it
-                                            
-                                            # Now try to save the secret directly
-                                            secret_file = os.path.join(storage.vault_dir, f"{name}.enc")
-                                            secret_value = ""
-                                            if hasattr(auth, 'secret') and auth.secret:
-                                                if hasattr(auth.secret, 'get_value'):
-                                                    try:
-                                                        secret_value = auth.secret.get_value().decode('utf-8')
-                                                    except Exception:
-                                                        secret_value = str(auth.secret)
-                                                else:
+                                        print(f"Created basic vault metadata at {vault_meta_path}")
+                                        vault_initialized = True
+                                        vault_authenticated = True
+                                        
+                                        # Now save the secret directly
+                                        secret_file = os.path.join(storage.vault_dir, f"{name}.enc")
+                                        
+                                        # Get the secret value
+                                        secret_value = ""
+                                        if hasattr(auth, 'secret') and auth.secret:
+                                            if hasattr(auth.secret, 'get_value'):
+                                                try:
+                                                    secret_value = auth.secret.get_value().decode('utf-8') 
+                                                except Exception:
                                                     secret_value = str(auth.secret)
-                                            
-                                            # Ensure the secret is in a proper format for TOTP (base32 encoded)
-                                            try:
-                                                import base64
-                                                import re
-                                                
-                                                # Check if it's a valid base32 string
-                                                if not re.match(r'^[A-Z2-7]+=*$', secret_value):
-                                                    print("Converting secret to proper base32 format for TOTP")
-                                                    # If not properly formatted, encode it as base32
-                                                    if isinstance(secret_value, str):
-                                                        secret_bytes = secret_value.encode('ascii')
-                                                    else:
-                                                        secret_bytes = secret_value
-                                                    # Then encode as base32
-                                                    secret_value = base64.b32encode(secret_bytes).decode('ascii')
-                                            except Exception as format_error:
-                                                print(f"Warning: Could not convert secret to base32: {format_error}")
-                                            
-                                            secret_data = {
-                                                "secret": secret_value,
-                                                "issuer": issuer,
-                                                "account": account
-                                            }
-                                            
-                                            import json
-                                            with open(secret_file, 'w') as f:
-                                                json.dump(secret_data, f)
-                                            
-                                            print(f"Saved secret '{name}' directly to {secret_file}")
-                                            print(f"Secret '{name}' saved successfully.")
-                                            
-                                            # Skip the rest of the save process since we already saved
-                                            continue
-                                        except Exception as direct_save_error:
-                                            print(f"Error with direct save: {direct_save_error}")
-                                    
-                                    # Try the normal approach
+                                            else:
+                                                secret_value = str(auth.secret)
+                                        
+                                        # Format for TOTP if needed
+                                        if not re.match(r'^[A-Z2-7]+=*$', secret_value):
+                                            print("Converting secret to proper base32 format for TOTP")
+                                            if isinstance(secret_value, str):
+                                                secret_bytes = secret_value.encode('ascii')
+                                            else:
+                                                secret_bytes = secret_value
+                                            secret_value = base64.b32encode(secret_bytes).decode('ascii')
+                                        
+                                        # Create and save the secret data
+                                        secret_data = {
+                                            "secret": secret_value,
+                                            "issuer": issuer,
+                                            "account": account
+                                        }
+                                        
+                                        with open(secret_file, 'w') as f:
+                                            json.dump(secret_data, f)
+                                        
+                                        print(f"Saved secret '{name}' directly to {secret_file}")
+                                        print(f"Secret '{name}' saved successfully.")
+                                        continue  # Skip the rest of the vault handling code
+                                    except Exception as direct_save_error:
+                                        print(f"Error with direct save: {direct_save_error}")
+                                        traceback.print_exc()
+                                
+                                # Try standard vault creation if Docker fallback failed
+                                try:
                                     success = storage.create_vault(master_password)
                                     if success:
                                         print("Vault created successfully.")
@@ -257,70 +251,24 @@ try:
                                         vault_authenticated = True
                                     else:
                                         print("Failed to create vault.")
-                                        # Try fallback location
-                                        storage.vault_dir = os.path.join(os.path.expanduser("~"), ".truefa", "vault")
-                                        print(f"Trying fallback location: {storage.vault_dir}")
-                                        os.makedirs(storage.vault_dir, exist_ok=True)
+                                        # Try alternative location
+                                        alt_dir = os.path.join(os.path.expanduser("~"), ".truefa", "vault")
+                                        print(f"Trying alternative location: {alt_dir}")
+                                        storage.vault_dir = alt_dir
+                                        os.makedirs(alt_dir, exist_ok=True)
+                                        
                                         success = storage.create_vault(master_password)
                                         if success:
-                                            print("Vault created successfully at fallback location.")
+                                            print("Vault created successfully at alternative location.")
                                             vault_initialized = True
                                             vault_authenticated = True
                                         else:
-                                            print("Failed to create vault at fallback location.")
-                                        continue
+                                            print("Failed to create vault at alternative location.")
+                                            continue
                                 except Exception as e:
                                     print(f"Failed to create vault: {e}")
                                     traceback.print_exc()
                                     continue
-                                    
-                            # Unlock the vault if needed
-                            if not storage.is_unlocked:
-                                try:
-                                    master_password = getpass.getpass("Enter your vault master password: ")
-                                    success = False
-                                    try:
-                                        success = storage.unlock(master_password)
-                                    except Exception as unlock_error:
-                                        print(f"Error during unlock attempt: {unlock_error}")
-                                        success = False
-                                        
-                                    if not success:
-                                        print("Failed to unlock vault. Secret not saved.")
-                                        continue
-                                except Exception as e:
-                                    print(f"Error unlocking vault: {e}")
-                                    continue
-                                
-                            # Save the secret
-                            try:
-                                # Ensure we have the needed attributes and convert them safely
-                                secret_value = ""
-                                if hasattr(auth, 'secret') and auth.secret:
-                                    if hasattr(auth.secret, 'get_value'):
-                                        try:
-                                            secret_value = auth.secret.get_value().decode('utf-8')
-                                        except Exception as e:
-                                            print(f"Warning: Could not decode secret: {e}")
-                                            secret_value = str(auth.secret)
-                                    else:
-                                        secret_value = str(auth.secret)
-                                
-                                secret_data = {
-                                    "secret": secret_value,
-                                    "issuer": issuer,
-                                    "account": account
-                                }
-                                
-                                print(f"Saving secret '{name}' with issuer '{issuer}' and account '{account}'")
-                                result = storage.save_secret(name, secret_data)
-                                if result:
-                                    print(f"Error: {result}")
-                                else:
-                                    print(f"Secret '{name}' saved successfully.")
-                            except Exception as e:
-                                print(f"An error occurred while saving secret: {e}")
-                                traceback.print_exc()
                         
                         elif choice == "1":
                             # Load QR code from image
