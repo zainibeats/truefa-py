@@ -57,38 +57,36 @@ class TwoFactorAuth:
     - Signal handling for secure termination
     """
     
-    def __init__(self):
+    def __init__(self, storage=None):
         """
-        Initialize the TwoFactorAuth object and setup necessary paths and security checks.
+        Initialize the TOTP authenticator.
+        
+        Args:
+            storage: Optional SecureStorage object to use for storage.
+                    If None, a new instance will be created.
         """
         try:
-            # Setup signal handling for secure termination
-            signal.signal(signal.SIGINT, self._signal_handler)
+            # Locate OpenCV if available
+            self._check_opencv()
             
-            # Initialize security event counters
-            self._error_states = {
-                'debug_attempts': 0,
-                'path_violations': 0,
-                'buffer_overflows': 0,
-                'format_attacks': 0,
-                'permission_violations': 0,
-                'integrity_violations': 0,  # Added for HMAC integrity checks
-            }
+            # Initialize secure storage
+            if storage is not None:
+                self.storage = storage
+                print("Using provided SecureStorage instance")
+            else:
+                from ..security.secure_storage import SecureStorage
+                self.storage = SecureStorage()
+                print("Created new SecureStorage instance")
             
-            # Basic anti-debug check (don't be too aggressive)
-            if not os.environ.get("TRUEFA_SKIP_DEBUG_CHECK"):
+            # Check for debugger
+            if os.environ.get("TRUEFA_SKIP_DEBUGGER_CHECK", "").lower() not in ("1", "true", "yes"):
                 self._check_debugger()
             
             # Initialize storage paths
             self._find_storage_dirs()
-
-            # Initialize storage
-            self.storage = SecureStorage()
-            
-            # Check if vault is already initialized
-            self.is_vault_mode = self.storage.vault.is_initialized()
             
             # Register signal handlers for secure cleanup
+            signal.signal(signal.SIGINT, self._signal_handler)
             signal.signal(signal.SIGTERM, self._signal_handler)
             if hasattr(signal, 'SIGHUP'):  # Not available on Windows
                 signal.signal(signal.SIGHUP, self._signal_handler)
@@ -98,17 +96,18 @@ class TwoFactorAuth:
             self.continuous_thread = None
             self.should_stop = threading.Event()
             self.is_generating = False  # Flag for continuous generation
+            self.issuer = ""
+            self.account = ""
+            self.algorithm = "SHA1"
+            self.digits = 6
+            self.period = 30
             
-            # Ensure OpenCV is available
-            self._check_opencv()
+            # Initialize the logger
+            self.logger = logging.getLogger(__name__)
             
-            # Create a FileIntegrityVerifier instance for HMAC operations
-            self.integrity_verifier = FileIntegrityVerifier(
-                security_event_handler=lambda event_type: record_security_event(event_type)
-            )
         except Exception as e:
-            print(f"Error initializing TwoFactorAuth: {e}")
-            traceback.print_exc()
+            print(f"Error initializing TwoFactorAuth: {str(e)}")
+            raise
 
     def _check_opencv(self):
         """
@@ -143,9 +142,15 @@ class TwoFactorAuth:
         Ensures proper cleanup of sensitive data when the program
         is interrupted or terminated.
         """
+        # Stop continuous generation if it's running
         if self.is_generating:
+            print("\nReceived termination signal. Stopping code generation...")
             self.is_generating = False
+            self.should_stop.set()
+            time.sleep(0.5)  # Give a moment for the generation to stop
             return
+        
+        # Otherwise clean up and exit
         self.cleanup()
         print("\nExiting securely...")
         sys.exit(0)
@@ -584,6 +589,9 @@ class TwoFactorAuth:
             print("No secret key available. Please load a secret first.")
             return
         
+        # Reset the stop event
+        self.should_stop.clear()
+        
         # Set the continuous generation flag
         self.is_generating = True
         
@@ -592,7 +600,7 @@ class TwoFactorAuth:
             last_code = None
             
             # Continue until interrupted
-            while self.is_generating:
+            while self.is_generating and not self.should_stop.is_set():
                 try:
                     # Generate the current code and get remaining time
                     code, remaining = self.generate_totp()
@@ -634,10 +642,12 @@ class TwoFactorAuth:
                     else:
                         # Standard refresh rate (1 second)
                         # Using 0.9 instead of 1.0 to account for processing time
-                        time.sleep(0.9)
+                        time.sleep(0.1)  # Use shorter sleep time to check for interrupts more frequently
                         
                 except KeyboardInterrupt:
-                    pass
+                    print("\nKeyboard interrupt detected. Stopping code generation...")
+                    self.should_stop.set()
+                    break
         except Exception as e:
             print(f"ERROR: Exception in continuous_generate: {e}")
         finally:
@@ -646,20 +656,14 @@ class TwoFactorAuth:
             
     def save_secret(self, name, password=None):
         """
-        Save the current secret securely.
+        Save the current secret with the provided name.
         
         Args:
-            name: Name to identify the saved secret
-            password: Optional password for additional encryption
-            
+            name: Name to save the secret as
+            password: Optional password to unlock vault if needed
+
         Returns:
-            str: Error message if failed, None if successful
-            
-        Security:
-        - Encrypts secret before storage
-        - Validates input parameters
-        - Returns generic error messages
-        - Uses HMAC to verify file integrity
+            Success message or error message
         """
         # Check if we have a secret to save
         if not self.secret:
@@ -683,72 +687,53 @@ class TwoFactorAuth:
         if '..' in name or '/' in name or '\\' in name:
             return "Name contains invalid characters"
         
-        # Check if vault is not initialized
-        if not self.storage.vault.is_initialized():
-            # First-time setup: create the vault
+        # Check if vault doesn't exist or has invalid metadata
+        print(f"DEBUG: Vault path exists: {os.path.exists(self.storage.vault.vault_path)}")
+        print(f"DEBUG: Checking vault.is_initialized property (this should be a boolean): {self.storage.vault.is_initialized}")
+        
+        # Check for corrupted vault or missing metadata
+        if not self.storage.vault.is_initialized:
+            # Vault doesn't exist or has invalid metadata - need to create a new one
+            
+            # Check if the vault directory exists but is corrupted
+            if os.path.exists(os.path.dirname(self.storage.vault.vault_path)):
+                print("\nExisting vault appears to be corrupted or incomplete.")
+                delete_vault = input("Do you want to delete the existing vault and create a new one? (y/n): ")
+                if delete_vault.lower() == 'y':
+                    try:
+                        # Delete the vault directory
+                        import shutil
+                        shutil.rmtree(os.path.dirname(self.storage.vault.vault_path))
+                        print("Existing vault deleted.")
+                    except Exception as e:
+                        print(f"Error deleting vault: {e}")
+                        return "Failed to delete existing vault"
+                else:
+                    return "Cannot save secret without a valid vault"
+            
             print("\nThis is the first time saving a secret. You need to set up a vault password.")
             
-            # Securely get and confirm the vault password
-            vault_password = getpass.getpass("Enter a vault password to secure your secrets: ")
-            if not vault_password:
-                return "Vault password cannot be empty"
+            # Ask for master password and create vault
+            master_password = getpass.getpass("Create a master password for your vault: ")
+            if len(master_password) < 8:
+                return "Password must be at least 8 characters long"
                 
-            confirm_password = getpass.getpass("Confirm vault password: ")
-            if vault_password != confirm_password:
+            confirm_password = getpass.getpass("Confirm master password: ")
+            if master_password != confirm_password:
                 return "Passwords do not match"
                 
-            # Use vault password as master password for simplicity
-            master_password = vault_password
-            
-            # Initialize the vault with the passwords
-            try:
-                # Create the vault with the passwords
-                self.storage.vault.create_vault(vault_password, master_password)
-                # Unlock the vault for immediate use
-                self.storage.vault.unlock_vault(vault_password)
-                # Mark storage as unlocked
-                self.storage._unlock()
-                
-                # Make sure the key is derived from the vault's master key
-                master_key = self.storage.vault.get_master_key()
-                if master_key and master_key.get():
-                    self.storage.key = base64.b64decode(master_key.get().encode())
-                    master_key.clear()
-                
-                self.is_vault_mode = True
-                print("Vault created and unlocked successfully.")
-                print(f"Vault unlocked state: {self.storage.vault.is_unlocked()}")
-                print(f"Storage unlocked state: {self.storage.is_unlocked}")
-            except Exception as e:
-                return f"Failed to create vault: {str(e)}"
-        # Check if vault is initialized but locked
-        elif self.storage.vault.is_initialized() and not self.storage.vault.is_unlocked():
-            # We need to unlock the vault
-            print("\nVault is locked. Please unlock it to save your secret.")
-            
-            # Get the vault password
-            vault_password = getpass.getpass("Enter your vault password: ")
-            if not vault_password:
-                return "Vault password cannot be empty"
-                
-            try:
-                # Attempt to unlock the vault
-                if not self.storage.vault.unlock_vault(vault_password):
-                    return "Incorrect vault password"
-                
-                # Mark storage as unlocked
-                self.storage._unlock()
-                
-                # Get the master key for encryption
-                master_key = self.storage.vault.get_master_key()
-                if master_key and master_key.get():
-                    self.storage.key = base64.b64decode(master_key.get().encode())
-                    master_key.clear()
-                
-                self.is_vault_mode = True
-                print("Vault unlocked successfully.")
-            except Exception as e:
-                return f"Failed to unlock vault: {str(e)}"
+            print("Creating new vault...")
+            if self.storage.create_vault(master_password):
+                print("Vault created successfully.")
+                # Don't ask for the password again after creating the vault - it's already unlocked
+                # Continue with saving the secret using the vault we just created and unlocked
+            else:
+                return "Failed to create vault"
+        elif not self.storage.vault.is_unlocked:
+            # Vault exists but is locked - need to unlock it
+            master_password = getpass.getpass("Enter your vault master password: ")
+            if not self.storage.unlock(master_password):
+                return "Invalid master password"
         
         try:
             result = self.storage.save_secret(name, self.secret, password)
@@ -776,27 +761,21 @@ class TwoFactorAuth:
                 except Exception as e:
                     # Don't fail the save if backup creation fails
                     print(f"Warning: Could not create integrity-protected backup: {e}")
-            
-            return result  # Return any error from the storage layer
+                
+            return result
         except Exception as e:
-            return f"Failed to save secret: {str(e)}"
+            return f"Error saving secret: {str(e)}"
 
     def load_secret(self, name, password=None):
         """
-        Load a saved secret.
+        Load a secret by name.
         
         Args:
             name: Name of the secret to load
-            password: Optional password for decryption
-            
+            password: Optional password to unlock the vault if needed
+        
         Returns:
-            str: Error message if failed, None if successful
-            
-        Security:
-        - Decrypts secret securely
-        - Validates input parameters
-        - Returns generic error messages
-        - Verifies file integrity using HMAC
+            Success message or error message
         """
         try:
             # Get the path to the secret file
@@ -821,12 +800,31 @@ class TwoFactorAuth:
                         with open(secret_file_path, 'wb') as f:
                             f.write(content)
             
-            # Now load the secret as normal
-            secret = self.storage.load_secret(name, password)
-            if secret:
-                self.secret = secret
-                return None  # No error
-            return "Failed to load secret"
+            # Load the secret
+            try:
+                secret = self.storage.load_secret(name, password)
+                
+                # Check if secret is a string (error message) or a dictionary (actual secret)
+                if isinstance(secret, str):
+                    return f"Error loading secret: {secret}"
+                
+                # Extract the secret data
+                if isinstance(secret, dict):
+                    secret_value = secret.get('secret')
+                    issuer = secret.get('issuer', '')
+                    account = secret.get('account', '')
+                    
+                    if not secret_value:
+                        return "Invalid secret data: missing 'secret' field"
+                        
+                    # Set the extracted values
+                    self.set_secret(secret_value, issuer, account)
+                    return f"Secret: {name}"
+                else:
+                    # Handle the case where secret is not a dict or string
+                    return f"Error: Unexpected secret format: {type(secret)}"
+            except Exception as e:
+                return f"Error listing secrets: {str(e)}"
         except Exception as e:
             return f"Failed to load secret: {e}"
 
@@ -1026,6 +1024,22 @@ class TwoFactorAuth:
             # Create images directory if needed
             if not os.path.exists(self.images_dir):
                 self._secure_create_file(os.path.join(self.images_dir, '.gitkeep'), '')
+                
+            # Check for vault using the correct path from vault_directory
+            try:
+                from src.security.vault_directory import get_secure_vault_dir
+                vault_dir = get_secure_vault_dir()
+                print(f"Checking for vault at {vault_dir}")
+                
+                # Check if vault exists by looking for the vault.json file
+                vault_json_path = os.path.join(vault_dir, "vault.json")
+                vault_exists = os.path.exists(vault_json_path)
+                print(f"Vault exists: {vault_exists}")
+                
+                # Don't check for vault.dat anymore, as we're using the vault directory
+                # from vault_directory module
+            except Exception as e:
+                print(f"Error finding vault directory: {e}")
         except Exception as e:
             print(f"Error setting up storage directories: {e}")
             # Fallback to current directory
