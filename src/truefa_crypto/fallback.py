@@ -1,12 +1,12 @@
 """
-Fallback Implementations for TrueFA Crypto
+TrueFA Crypto Python Fallback Implementation
 
-This module provides pure Python implementations of the cryptographic functions
-that would normally be provided by the Rust DLL. These are used as a fallback
-when the DLL cannot be loaded.
+Pure Python implementations of cryptographic functions that serve as a fallback
+when the Rust native library cannot be loaded. Provides feature compatibility
+at the expense of some security benefits offered by the Rust implementation.
 
-WARNING: These implementations may be less secure than the Rust implementations
-due to lack of memory zeroing and other security features that the Rust DLL provides.
+SECURITY NOTE: This implementation lacks memory protection features like automatic
+zeroing that the Rust version provides. Use only when the native library is unavailable.
 """
 
 import os
@@ -22,14 +22,14 @@ warnings.warn("Using Python fallback implementation for crypto operations. Secur
 
 def encrypt_data(data, key):
     """
-    Encrypt data using AES-GCM.
+    Encrypt data using AES-GCM with a random nonce.
     
     Args:
-        data (bytes): Data to encrypt
-        key (bytes): Encryption key
+        data (bytes): Plaintext data
+        key (bytes): 32-byte encryption key
         
     Returns:
-        bytes: Encrypted data with nonce prepended
+        bytes: Encrypted data (12-byte nonce + ciphertext)
     """
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -50,14 +50,17 @@ def encrypt_data(data, key):
 
 def decrypt_data(encrypted_data, key):
     """
-    Decrypt data using AES-GCM.
+    Decrypt AES-GCM encrypted data.
     
     Args:
-        encrypted_data (bytes): Encrypted data with nonce prepended
-        key (bytes): Decryption key
+        encrypted_data (bytes): Combined nonce and ciphertext
+        key (bytes): 32-byte decryption key
         
     Returns:
-        bytes: Decrypted data
+        bytes: Decrypted plaintext
+        
+    Raises:
+        ValueError: If decryption fails (likely due to incorrect key or data corruption)
     """
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -80,15 +83,15 @@ def decrypt_data(encrypted_data, key):
 
 def derive_key(password, salt=None, iterations=100000):
     """
-    Derive a key from a password using PBKDF2.
+    Derive cryptographic key from password using PBKDF2-HMAC-SHA256.
     
     Args:
-        password (str or bytes): The password
-        salt (bytes, optional): The salt. If None, a random salt is generated.
-        iterations (int, optional): Number of iterations for key derivation
+        password (str or bytes): User password
+        salt (bytes, optional): 16-byte salt (randomly generated if None)
+        iterations (int, optional): PBKDF2 iteration count (higher is more secure)
         
     Returns:
-        tuple: (key, salt) where key is the derived key and salt is the salt used
+        tuple: (derived_key, salt) where derived_key is 32 bytes
     """
     try:
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -119,29 +122,29 @@ def derive_key(password, salt=None, iterations=100000):
 
 def hash_password(password, salt=None):
     """
-    Hash a password for storage using PBKDF2.
+    Create password hash for secure storage.
     
     Args:
-        password (str or bytes): The password to hash
-        salt (bytes, optional): The salt. If None, a random salt is generated.
+        password (str or bytes): Password to hash
+        salt (bytes, optional): Salt value (randomly generated if None)
         
     Returns:
-        tuple: (hash, salt) where hash is the hashed password and salt is the salt used
+        tuple: (password_hash, salt) for storage and verification
     """
     # This is essentially the same as derive_key
     return derive_key(password, salt)
 
 def verify_password(password, password_hash, salt):
     """
-    Verify a password against a stored hash.
+    Verify a password against stored hash using constant-time comparison.
     
     Args:
-        password (str or bytes): The password to verify
-        password_hash (bytes): The stored password hash
-        salt (bytes): The salt used to generate the hash
+        password (str or bytes): Password to verify
+        password_hash (bytes): Previously stored password hash
+        salt (bytes): Salt used for the original hash
         
     Returns:
-        bool: True if the password matches, False otherwise
+        bool: True if password matches, False otherwise
     """
     # Generate hash of the provided password using the same salt
     calculated_hash, _ = hash_password(password, salt)
@@ -151,14 +154,14 @@ def verify_password(password, password_hash, salt):
 
 def create_hmac(data, key):
     """
-    Create an HMAC for the provided data using the key.
+    Generate HMAC-SHA256 for data authentication.
     
     Args:
-        data (bytes): The data to create an HMAC for
-        key (bytes): The key to use for the HMAC
+        data (bytes or str): Data to authenticate
+        key (bytes): Secret key for HMAC generation
         
     Returns:
-        bytes: The HMAC
+        bytes: 32-byte HMAC digest
     """
     # Convert data to bytes if it's a string
     if isinstance(data, str):
