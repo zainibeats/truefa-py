@@ -112,29 +112,29 @@ class TwoFactorAuth:
 
     def _check_opencv(self):
         """
-        Check if OpenCV is installed and install it if needed.
+        Check if OpenCV is installed and use a graceful fallback if not.
         
         Returns:
             bool: True if OpenCV is available, False otherwise
-            
-        Note:
-            Attempts to install OpenCV using pip if not found
         """
         try:
             # Try to import OpenCV
             import cv2
             return True
         except ImportError:
-            print("OpenCV not found. Installing...")
-            try:
-                # Install OpenCV using pip
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python"])
-                print("OpenCV installed successfully.")
-                import cv2
-                return True
-            except Exception as e:
-                print(f"Failed to install OpenCV: {e}")
-                return False
+            print("OpenCV not found. Installation will be skipped.")
+            print("QR code functionality will be limited.")
+            
+            # Instead of trying to install at runtime, provide clear instructions
+            if getattr(sys, 'frozen', False):
+                print("This executable requires OpenCV for QR code scanning.")
+                print("The application will continue with limited functionality.")
+                print("To enable QR code scanning, please use the full installer version.")
+            else:
+                print("To enable QR code scanning, install OpenCV manually:")
+                print("pip install opencv-python")
+            
+            return False
 
     def _signal_handler(self, signum, frame):
         """
