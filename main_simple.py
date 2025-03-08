@@ -23,12 +23,35 @@ try:
     from src.security.secure_string import SecureString
     from src.utils.screen import clear_screen
     
-    # Copy the main functionality from main_opencv.py
+    # Modified main function to ensure vault storage works in Docker
     def main():
         # Initialize the authenticator and secure storage once
         try:
             auth = TwoFactorAuth()
+            
+            # Create storage with Docker-friendly path
             storage = SecureStorage()
+            
+            # In Docker, ensure we use a path we know we can write to
+            if os.environ.get("DOCKER_CONTAINER") == "1" or os.path.exists("/.dockerenv"):
+                # Use a path we know we can write to in Docker
+                docker_vault_dir = os.path.expanduser("~/truefa_vault")
+                print(f"Docker environment detected, using {docker_vault_dir} for vault storage")
+                storage.vault_dir = docker_vault_dir
+            elif "ContainerAdministrator" in os.path.expanduser("~"):
+                # Detected Windows container
+                docker_vault_dir = "C:\\truefa_vault"
+                print(f"Windows container detected, using {docker_vault_dir} for vault storage")
+                storage.vault_dir = docker_vault_dir
+                # Ensure the directory exists with proper permissions
+                os.makedirs(docker_vault_dir, exist_ok=True)
+                try:
+                    # Try to adjust permissions if needed
+                    if os.name == "nt":
+                        import stat
+                        os.chmod(docker_vault_dir, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+                except Exception as e:
+                    print(f"Warning: Could not set permissions on vault directory: {e}")
             
             # Process command-line arguments for non-interactive operations
             parser = argparse.ArgumentParser(description="TrueFA-Py OpenCV Edition")
@@ -66,9 +89,11 @@ try:
             # Check for existing vault
             vault_exists = False
             try:
+                print(f"Checking for vault at {storage.vault_dir}")
                 vault_exists = storage.vault_exists()
-            except:
-                pass
+                print(f"Vault exists: {vault_exists}")
+            except Exception as e:
+                print(f"Error checking if vault exists: {e}")
                 
             # Start interactive mode if no special flags were used
             # Start main interactive loop
@@ -118,7 +143,9 @@ try:
                             # Check if vault is initialized
                             try:
                                 vault_initialized = storage.vault.is_initialized()
-                            except:
+                                print(f"Vault initialized: {vault_initialized}")
+                            except Exception as e:
+                                print(f"Error checking vault initialization: {e}")
                                 vault_initialized = False
                                 
                             if not vault_initialized:
@@ -130,31 +157,82 @@ try:
                                     print("Passwords do not match.")
                                     continue
                                     
-                                if not storage.create_vault(master_password):
-                                    print("Failed to create vault.")
+                                try:
+                                    # Use fallback Python implementation for crypto in Docker
+                                    if os.environ.get("DOCKER_CONTAINER") == "1" or os.path.exists("/.dockerenv") or "ContainerAdministrator" in os.path.expanduser("~"):
+                                        os.environ["TRUEFA_USE_FALLBACK"] = "1"
+                                        print("Using Python fallback implementation in Docker environment")
+                                    
+                                    print(f"Creating vault at {storage.vault_dir}")
+                                    success = storage.create_vault(master_password)
+                                    if success:
+                                        print("Vault created successfully.")
+                                        vault_initialized = True
+                                    else:
+                                        print("Failed to create vault.")
+                                        # Try fallback location
+                                        storage.vault_dir = os.path.join(os.path.expanduser("~"), ".truefa", "vault")
+                                        print(f"Trying fallback location: {storage.vault_dir}")
+                                        os.makedirs(storage.vault_dir, exist_ok=True)
+                                        success = storage.create_vault(master_password)
+                                        if success:
+                                            print("Vault created successfully at fallback location.")
+                                            vault_initialized = True
+                                        else:
+                                            print("Failed to create vault at fallback location.")
+                                            continue
+                                except Exception as e:
+                                    print(f"Failed to create vault: {e}")
+                                    traceback.print_exc()
                                     continue
                                     
                             # Unlock the vault if needed
                             if not storage.is_unlocked:
-                                master_password = getpass.getpass("Enter your vault master password: ")
-                                if not storage.unlock(master_password):
-                                    print("Failed to unlock vault. Secret not saved.")
+                                try:
+                                    master_password = getpass.getpass("Enter your vault master password: ")
+                                    success = False
+                                    try:
+                                        success = storage.unlock(master_password)
+                                    except Exception as unlock_error:
+                                        print(f"Error during unlock attempt: {unlock_error}")
+                                        success = False
+                                        
+                                    if not success:
+                                        print("Failed to unlock vault. Secret not saved.")
+                                        continue
+                                except Exception as e:
+                                    print(f"Error unlocking vault: {e}")
                                     continue
-                                    
+                                
                             # Save the secret
                             try:
+                                # Ensure we have the needed attributes and convert them safely
+                                secret_value = ""
+                                if hasattr(auth, 'secret') and auth.secret:
+                                    if hasattr(auth.secret, 'get_value'):
+                                        try:
+                                            secret_value = auth.secret.get_value().decode('utf-8')
+                                        except Exception as e:
+                                            print(f"Warning: Could not decode secret: {e}")
+                                            secret_value = str(auth.secret)
+                                    else:
+                                        secret_value = str(auth.secret)
+                                
                                 secret_data = {
-                                    "secret": auth.secret.get_value().decode('utf-8') if hasattr(auth.secret, 'get_value') else str(auth.secret),
+                                    "secret": secret_value,
                                     "issuer": issuer,
                                     "account": account
                                 }
+                                
+                                print(f"Saving secret '{name}' with issuer '{issuer}' and account '{account}'")
                                 result = storage.save_secret(name, secret_data)
                                 if result:
                                     print(f"Error: {result}")
                                 else:
                                     print(f"Secret '{name}' saved successfully.")
                             except Exception as e:
-                                print(f"An error occurred: {e}")
+                                print(f"An error occurred while saving secret: {e}")
+                                traceback.print_exc()
                         
                         elif choice == "1":
                             # Handle QR code loading
