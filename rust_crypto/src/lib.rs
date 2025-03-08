@@ -1,15 +1,16 @@
 #![allow(non_snake_case)]
-//! TrueFA Cryptographic Module
+//! TrueFA Rust Cryptography Module
 //! 
-//! This module provides secure cryptographic operations for the TrueFA application.
-//! It implements:
-//! - Secure memory handling with automatic zeroization
-//! - Vault-based secret storage with envelope encryption
-//! - Secure random number generation
-//! - Key derivation using Scrypt
+//! High-performance, memory-safe implementation of cryptographic operations
+//! for the TrueFA application. Features include:
+//! - Automatic memory zeroization for sensitive data
+//! - Envelope encryption with master key protection
+//! - Secure random generation using OS entropy sources
+//! - Scrypt key derivation for vault password handling
+//! - AES-256-GCM authenticated encryption
 //! 
-//! The module is designed to be called from Python and ensures that sensitive
-//! data is properly protected in memory and during storage.
+//! This module exposes both Python bindings for direct integration
+//! and C-compatible functions for FFI access from other languages.
 
 use std::sync::Mutex;
 use pyo3::{prelude::*, exceptions::PyValueError};
@@ -20,8 +21,8 @@ use once_cell::sync::Lazy;
 use scrypt::{password_hash::{PasswordHasher, SaltString}, Scrypt};
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
 
-/// SecureString provides protected memory storage for sensitive data.
-/// The stored data is automatically zeroized when dropped.
+/// Memory-protected string with automatic zeroization on drop.
+/// Prevents sensitive data exposure through memory dumps or leaks.
 #[pyclass]
 #[derive(Debug)]
 pub struct SecureString {
@@ -31,7 +32,7 @@ pub struct SecureString {
 #[pymethods]
 impl SecureString {
     /// Creates a new SecureString from a UTF-8 string.
-    /// The data is stored in protected memory.
+    /// Stores data in protected memory when available.
     #[new]
     pub fn new(value: &str) -> Self {
         Self { 
@@ -39,37 +40,36 @@ impl SecureString {
         }
     }
     
-    /// Returns the stored string as UTF-8.
-    /// Note: This temporarily exposes the secret in memory.
+    /// Retrieves stored data as UTF-8 string.
+    /// Note: Temporarily exposes the secret in memory.
     fn __str__(&self) -> PyResult<String> {
         String::from_utf8(self.data.clone())
             .map_err(|_| PyValueError::new_err("Invalid UTF-8 in secure string"))
     }
     
-    /// Explicitly clears the stored data by zeroizing the memory.
+    /// Explicitly zeroizes memory and clears the stored data.
     fn clear(&mut self) {
         self.data.zeroize();
         self.data = Vec::new();
     }
 }
 
-/// Ensures secure cleanup by zeroizing memory when the object is dropped.
+/// Ensures secure cleanup by zeroizing memory when dropped.
 impl Drop for SecureString {
     fn drop(&mut self) {
         self.data.zeroize();
     }
 }
 
-/// Thread-safe cache for the vault key with secure memory handling.
-/// This struct maintains both the active vault key and original key for verification.
+/// Thread-safe cache for vault encryption keys with secure memory handling.
 struct VaultKeyCache {
-    vault_key: Option<Vec<u8>>,      // Current active key
+    vault_key: Option<Vec<u8>>,      // Active encryption key
     original_key: Option<Vec<u8>>,    // Original key for verification
-    vault_exists: bool,               // Whether a vault has been initialized
+    vault_exists: bool,               // Vault initialization state
 }
 
 impl VaultKeyCache {
-    /// Creates a new empty vault key cache.
+    /// Creates a new empty key cache with no active vault.
     fn new() -> Self {
         Self { 
             vault_key: None,
@@ -78,8 +78,7 @@ impl VaultKeyCache {
         }
     }
     
-    /// Sets both the active and original keys.
-    /// Any existing key is securely zeroized before being replaced.
+    /// Sets both active and verification keys, zeroizing any existing key.
     fn set_key(&mut self, key: Vec<u8>) {
         if let Some(old_key) = &mut self.vault_key {
             old_key.zeroize();
@@ -89,8 +88,7 @@ impl VaultKeyCache {
         self.vault_exists = true;
     }
     
-    /// Clears only the active key while preserving the original for verification.
-    /// The cleared key is securely zeroized.
+    /// Securely clears the active key while preserving verification key.
     fn clear_key(&mut self) {
         if let Some(key) = &mut self.vault_key {
             key.zeroize();
