@@ -34,6 +34,7 @@ node_modules/
 check_dll.py
 vault_test.py
 vault/
+test_vault/
 
 # Production files
 ez-release/
