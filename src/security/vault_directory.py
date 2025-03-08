@@ -274,4 +274,42 @@ def secure_atomic_write(file_path, content, mode="w"):
                 os.remove(temp_file)
         except:
             pass
-        return False 
+        return False
+
+def get_secure_vault_dir():
+    """
+    Get the path to the secure vault directory.
+    
+    This function determines the most appropriate location for storing
+    vault files based on the platform and environment.
+    
+    Returns:
+        str: Path to the secure vault directory
+    """
+    # Check if running in Docker
+    running_in_docker = is_running_in_docker()
+    
+    # Get the user's home directory
+    home_dir = os.path.expanduser("~")
+    
+    if running_in_docker:
+        # Use a dedicated Docker vault location
+        if "ContainerAdministrator" in home_dir or platform.system() == "Windows":
+            # Windows container
+            return "C:\\test_vault"
+        else:
+            # Linux container
+            return os.path.join(home_dir, "truefa_vault") 
+    
+    # Standard locations based on platform
+    if platform.system() == "Windows":
+        # On Windows, use AppData/Roaming
+        appdata = os.environ.get('APPDATA') or os.path.join(home_dir, "AppData", "Roaming")
+        return os.path.join(appdata, "TrueFA-Py", "vault")
+    elif platform.system() == "Darwin":
+        # On macOS, use Library/Application Support
+        return os.path.join(home_dir, "Library", "Application Support", "TrueFA-Py", "vault")
+    else:
+        # On Linux/Unix, use XDG_DATA_HOME or ~/.local/share
+        xdg_data_home = os.environ.get('XDG_DATA_HOME') or os.path.join(home_dir, ".local", "share")
+        return os.path.join(xdg_data_home, "TrueFA-Py", "vault") 
