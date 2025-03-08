@@ -59,31 +59,38 @@ class TwoFactorAuth:
     
     def __init__(self, storage=None):
         """
-        Initialize the TOTP authenticator.
+        Initialize the TwoFactorAuth instance.
         
         Args:
-            storage: Optional SecureStorage object to use for storage.
-                    If None, a new instance will be created.
+            storage: Optional SecureStorage instance to use for saving/loading secrets
         """
+        # Core configuration
+        self.secret = None
+        self.issuer = None
+        self.account = None
+        self.algorithm = 'SHA1'
+        self.digits = 6
+        self.period = 30
+        
+        # Use provided storage or create a new one
+        if storage is not None:
+            print("Using provided SecureStorage instance")
+            self.storage = storage
+        else:
+            print("Creating new SecureStorage instance")
+            from ..security.secure_storage import SecureStorage
+            self.storage = SecureStorage()
+        
+        # Verify we have paths for images
+        self.images_dir = self._find_storage_dirs()
+        
+        # Set up OpenCV if available
+        self.opencv_available = self._check_opencv()
+        
         try:
-            # Locate OpenCV if available
-            self._check_opencv()
-            
-            # Initialize secure storage
-            if storage is not None:
-                self.storage = storage
-                print("Using provided SecureStorage instance")
-            else:
-                from ..security.secure_storage import SecureStorage
-                self.storage = SecureStorage()
-                print("Created new SecureStorage instance")
-            
             # Check for debugger
             if os.environ.get("TRUEFA_SKIP_DEBUGGER_CHECK", "").lower() not in ("1", "true", "yes"):
                 self._check_debugger()
-            
-            # Initialize storage paths
-            self._find_storage_dirs()
             
             # Register signal handlers for secure cleanup
             signal.signal(signal.SIGINT, self._signal_handler)
@@ -92,15 +99,9 @@ class TwoFactorAuth:
                 signal.signal(signal.SIGHUP, self._signal_handler)
                 
             # Setup instance variables
-            self.secret = None
             self.continuous_thread = None
             self.should_stop = threading.Event()
             self.is_generating = False  # Flag for continuous generation
-            self.issuer = ""
-            self.account = ""
-            self.algorithm = "SHA1"
-            self.digits = 6
-            self.period = 30
             
             # Initialize the logger
             self.logger = logging.getLogger(__name__)
@@ -285,95 +286,81 @@ class TwoFactorAuth:
         - Securely stores extracted secret
         """
         try:
-            # Import OpenCV - this should be available after _check_opencv
+            # Import OpenCV
             import cv2
+            print("DEBUG: OpenCV imported successfully")
+            
+            # Check if image_path is None
+            if image_path is None:
+                print("DEBUG: image_path is None")
+                return None, "No image path provided"
             
             # Validate the image path
             valid_path, error_msg = self._validate_image_path(image_path)
             if not valid_path:
+                print(f"DEBUG: Path validation failed: {error_msg}")
                 return None, error_msg
-                
-            # Adjusted path might be relative to images directory
-            full_path = os.path.join(self.images_dir, valid_path) if not os.path.isabs(valid_path) else valid_path
             
-            # Check if file exists after adjustments
-            if not os.path.exists(full_path):
-                # Try finding file in images directory if not found at full path
-                if not os.path.isabs(valid_path):
-                    alternate_path = os.path.join(self.images_dir, os.path.basename(valid_path))
-                    if os.path.exists(alternate_path):
-                        full_path = alternate_path
-                    else:
-                        return None, f"File not found: {valid_path}"
-                else:
-                    return None, f"File not found: {full_path}"
+            print(f"DEBUG: Reading image from validated path: {valid_path}")
             
-            # Load and process the image with OpenCV
-            try:
-                # Debug the image path
-                print(f"DEBUG: Reading image from: {full_path}")
-                
-                # Load the image using OpenCV
-                img = cv2.imread(str(full_path))
-                if img is None:
-                    # Try one more time with the original path
-                    print(f"DEBUG: Retrying with original path: {image_path}")
-                    img = cv2.imread(str(image_path))
-                    if img is None:
-                        return None, f"Could not read image: {image_path}"
-                
-                print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
-                
-                # Initialize QR Code detector
-                detector = cv2.QRCodeDetector()
-                
-                # Detect and decode
-                print("DEBUG: Attempting to detect and decode QR code...")
-                data, bbox, _ = detector.detectAndDecode(img)
-                
-                print(f"DEBUG: QR code data: {data if data else 'None'}")
-                print(f"DEBUG: QR code bounding box: {bbox if bbox is not None else 'None'}")
-                
-                # Process QR code data
-                if data:
-                    print(f"DEBUG: Raw QR data: {data}")
-                    if data.startswith('otpauth://'):
-                        parsed = urllib.parse.urlparse(data)
-                        params = dict(urllib.parse.parse_qsl(parsed.query))
-                        
-                        print(f"DEBUG: Parsed params: {params}")
-                        
-                        if 'secret' in params:
-                            # Extract and normalize the secret
-                            secret = params['secret']
-                            print(f"DEBUG: Raw secret from QR: {secret}")
-                            
-                            # Create a secure string from the extracted secret
-                            secure_secret = SecureString(secret)
-                            
-                            # Set the issuer and account if available
-                            path = parsed.path
-                            if path.startswith('/'):
-                                path = path[1:]
-                            
-                            if ':' in path:
-                                self.issuer, self.account = path.split(':', 1)
-                            else:
-                                self.account = path
-                                self.issuer = params.get('issuer', '')
-                            
-                            print(f"DEBUG: Parsed issuer: {self.issuer}, account: {self.account}")
-                            
-                            # Store the secret
-                            self.secret = secure_secret
-                            return secure_secret, None
+            # Load the image using OpenCV
+            img = cv2.imread(valid_path)
+            if img is None:
+                print(f"DEBUG: Failed to read image: {valid_path}")
+                return None, f"Could not read image: {valid_path}"
+            
+            print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
+            
+            # Initialize QR Code detector
+            detector = cv2.QRCodeDetector()
+            
+            # Detect and decode
+            print("DEBUG: Attempting to detect and decode QR code...")
+            data, bbox, _ = detector.detectAndDecode(img)
+            
+            print(f"DEBUG: QR code data: {data if data else 'None'}")
+            print(f"DEBUG: QR code bounding box: {bbox if bbox is not None else 'None'}")
+            
+            # Process QR code data
+            if data:
+                print(f"DEBUG: Raw QR data: {data}")
+                if data.startswith('otpauth://'):
+                    parsed = urllib.parse.urlparse(data)
+                    params = dict(urllib.parse.parse_qsl(parsed.query))
                     
-                    return None, "No secret parameter found in otpauth URL"
+                    print(f"DEBUG: Parsed params: {params}")
+                    
+                    if 'secret' in params:
+                        # Extract and normalize the secret
+                        secret = params['secret']
+                        print(f"DEBUG: Raw secret from QR: {secret}")
+                        
+                        # Create a secure string from the extracted secret
+                        secure_secret = SecureString(secret)
+                        
+                        # Set the issuer and account if available
+                        path = parsed.path
+                        if path.startswith('/'):
+                            path = path[1:]
+                        
+                        if ':' in path:
+                            self.issuer, self.account = path.split(':', 1)
+                        else:
+                            self.account = path
+                            self.issuer = params.get('issuer', '')
+                        
+                        print(f"DEBUG: Parsed issuer: {self.issuer}, account: {self.account}")
+                        
+                        # Store the secret
+                        self.secret = secure_secret
+                        return secure_secret, None
                 
-                return None, "QR code found but doesn't contain a valid otpauth URL"
-            except ImportError:
-                return None, "OpenCV is required for QR scanning. Please install it with 'pip install opencv-python'"
+                return None, "No secret parameter found in otpauth URL"
             
+            return None, "QR code not found or doesn't contain a valid otpauth URL"
+        except ImportError as e:
+            print(f"DEBUG: ImportError: {e}")
+            return None, "OpenCV is required for QR scanning. Please install it with 'pip install opencv-python'"
         except Exception as e:
             print(f"DEBUG: Exception in extract_secret_from_qr: {str(e)}")
             import traceback
@@ -388,7 +375,7 @@ class TwoFactorAuth:
             image_path: Raw path to validate
             
         Returns:
-            Path object or None if validation fails
+            tuple: (valid_path, error_message) - valid_path is None if validation fails
             
         Security:
         - Sanitizes path input
@@ -396,88 +383,60 @@ class TwoFactorAuth:
         - Validates path is within allowed directory
         - Checks file existence
         """
+        # Basic validation
+        if image_path is None:
+            print("DEBUG: image_path is None")
+            return None, "No image path provided"
+            
         try:
             # Clean up the path
-            image_path = image_path.strip().strip("'").strip('"')
+            image_path = str(image_path).strip().strip("'").strip('"')
+            print(f"DEBUG: Raw image path after cleanup: {image_path}")
             
-            # Debug the path
-            print(f"DEBUG: Raw image path: {image_path}")
+            # Ensure images directory exists
+            os.makedirs(self.images_dir, exist_ok=True)
             
-            # Convert to Path object for safer operations
-            path_obj = Path(image_path)
-            
-            # Additional security: Block absolute paths that try to escape
-            if path_obj.is_absolute():
-                # Check if it's inside the allowed directories
-                allowed_dirs = [
-                    Path(self.images_dir).resolve(),
-                    Path(os.getcwd()).resolve(),
-                    Path(os.path.join(os.getcwd(), 'assets')).resolve()
-                ]
-                
-                resolved_path = path_obj.resolve()
-                path_allowed = False
-                
-                for allowed_dir in allowed_dirs:
-                    try:
-                        # Check if the path is within an allowed directory
-                        if str(resolved_path).startswith(str(allowed_dir)):
-                            path_allowed = True
-                            break
-                    except Exception:
-                        # Resolve can fail on some systems for non-existent paths
-                        continue
-                    
-                if not path_allowed:
-                    print(f"Security warning: Attempted access to restricted path: {image_path}")
-                    self._record_security_event('invalid_path', image_path)
-                    return None, "Access to this path is not allowed for security reasons"
-            
-            # Try several options to find the image
-            potential_paths = [
-                path_obj,                                       # As provided
-                Path(os.getcwd()) / path_obj,                   # Relative to CWD
-                Path(self.images_dir) / path_obj.name,          # In images dir
-                Path('assets') / path_obj.name,                 # In assets dir
-                Path(os.getcwd()) / 'assets' / path_obj.name,   # In CWD/assets
+            # List of paths to try
+            paths_to_try = [
+                image_path,  # As provided
+                os.path.join(os.getcwd(), image_path),  # Relative to CWD
+                os.path.join(self.images_dir, image_path),  # In images dir
+                os.path.join(self.images_dir, os.path.basename(image_path))  # Just basename in images dir
             ]
             
-            for potential_path in potential_paths:
-                print(f"DEBUG: Trying path: {potential_path}")
-                if potential_path.exists() and potential_path.is_file():
-                    # Ensure path didn't change through symlinks or other means
-                    resolved_path = potential_path.resolve()
-                    
-                    # Additional security check: verify file extension is an image format
-                    if resolved_path.suffix.lower() not in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+            # Try each path
+            for path in paths_to_try:
+                print(f"DEBUG: Trying path: {path}")
+                if os.path.exists(path) and os.path.isfile(path):
+                    # Validate file extension
+                    _, ext = os.path.splitext(path)
+                    if ext.lower() not in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
                         return None, f"File must be an image type (.png, .jpg, .jpeg, .gif, .bmp)"
                     
-                    # Additional security: perform canonicalization check
-                    if str(potential_path) != str(resolved_path):
-                        print(f"Security warning: Path changed after resolution: {potential_path} -> {resolved_path}")
-                        # Extra validation for the resolved path
-                        allowed_dirs = [
-                            Path(self.images_dir).resolve(),
-                            Path(os.getcwd()).resolve(),
-                            Path(os.path.join(os.getcwd(), 'assets')).resolve()
-                        ]
-                        
-                        path_allowed = False
-                        for allowed_dir in allowed_dirs:
-                            try:
-                                if str(resolved_path).startswith(str(allowed_dir)):
-                                    path_allowed = True
-                                    break
-                            except Exception:
-                                continue
-                        
-                        if not path_allowed:
-                            return None, "Path resolves to a location outside allowed directories"
+                    # Additional security check
+                    full_path = os.path.abspath(path)
                     
-                    print(f"DEBUG: Found valid image at: {potential_path}")
-                    return str(potential_path), None
+                    # Verify path is within allowed directories
+                    allowed_dirs = [
+                        os.path.abspath(self.images_dir),
+                        os.path.abspath(os.getcwd()),
+                        os.path.abspath(os.path.join(os.getcwd(), 'assets'))
+                    ]
+                    
+                    is_allowed = False
+                    for allowed_dir in allowed_dirs:
+                        if full_path.startswith(allowed_dir):
+                            is_allowed = True
+                            break
+                    
+                    if not is_allowed:
+                        print(f"Security warning: Path outside of allowed directories: {full_path}")
+                        return None, "Path is outside of allowed directories"
+                    
+                    print(f"DEBUG: Found valid image at: {full_path}")
+                    return full_path, None
             
-            # If we get here, we didn't find a valid image
+            # If we get here, no valid path was found
             return None, f"Could not find image file: {image_path}"
             
         except Exception as e:
@@ -654,116 +613,102 @@ class TwoFactorAuth:
             self.is_generating = False
             print("\nStopped code generation.")
             
-    def save_secret(self, name, password=None):
+    def save_secret(self, name, secret=None, password=None):
         """
-        Save the current secret with the provided name.
+        Save a secret to the vault.
         
         Args:
-            name: Name to save the secret as
+            name: Name to identify the secret
+            secret: Optional secret data to save (uses current secret if None)
             password: Optional password to unlock vault if needed
-
+            
         Returns:
-            Success message or error message
+            str: Error message on failure, None on success
         """
-        # Check if we have a secret to save
-        if not self.secret:
-            return "No secret available to save"
-        
-        # Input validation
-        # Check for buffer overflow attempts or other malicious input
-        if name is None or not isinstance(name, str):
-            return "Invalid name format"
-        
-        if len(name) > 256:  # Set reasonable limits
-            return "Name is too long (maximum 256 characters)"
-        
-        # Sanitize the name to prevent directory traversal or command injection
-        # Only allow alphanumeric chars, dash, underscore, and space
-        sanitized_name = re.sub(r'[^\w\s-]', '', name)
-        if sanitized_name != name:
-            return "Name contains invalid characters (only letters, numbers, spaces, underscores, and dashes are allowed)"
-        
-        # Prevent common injection patterns
-        if '..' in name or '/' in name or '\\' in name:
-            return "Name contains invalid characters"
-        
-        # Check if vault doesn't exist or has invalid metadata
-        print(f"DEBUG: Vault path exists: {os.path.exists(self.storage.vault.vault_path)}")
-        print(f"DEBUG: Checking vault.is_initialized property (this should be a boolean): {self.storage.vault.is_initialized}")
-        
-        # Check for corrupted vault or missing metadata
-        if not self.storage.vault.is_initialized:
-            # Vault doesn't exist or has invalid metadata - need to create a new one
-            
-            # Check if the vault directory exists but is corrupted
-            if os.path.exists(os.path.dirname(self.storage.vault.vault_path)):
-                print("\nExisting vault appears to be corrupted or incomplete.")
-                delete_vault = input("Do you want to delete the existing vault and create a new one? (y/n): ")
-                if delete_vault.lower() == 'y':
-                    try:
-                        # Delete the vault directory
-                        import shutil
-                        shutil.rmtree(os.path.dirname(self.storage.vault.vault_path))
-                        print("Existing vault deleted.")
-                    except Exception as e:
-                        print(f"Error deleting vault: {e}")
-                        return "Failed to delete existing vault"
-                else:
-                    return "Cannot save secret without a valid vault"
-            
-            print("\nThis is the first time saving a secret. You need to set up a vault password.")
-            
-            # Ask for master password and create vault
-            master_password = getpass.getpass("Create a master password for your vault: ")
-            if len(master_password) < 8:
-                return "Password must be at least 8 characters long"
-                
-            confirm_password = getpass.getpass("Confirm master password: ")
-            if master_password != confirm_password:
-                return "Passwords do not match"
-                
-            print("Creating new vault...")
-            if self.storage.create_vault(master_password):
-                print("Vault created successfully.")
-                # Don't ask for the password again after creating the vault - it's already unlocked
-                # Continue with saving the secret using the vault we just created and unlocked
-            else:
-                return "Failed to create vault"
-        elif not self.storage.vault.is_unlocked:
-            # Vault exists but is locked - need to unlock it
-            master_password = getpass.getpass("Enter your vault master password: ")
-            if not self.storage.unlock(master_password):
-                return "Invalid master password"
-        
         try:
-            result = self.storage.save_secret(name, self.secret, password)
+            # Basic validation
+            if not name or not isinstance(name, str):
+                return "Invalid secret name"
             
-            # If the save was successful, create an HMAC-protected backup
-            if result is None:  # None means success in this API
-                try:
-                    # Get the path to the saved secret file
-                    secret_file_path = self.storage.get_secret_path(name)
-                    if secret_file_path and os.path.exists(secret_file_path):
-                        # Create a backup with HMAC protection
-                        with open(secret_file_path, 'rb') as f:
-                            file_content = f.read()
-                        
-                        # Get a key for HMAC - derive from the storage key if available
-                        hmac_key = None
-                        if hasattr(self.storage, 'key') and self.storage.key:
-                            hmac_key = hashlib.sha256(self.storage.key).digest()
-                        
-                        # Create backup file with HMAC
-                        backup_path = f"{secret_file_path}.backup"
-                        add_hmac_to_file(backup_path, file_content, hmac_key)
-                        
-                        print(f"Integrity-protected backup created for {name}")
-                except Exception as e:
-                    # Don't fail the save if backup creation fails
-                    print(f"Warning: Could not create integrity-protected backup: {e}")
+            # Sanitize the name
+            sanitized_name = re.sub(r'[^\w\s-]', '', name)
+            if sanitized_name != name:
+                return "Name contains invalid characters (only letters, numbers, spaces, underscores, and dashes are allowed)"
+            
+            # Prevent common injection patterns
+            if '..' in name or '/' in name or '\\' in name:
+                return "Name contains invalid characters"
+            
+            # Get the vault file path
+            vault_file = os.path.join(self.storage.vault_dir, "vault.json")
+            print(f"DEBUG: Vault file exists: {os.path.exists(vault_file)}")
+            print(f"DEBUG: Checking vault.is_initialized property: {self.storage.vault.is_initialized}")
+            
+            # Handle vault initialization
+            if not self.storage.vault.is_initialized:
+                # Need to create a new vault
+                print("\nThis is the first time saving a secret. You need to set up a vault password.")
                 
-            return result
+                # Ask for master password and create vault
+                master_password = getpass.getpass("Create a master password for your vault: ")
+                if len(master_password) < 8:
+                    return "Password must be at least 8 characters long"
+                
+                confirm_password = getpass.getpass("Confirm master password: ")
+                if master_password != confirm_password:
+                    return "Passwords do not match"
+                
+                print("Creating new vault...")
+                if self.storage.create_vault(master_password):
+                    print("Vault created successfully.")
+                    # Set the password parameter for the upcoming save operation
+                    password = master_password
+                else:
+                    return "Failed to create vault"
+            elif not self.storage.vault.is_unlocked:
+                # Vault exists but is locked - need to unlock it
+                master_password = getpass.getpass("Enter your vault master password: ")
+                if not self.storage.unlock(master_password):
+                    return "Invalid master password"
+                password = master_password
+            
+            # Prepare the secret data
+            if secret is not None:
+                # Use the provided secret
+                if isinstance(secret, dict):
+                    # Already in the right format
+                    data_to_save = secret
+                else:
+                    # Convert to dict format
+                    data_to_save = {
+                        'secret': str(secret),
+                        'issuer': self.issuer or '',
+                        'account': self.account or ''
+                    }
+            else:
+                # Use the current secret from the instance
+                if self.secret is None:
+                    return "No secret to save"
+                
+                data_to_save = {
+                    'secret': self.secret.get_raw_value(),
+                    'issuer': self.issuer or '',
+                    'account': self.account or ''
+                }
+            
+            # Save the secret to the vault
+            error = self.storage.save_secret(name, data_to_save, password)
+            if error:
+                print(f"DEBUG: Error from save_secret: {error}")
+                return f"Failed to save secret: {error}"
+            
+            print(f"DEBUG: Successfully saved secret '{name}'")
+            return None  # Success
+            
         except Exception as e:
+            print(f"ERROR: Exception in save_secret: {e}")
+            import traceback
+            traceback.print_exc()
             return f"Error saving secret: {str(e)}"
 
     def load_secret(self, name, password=None):
@@ -987,6 +932,9 @@ class TwoFactorAuth:
         Security:
         - Uses OS-appropriate paths
         - Creates directories with correct permissions
+        
+        Returns:
+            str: Path to the images directory
         """
         try:
             # Determine the executable directory for resource paths
@@ -1008,44 +956,30 @@ class TwoFactorAuth:
                         f.write('test')
                     os.remove(test_file)
                     # We can write to the directory, use the app's images folder
-                    self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
+                    images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(app_dir, 'images'))
                 except Exception:
                     # Can't write to program directory, use user's documents folder instead
                     user_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'TrueFA-Py', 'images')
                     os.makedirs(user_dir, exist_ok=True)
-                    self.images_dir = os.getenv('QR_IMAGES_DIR', user_dir)
+                    images_dir = os.getenv('QR_IMAGES_DIR', user_dir)
                     print(f"Using personal images directory in Documents folder: {user_dir}")
             else:
                 # Running in normal Python environment
-                self.images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
+                images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
             
-            print(f"You can use either the full path or just the filename if it's in the images directory: {self.images_dir}")
+            # Ensure the directory exists
+            os.makedirs(images_dir, exist_ok=True)
             
-            # Create images directory if needed
-            if not os.path.exists(self.images_dir):
-                self._secure_create_file(os.path.join(self.images_dir, '.gitkeep'), '')
-                
-            # Check for vault using the correct path from vault_directory
-            try:
-                from src.security.vault_directory import get_secure_vault_dir
-                vault_dir = get_secure_vault_dir()
-                print(f"Checking for vault at {vault_dir}")
-                
-                # Check if vault exists by looking for the vault.json file
-                vault_json_path = os.path.join(vault_dir, "vault.json")
-                vault_exists = os.path.exists(vault_json_path)
-                print(f"Vault exists: {vault_exists}")
-                
-                # Don't check for vault.dat anymore, as we're using the vault directory
-                # from vault_directory module
-            except Exception as e:
-                print(f"Error finding vault directory: {e}")
+            print(f"Using images directory: {images_dir}")
+            return images_dir
+            
         except Exception as e:
             print(f"Error setting up storage directories: {e}")
             # Fallback to current directory
-            self.images_dir = os.path.join(os.getcwd(), 'images')
-            if not os.path.exists(self.images_dir):
-                os.makedirs(self.images_dir, exist_ok=True)
+            fallback_dir = os.path.join(os.getcwd(), 'images')
+            os.makedirs(fallback_dir, exist_ok=True)
+            print(f"Using fallback images directory: {fallback_dir}")
+            return fallback_dir
 
     def set_secret(self, secret_value, issuer="", account=""):
         """
