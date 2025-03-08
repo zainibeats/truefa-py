@@ -106,3 +106,159 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ## Contributing
 
 Contributions are welcome! Please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md) for contribution guidelines.
+
+## Project Overview
+TrueFA-Py is a secure Two-Factor Authentication (TOTP) application written in Python. It provides functionality for scanning QR codes, generating TOTP codes, and securely storing authentication secrets in an encrypted vault.
+
+## Directory Structure
+```
+truefa-py/
+├── main.py                 # Main entry point for the application
+├── src/
+│   ├── main_opencv.py      # Alternative entry point with OpenCV support
+│   ├── config.py           # Configuration settings
+│   ├── images/             # Directory for QR code images
+│   ├── security/           # Security-related modules
+│   │   └── vault_state.py  # Handles vault state management
+│   ├── totp/               # TOTP-related modules
+│   │   └── auth_opencv.py  # Contains TwoFactorAuth class for TOTP operations
+│   ├── truefa_crypto/      # Cryptographic functions
+│   └── utils/              # Utility functions
+├── rust_crypto/            # Rust implementation of cryptographic functions
+└── truefa_crypto/          # DLL for cryptographic operations
+```
+
+## Key Components
+
+### TwoFactorAuth Class
+The main class in `src/totp/auth_opencv.py` responsible for:
+- QR code scanning
+- TOTP code generation
+- Secret management
+- Vault operations
+
+### SecureVault Class
+Handles the encryption and storage of sensitive information in a vault file.
+
+### SecureStorage Class
+Acts as a bridge between the application and the SecureVault, providing higher-level functions for storing and retrieving data.
+
+## Current Issues
+
+### 1. QR Code Loading Issue
+When loading a QR code from an image, the application fails with:
+```
+DEBUG: Path validation error: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'
+Error extracting secret: Invalid path: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'
+```
+
+This suggests a NoneType is being passed to a function expecting a path string.
+
+### 2. Vault Initialization and Path Issues
+Previously, there were issues with:
+- The `vault_path` attribute not existing (fixed by using `vault_dir` and constructing the file path)
+- Inconsistent checking of vault initialization status
+- Storage instance sharing between components
+
+### 3. DLL Loading Warnings
+The application shows warnings related to fallback implementations for crypto operations, which indicates that the native DLL is not loading correctly.
+
+## Suggested Fixes
+
+### Fix for QR Code Loading
+The error occurs in the `_validate_image_path` method when it's called with None. The issue is likely in the `extract_secret_from_qr` method. Examine how it handles the image path before passing it to validation.
+
+Possible fix in `auth_opencv.py`:
+```python
+def extract_secret_from_qr(self, image_path):
+    """Extract TOTP secret from a QR code image."""
+    try:
+        # Debug the raw image path
+        print(f"DEBUG: Raw image path: {image_path}")
+        
+        # Ensure image_path is not None before validation
+        if image_path is None:
+            return None, "No image path provided"
+            
+        # Validate the image path
+        validated_path = self._validate_image_path(image_path)
+        if validated_path is None:
+            return None, "Invalid image path"
+            
+        # Rest of the function...
+```
+
+### Fix for Vault Initialization
+Ensure consistent handling of vault paths and initialization checking:
+
+1. In `TwoFactorAuth.save_secret`:
+```python
+# Get the vault file path
+vault_file = os.path.join(self.storage.vault_dir, "vault.json")
+
+# Check initialization using storage instance
+if not self.storage.is_initialized:
+    # Handle vault creation
+```
+
+2. Consider adding a helper method in SecureStorage to check if a path exists and is a valid vault file.
+
+### Fix for DLL Loading
+Look into the DLL loading process in the application. It's currently falling back to Python implementations, which reduces security. Ensure the correct DLL is accessible and its functions are properly exposed.
+
+## Next Steps
+
+1. **Fix QR Code Loading**: Modify the `extract_secret_from_qr` method to handle None values and proper path validation.
+
+2. **Verify Vault Operations**: After fixing the QR code issue, test the full workflow:
+   - Load a QR code
+   - Generate TOTP codes
+   - Create a vault
+   - Save a secret
+   - List saved secrets
+
+3. **Enhance Error Handling**: Add better error messages throughout the application, especially for common operations like file access and QR code scanning.
+
+4. **Security Review**: Once functionality is working, conduct a security review to ensure sensitive data is properly protected.
+
+## Testing Instructions
+
+1. **Reset the Vault**: Delete existing vault files:
+   ```
+   python cleanup_vault.py
+   ```
+
+2. **Run the Application**:
+   ```
+   python -m main
+   ```
+
+3. **Test Workflow**:
+   - Option 1: Load QR code from image (use "qrtest.png" or a valid QR code image)
+   - Option 3: Save the current secret (create a vault with password "testpassword")
+   - Option 4: View saved secrets (should show the saved secret)
+   - Option 7: Exit
+
+## Common Errors and Solutions
+
+### Path Validation Errors
+If you encounter path validation errors, check that:
+- The image file exists in the expected location
+- The code correctly handles relative and absolute paths
+- Debug output is added to trace the path resolution
+
+### Vault Access Issues
+If you encounter vault access issues:
+- Verify the vault file exists at the expected location
+- Check permissions on the vault directory
+- Ensure consistent use of storage references throughout the application
+
+### Debug Tips
+Add debug print statements to trace execution flow, particularly when:
+- Processing user input
+- Validating paths
+- Performing vault operations
+- Handling encryption/decryption
+
+## Contact
+For issues or questions, please contact the project maintainer.
