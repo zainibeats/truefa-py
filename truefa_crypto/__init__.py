@@ -111,46 +111,44 @@ def get_fallback_status():
 
 # Find the DLL
 def _find_dll():
-    """
-    Search for the TrueFA crypto DLL in standard locations.
-    
-    Returns:
-        tuple: (dll_path, found) - Path to the DLL and boolean indicating if it was found
-    """
-    # Check environment variable first
-    if os.environ.get("TRUEFA_USE_FALLBACK", "").lower() in ("true", "1", "yes"):
-        print("Forced to use Python fallback implementation by environment variable")
-        return None, False
-        
-    # Enhance DLL search paths in Windows
-    _enhance_dll_search_paths()
-    
-    # Check various standard locations where the DLL might be
+    """Find the Rust DLL in various possible locations."""
     possible_locations = [
-        # Current directory
-        os.path.join(os.getcwd(), "truefa_crypto.dll"),
-        # Parent directory
-        os.path.join(os.path.dirname(os.getcwd()), "truefa_crypto", "truefa_crypto.dll"),
-        # Source directory
-        os.path.join(os.getcwd(), "src", "truefa_crypto", "truefa_crypto.dll"),
-        # Build directory
+        # PyInstaller bundle
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "truefa_crypto.dll"),
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "truefa_crypto", "truefa_crypto.dll"),
+        
+        # Development locations
         os.path.join(os.getcwd(), "rust_crypto", "target", "release", "truefa_crypto.dll"),
-        # Explicit path 
+        os.path.join(os.getcwd(), "truefa_crypto", "truefa_crypto.dll"),
+        os.path.join(os.getcwd(), "truefa_crypto.dll"),
+        
+        # Installation locations
+        os.path.join(os.path.dirname(__file__), "truefa_crypto.dll"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "truefa_crypto.dll"),
-        # System path
-        "truefa_crypto.dll"
+        
+        # Additional Docker locations
+        os.path.join(os.path.dirname(sys.executable), "truefa_crypto.dll"),
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "_internal", "truefa_crypto.dll"),
+        os.path.join(getattr(sys, '_MEIPASS', '.'), "_internal", "truefa_crypto", "truefa_crypto.dll"),
     ]
     
-    # Try each location
+    # For Docker, add special locations
+    if "ContainerAdministrator" in os.path.expanduser("~"):
+        docker_locations = [
+            "C:\\TrueFA\\truefa_crypto.dll",
+            "C:\\TrueFA\\truefa_crypto\\truefa_crypto.dll"
+        ]
+        possible_locations.extend(docker_locations)
+    
     for location in possible_locations:
         if os.path.exists(location):
             print(f"DLL found at: {location}")
-            return location, True
+            return location
     
     print("DLL not found in any standard location")
     for location in possible_locations:
         print(f"DLL not found at: {location}")
-    return None, False
+    return None
 
 _dll_path, _found_dll = _find_dll()
 
@@ -454,131 +452,100 @@ def _safe_dll_call(func_name, fallback_func, *args, **kwargs):
 # Load the DLL
 def _load_dll():
     """Load the TrueFA crypto DLL using ctypes."""
-    global _lib
+    global _lib, _detected_dll_issue
     
-    # First try to find the DLL
-    _dll_path, _found_dll = _find_dll()
+    # First check if we should use fallback implementation
+    if USE_FALLBACK:
+        logger.info("Using Python fallback implementation due to environment variable")
+        _lib = _DummyModule()
+        return _lib
     
-    if not _found_dll or not _dll_path:
-        print("Failed to find TrueFA crypto DLL, using fallback")
+    # Try to find the DLL
+    dll_path = _find_dll()
+    if not dll_path:
+        logger.error("DLL not found, using Python fallback")
         _lib = _DummyModule()
         return _lib
     
     try:
-        # Log the DLL loading attempt
-        print(f"Loading DLL from: {_dll_path}")
+        print(f"Loading DLL from {dll_path}")
         
-        # Enhanced DLL loading with better error handling
+        # Load the DLL
+        _lib = ctypes.CDLL(dll_path)
+        print(f"DLL loaded successfully from {dll_path}")
+        
+        # Map Rust C exports to Python-friendly function names
+        # Note: Rust exports functions with 'c_' prefix
+        function_mappings = {
+            'secure_random_bytes': 'c_secure_random_bytes',
+            'generate_salt': 'c_generate_salt',
+            'is_vault_unlocked': 'c_is_vault_unlocked',
+            'vault_exists': 'c_vault_exists',
+            'create_vault': 'c_create_vault',
+            'unlock_vault': 'c_unlock_vault',
+            'lock_vault': 'c_lock_vault',
+            'derive_master_key': 'c_derive_master_key',
+            'encrypt_master_key': 'c_encrypt_master_key',
+            'decrypt_master_key': 'c_decrypt_master_key',
+            'create_secure_string': 'c_create_secure_string',
+            'verify_signature': 'c_verify_signature',
+            'encrypt_data': 'c_encrypt_data',
+            'decrypt_data': 'c_decrypt_data',
+            'derive_key': 'c_derive_key'
+        }
+        
+        # Map functions and add Python-friendly names
+        mapped_successfully = True
+        for py_name, c_name in function_mappings.items():
+            if hasattr(_lib, c_name):
+                # Create Python-friendly alias
+                setattr(_lib, py_name, getattr(_lib, c_name))
+                print(f"Successfully mapped {c_name} to {py_name}")
+            else:
+                print(f"Warning: Function {c_name} not found in DLL")
+                mapped_successfully = False
+        
+        # Set function signatures
         try:
-            # Load the library
-            _lib = ctypes.CDLL(_dll_path)
-            print("Successfully loaded DLL using ctypes")
-        except Exception as e:
-            print(f"Error loading DLL with ctypes: {e}")
-            _lib = _DummyModule()
-            print("Using Python fallback implementation")
-            return _lib
+            if hasattr(_lib, 'c_secure_random_bytes'):
+                _lib.c_secure_random_bytes.argtypes = [
+                    ctypes.c_size_t,  # size
+                    ctypes.POINTER(ctypes.c_ubyte),  # buffer
+                    ctypes.POINTER(ctypes.c_size_t)  # output_len
+                ]
+                _lib.c_secure_random_bytes.restype = ctypes.c_bool
+                print("Set signature for c_secure_random_bytes")
+        except AttributeError as e:
+            print(f"Error setting c_secure_random_bytes signature: {e}")
+            
+        try:
+            if hasattr(_lib, 'c_create_secure_string'):
+                _lib.c_create_secure_string.argtypes = [
+                    ctypes.c_char_p,  # data
+                    ctypes.c_size_t   # data_len
+                ]
+                _lib.c_create_secure_string.restype = ctypes.c_void_p
+                print("Set signature for c_create_secure_string")
+        except AttributeError as e:
+            print(f"Error setting c_create_secure_string signature: {e}")
         
-        # Safely set function signatures
-        def safe_set_signature(func_name, argtypes, restype, required=False):
-            """Safely set a function signature with proper error handling."""
-            try:
-                if hasattr(_lib, func_name):
-                    setattr(getattr(_lib, func_name), 'argtypes', argtypes)
-                    setattr(getattr(_lib, func_name), 'restype', restype)
-                    return True
-                else:
-                    if required:
-                        print(f"Required function '{func_name}' not found in DLL")
-                    else:
-                        print(f"Optional function '{func_name}' not found in DLL")
-                    return False
-            except Exception as e:
-                print(f"Error setting signature for {func_name}: {e}")
-                return False
+        # Add more function signature setups here for all other functions
         
-        # Define the required functions - these must be present
-        required_functions = [
-            'c_secure_random_bytes',
-            'c_generate_salt',
-            'c_derive_master_key'
-        ]
-        
-        # Initialize signature setup success tracking
-        signature_success = True
-        
-        # Set up signatures for secure random bytes
-        if not safe_set_signature('c_secure_random_bytes', 
-            [ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)],
-            ctypes.c_bool, 
-            required=True):
-            signature_success = False
-        
-        # Set up signatures for vault functions
-        safe_set_signature('c_is_vault_unlocked', [], ctypes.c_bool)
-        safe_set_signature('c_vault_exists', [], ctypes.c_bool)
-        
-        # Set up signature for create vault
-        safe_set_signature('c_create_vault', 
-            [ctypes.c_char_p, ctypes.c_char_p],
-            ctypes.c_bool)
-        
-        # Set up signature for unlock vault
-        safe_set_signature('c_unlock_vault', 
-            [ctypes.c_char_p, ctypes.c_char_p],
-            ctypes.c_bool)
-        
-        # Set up signature for lock vault
-        safe_set_signature('c_lock_vault', [], ctypes.c_bool)
-        
-        # Set up signature for generate salt
-        if not safe_set_signature('c_generate_salt', [], ctypes.c_char_p, required=True):
-            signature_success = False
-        
-        # Set up signature for derive master key
-        if not safe_set_signature('c_derive_master_key', 
-            [ctypes.c_char_p, ctypes.c_char_p],
-            ctypes.c_char_p,
-            required=True):
-            signature_success = False
-        
-        # Set up signature for encrypt master key
-        safe_set_signature('c_encrypt_master_key', 
-            [ctypes.c_char_p],
-            ctypes.c_char_p)
-        
-        # Set up signature for decrypt master key
-        safe_set_signature('c_decrypt_master_key', 
-            [ctypes.c_char_p],
-            ctypes.c_char_p)
-        
-        # Set up signature for verify signature
-        safe_set_signature('c_verify_signature', 
-            [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, 
-             ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t],
-            ctypes.c_bool)
-        
-        # Set up signature for create secure string
-        # This is commonly missing in older versions
-        safe_set_signature('c_create_secure_string', 
-            [ctypes.c_char_p, ctypes.c_size_t],
-            ctypes.c_void_p)
-        
-        # Check if required functions were set up successfully
-        if not signature_success:
-            print("One or more required functions missing in DLL, using fallback implementation")
-            _lib = _DummyModule()
-            return _lib
-        
-        # Initialize the DLL
-        _lib.is_initialized = True
-        print("DLL initialization complete")
+        if not mapped_successfully:
+            logger.warning("Some functions were not found in the DLL. Using mixed mode.")
         
         return _lib
-    
     except Exception as e:
-        print(f"Error loading Rust DLL: {e}")
-        print("Falling back to Python implementations")
+        logger.error(f"Error loading Rust DLL: {e}")
+        _detected_dll_issue = True
+        
+        # Create marker file to indicate DLL issue
+        try:
+            os.makedirs(os.path.dirname(FALLBACK_MARKER_PATH), exist_ok=True)
+            with open(FALLBACK_MARKER_PATH, 'w') as f:
+                f.write(f"DLL crash at {time.ctime()}: {str(e)}")
+        except Exception:
+            pass
         
         # Use Python fallback
         _lib = _DummyModule()

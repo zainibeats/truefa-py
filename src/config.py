@@ -47,6 +47,21 @@ def is_running_from_program_files():
     
     return any(restricted in executable_path for restricted in restricted_paths)
 
+# Get the repository root directory
+def get_repo_root():
+    """
+    Get the root directory of the repository.
+    
+    Returns:
+        str: The absolute path to the repository root
+    """
+    # If we're running from a frozen executable, use the directory containing the executable
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    
+    # Otherwise, use the directory containing the main.py file
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 # Determine the correct data directory based on platform
 def get_data_directory():
     """

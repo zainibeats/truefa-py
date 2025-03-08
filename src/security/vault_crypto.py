@@ -247,12 +247,14 @@ class PythonCrypto:
             print(f"DEBUG [vault_crypto.py]: Encrypting master key...")
             try:
                 # Check which encryption function is available
-                if hasattr(truefa_crypto, 'encrypt_with_key'):
+                if hasattr(truefa_crypto, 'encrypt_data'):
+                    encrypted_master_key = truefa_crypto.encrypt_data(master_key_b64, vault_key)
+                    if isinstance(encrypted_master_key, bytes):
+                        encrypted_master_key = base64.b64encode(encrypted_master_key).decode('utf-8')
+                    print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_data for encryption")
+                elif hasattr(truefa_crypto, 'encrypt_with_key'):
                     encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
                     print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_with_key for encryption")
-                elif hasattr(truefa_crypto, 'encrypt_data'):
-                    encrypted_master_key = truefa_crypto.encrypt_data(master_key_b64, vault_key)
-                    print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_data for encryption")
                 else:
                     raise ImportError("No encryption function found in truefa_crypto")
             except Exception as e:
@@ -423,12 +425,14 @@ def create_vault(password, vault_path):
         print(f"DEBUG [vault_crypto.py]: Encrypting master key...")
         try:
             # Check which encryption function is available
-            if hasattr(truefa_crypto, 'encrypt_with_key'):
+            if hasattr(truefa_crypto, 'encrypt_data'):
+                encrypted_master_key = truefa_crypto.encrypt_data(master_key_b64, vault_key)
+                if isinstance(encrypted_master_key, bytes):
+                    encrypted_master_key = base64.b64encode(encrypted_master_key).decode('utf-8')
+                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_data for encryption")
+            elif hasattr(truefa_crypto, 'encrypt_with_key'):
                 encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
                 print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_with_key for encryption")
-            elif hasattr(truefa_crypto, 'encrypt_data'):
-                encrypted_master_key = truefa_crypto.encrypt_data(master_key_b64, vault_key)
-                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto.encrypt_data for encryption")
             else:
                 raise ImportError("No encryption function found in truefa_crypto")
         except Exception as e:

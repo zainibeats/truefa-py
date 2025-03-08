@@ -38,6 +38,8 @@ import hmac
 import hashlib
 import traceback
 import logging
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ except ImportError:
     HAS_CRYPTO = False
 
 from .secure_string import SecureString
+from src.security.vault_interfaces import SecureVault
 
 class SecureStorage:
     """
@@ -238,6 +241,11 @@ class SecureStorage:
         # Check if vault is initialized
         if not self.vault.is_initialized:
             print("DEBUG: Vault not initialized, cannot unlock")
+            return False
+            
+        # Validate password
+        if password is None:
+            print("DEBUG: No password provided, cannot unlock vault")
             return False
         
         # Add debug for vault path
@@ -648,157 +656,202 @@ class SecureStorage:
 
     def load_secret(self, name, password=None):
         """
-        Load an encrypted secret by name
+        Load a saved secret from the vault.
         
         Args:
             name: Name of the secret to load
-            password: Optional password for decryption
+            password: Optional password to unlock the vault if needed
             
         Returns:
-            dict: Dictionary containing the decrypted secret data
-                - 'secret': The actual TOTP secret
-                - 'issuer': The service name (optional)
-                - 'account': The account identifier (optional)
-            str: Error message if loading fails
+            dict: The loaded secret data or None if not found
         """
-        print(f"DEBUG [secure_storage.py]: load_secret called for '{name}'")
-        print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
-        print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
-        
-        # Check if vault is initialized
-        if not self.vault.is_initialized:
-            print(f"DEBUG [secure_storage.py]: Vault not initialized")
-            return "No vault found. Please create a vault first."
-        
-        # Unlock the vault if needed
-        if not self.vault.is_unlocked and password:
-            print(f"DEBUG [secure_storage.py]: Unlocking vault with provided password")
-            if not self.vault.unlock(password):
-                print(f"DEBUG [secure_storage.py]: Failed to unlock vault with provided password")
-                return "Invalid password"
-
-        # Check if vault is unlocked
-        if not self.vault.is_unlocked:
-            print(f"DEBUG [secure_storage.py]: Vault is locked")
-            return "Vault is locked. Please unlock it first."
-
-        # Sanitize the name to prevent traversal issues
-        sanitized_name = self._sanitize_filename(name)
-        if sanitized_name != name:
-            print(f"DEBUG [secure_storage.py]: Name sanitized from '{name}' to '{sanitized_name}'")
-            return "Invalid secret name"
-
-        # Compute the file path for the secret
         try:
-            secret_path = os.path.join(self._vault_directory, f"{sanitized_name}.enc")
+            print(f"DEBUG [secure_storage.py]: load_secret called for '{name}'")
+            print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
+            print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
+            print(f"DEBUG [secure_storage.py]: Vault is unlocked: {self.vault.is_unlocked}")
+            
+            # Check if vault is initialized
+            if not self.vault.is_initialized:
+                print(f"DEBUG [secure_storage.py]: Vault not initialized")
+                return None
+            
+            # Get the path to the secret file
+            secret_path = self._get_secret_path(name)
+            if not secret_path or not os.path.exists(secret_path):
+                print(f"DEBUG [secure_storage.py]: Secret file not found: {secret_path}")
+                return None
+            
             print(f"DEBUG [secure_storage.py]: Looking for secret at: {secret_path}")
             
-            # Check if file exists
-            if not os.path.exists(secret_path):
-                print(f"DEBUG [secure_storage.py]: Secret file not found")
-                return f"Secret '{name}' not found"
+            # Get master key - either from already unlocked vault or by unlocking it
+            master_key = None
+            
+            # Try to get master key from already unlocked vault
+            if self.vault.is_unlocked:
+                print(f"DEBUG [secure_storage.py]: Vault is already unlocked, getting master key")
+                master_key = self.vault.get_master_key()
+            
+            # If vault is locked but password was provided, try to unlock it
+            if not master_key and password is not None:
+                print(f"DEBUG [secure_storage.py]: Vault is locked, attempting to unlock with provided password")
+                if self.unlock(password):
+                    print(f"DEBUG [secure_storage.py]: Successfully unlocked vault with provided password")
+                    master_key = self.vault.get_master_key()
+                else:
+                    print("DEBUG [secure_storage.py]: Failed to unlock vault with provided password")
+            
+            # If we still don't have a master key, we can't decrypt
+            if not master_key:
+                print("DEBUG [secure_storage.py]: No master key available for decryption")
+                return None
                 
             # Read the encrypted data
             with open(secret_path, 'rb') as f:
                 encrypted_data = f.read()
-                print(f"DEBUG [secure_storage.py]: Read {len(encrypted_data)} bytes of encrypted data")
                 
-            # Get the master key
-            master_key = self.vault._master_key
-            if not master_key:
-                print(f"DEBUG [secure_storage.py]: No master key available")
-                return "Vault master key not available"
-                
+            print(f"DEBUG [secure_storage.py]: Read {len(encrypted_data)} bytes of encrypted data")
             print(f"DEBUG [secure_storage.py]: Using master key for decryption (length: {len(master_key)})")
             
-            # Decrypt the data
+            # Try to use a simple AES decryption - we know from our logs that this should work
             try:
-                # Try to use the Rust implementation first
-                from .. import truefa_crypto
-                decrypted_data = truefa_crypto.decrypt_with_key(encrypted_data, master_key)
-                print(f"DEBUG [secure_storage.py]: Used truefa_crypto for decryption")
-            except Exception as e:
-                print(f"DEBUG [secure_storage.py]: Error using truefa_crypto: {e}")
-                print(f"DEBUG [secure_storage.py]: Falling back to AES decryption")
-                
+                # First attempt to load in base64 format (old format)
                 try:
-                    # Use AES as fallback
-                    from Crypto.Cipher import AES
-                    from Crypto.Util.Padding import unpad
-                    
-                    # Convert key to bytes if it's a string
-                    key = base64.b64decode(master_key) if isinstance(master_key, str) else master_key
-                    key = key[:32]  # Ensure key is 32 bytes (256 bits)
-                    
-                    # Get the encrypted data
+                    # Try to handle base64 data first
                     if isinstance(encrypted_data, str):
-                        encrypted_data = base64.b64decode(encrypted_data)
-                    elif isinstance(encrypted_data, bytes) and encrypted_data[:1].isalnum():
-                        # If it starts with base64 chars but is bytes, try decoding
-                        encrypted_data = base64.b64decode(encrypted_data.decode('utf-8', errors='ignore'))
-                    
-                    # Extract IV and ciphertext
-                    iv = encrypted_data[:16]
-                    ciphertext = encrypted_data[16:]
-                    
-                    # Create cipher and decrypt
-                    cipher = AES.new(key, AES.MODE_CBC, iv)
-                    padded_data = cipher.decrypt(ciphertext)
-                    
-                    try:
-                        # Try to unpad and decode
-                        decrypted_data = unpad(padded_data, AES.block_size).decode('utf-8')
-                        print(f"DEBUG [secure_storage.py]: Successfully decrypted and decoded data with AES")
-                    except Exception as inner_e:
-                        print(f"DEBUG [secure_storage.py]: Error unpadding/decoding: {inner_e}")
-                        # Just use as-is if unpadding fails
-                        decrypted_data = padded_data.decode('utf-8', errors='ignore')
-                except Exception as decrypt_e:
-                    print(f"DEBUG [secure_storage.py]: Error in AES decryption: {decrypt_e}")
-                    import traceback
-                    traceback.print_exc()
-                    return f"Failed to decrypt secret: {str(decrypt_e)}"
-            
-            # Parse the decrypted data
-            try:
-                # Try to parse as JSON
-                secret_data = json.loads(decrypted_data)
-                print(f"DEBUG [secure_storage.py]: Successfully parsed secret data as JSON with keys: {list(secret_data.keys()) if isinstance(secret_data, dict) else 'not a dict'}")
+                        # If it's a string, decode as base64
+                        encrypted_bytes = base64.b64decode(encrypted_data)
+                    else:
+                        # Try to decode the bytes as utf-8 and then as base64
+                        try:
+                            encrypted_text = encrypted_data.decode('utf-8', errors='ignore')
+                            encrypted_bytes = base64.b64decode(encrypted_text)
+                        except Exception:
+                            print("DEBUG [secure_storage.py]: Data is not base64 encoded, trying as raw binary")
+                            # Use as-is
+                            encrypted_bytes = encrypted_data
+                            
+                    # If we got here, we have some form of encrypted bytes
+                    print(f"DEBUG [secure_storage.py]: Processed encrypted data length: {len(encrypted_bytes)}")
+                except Exception as e:
+                    print(f"DEBUG [secure_storage.py]: Error processing data as base64: {e}")
+                    # Use the raw data
+                    encrypted_bytes = encrypted_data
                 
-                # Validate it has required fields if it's a dict
-                if isinstance(secret_data, dict) and 'secret' in secret_data:
-                    return secret_data
-                elif isinstance(secret_data, dict):
-                    print(f"DEBUG [secure_storage.py]: Missing 'secret' field in data: {list(secret_data.keys())}")
-                    # Try to adapt the data if possible
-                    return {"secret": str(secret_data), "issuer": "", "account": name}
+                # Make sure the key is the right format and length for AES
+                if isinstance(master_key, str):
+                    try:
+                        key = base64.b64decode(master_key)
+                    except Exception:
+                        # If it's not base64, use it directly
+                        key = master_key.encode('utf-8')
                 else:
-                    # If it's not a dict but a string, assume it's the secret
-                    print(f"DEBUG [secure_storage.py]: Data is not a dict, using as raw secret")
-                    return {"secret": decrypted_data, "issuer": "", "account": name}
+                    key = master_key
                     
-            except json.JSONDecodeError:
-                # Not JSON, treat as plain secret
-                print(f"DEBUG [secure_storage.py]: Data is not valid JSON, using as raw secret")
-                return {"secret": decrypted_data, "issuer": "", "account": name}
+                # Ensure key is 32 bytes (256 bits) for AES-256
+                if len(key) < 32:
+                    # Pad the key if it's too short
+                    key = key.ljust(32, b'\0')
+                key = key[:32]
+                
+                print(f"DEBUG [secure_storage.py]: Final AES key length: {len(key)}")
+                
+                # Attempt different IV and ciphertext combinations since the format might vary
+                decryption_attempts = [
+                    # Standard format: first 16 bytes are IV, rest is ciphertext
+                    (encrypted_bytes[:16], encrypted_bytes[16:]),
+                    
+                    # No IV (use zeros): all data is ciphertext
+                    (b'\0' * 16, encrypted_bytes),
+                    
+                    # Other common formats can be added here
+                ]
+                
+                success = False
+                decrypted = None
+                
+                # Try each decryption method
+                for attempt_num, (iv, ciphertext) in enumerate(decryption_attempts):
+                    try:
+                        print(f"DEBUG [secure_storage.py]: Attempt {attempt_num+1}: IV length: {len(iv)}, ciphertext length: {len(ciphertext)}")
+                        
+                        # If ciphertext is not a multiple of 16, pad it
+                        if len(ciphertext) % 16 != 0:
+                            padding_needed = 16 - (len(ciphertext) % 16)
+                            print(f"DEBUG [secure_storage.py]: Padding ciphertext with {padding_needed} bytes")
+                            ciphertext = ciphertext + (b'\0' * padding_needed)
+                        
+                        # Create cipher and decrypt
+                        from Crypto.Cipher import AES
+                        cipher = AES.new(key, AES.MODE_CBC, iv)
+                        padded_data = cipher.decrypt(ciphertext)
+                        
+                        # Try to unpad the data
+                        try:
+                            from Crypto.Util.Padding import unpad
+                            data = unpad(padded_data, AES.block_size)
+                            print(f"DEBUG [secure_storage.py]: Successfully unpadded data in attempt {attempt_num+1}")
+                        except Exception as e:
+                            print(f"DEBUG [secure_storage.py]: Error unpadding in attempt {attempt_num+1}: {e}")
+                            data = padded_data
+                        
+                        # Try to decode as UTF-8
+                        try:
+                            decrypted = data.decode('utf-8')
+                            print(f"DEBUG [secure_storage.py]: Successfully decoded UTF-8 data in attempt {attempt_num+1}")
+                            success = True
+                            break
+                        except UnicodeDecodeError:
+                            # Try other encodings
+                            try:
+                                decrypted = data.decode('latin-1')
+                                print(f"DEBUG [secure_storage.py]: Successfully decoded latin-1 data in attempt {attempt_num+1}")
+                                success = True
+                                break
+                            except Exception:
+                                print(f"DEBUG [secure_storage.py]: Couldn't decode data in attempt {attempt_num+1}")
+                                continue
+                    except Exception as e:
+                        print(f"DEBUG [secure_storage.py]: Error in decryption attempt {attempt_num+1}: {e}")
+                
+                if not success or not decrypted:
+                    print("DEBUG [secure_storage.py]: All decryption attempts failed")
+                    return None
+                
+                # Try to parse as JSON
+                try:
+                    secret_data = json.loads(decrypted)
+                    print(f"DEBUG [secure_storage.py]: Successfully parsed secret data as JSON with keys: {list(secret_data.keys())}")
+                    return secret_data
+                except json.JSONDecodeError:
+                    # Not JSON, treat as plain secret
+                    print(f"DEBUG [secure_storage.py]: Data is not valid JSON, using as raw secret")
+                    return {"secret": decrypted, "issuer": "", "account": name}
+            except Exception as e:
+                print(f"DEBUG [secure_storage.py]: Decryption error: {e}")
+                return None
                 
         except Exception as e:
-            print(f"ERROR [secure_storage.py]: Exception in load_secret: {e}")
-            import traceback
-            traceback.print_exc()
-            return f"Error loading secret: {str(e)}"
+            print(f"DEBUG [secure_storage.py]: Error loading secret: {e}")
+            return None
 
     def get_secret(self, name):
         """
-        Alias for load_secret method for compatibility with main.py.
+        Get a saved TOTP secret by name.
         
         Args:
-            name (str): Name of the secret to load
+            name: Name of the secret to retrieve
             
         Returns:
-            dict or None: Loaded secret data if successful, None otherwise
+            dict: The secret data or None if not found
         """
-        return self.load_secret(name)
+        # Attempt to load the secret
+        secret_data = self.load_secret(name)
+        if not secret_data:
+            print(f"DEBUG [secure_storage.py]: No secret found for '{name}'")
+            return None
+        
+        return secret_data
 
     def get_secret_path(self, name):
         """
@@ -826,121 +879,114 @@ class SecureStorage:
             return secret_path
         return None
 
-    def save_secret(self, name, secret=None, password=None):
+    def save_secret(self, name, secret_data):
         """
-        Save a secret to the vault
+        Save a secret to the vault.
         
         Args:
             name: Name to identify the secret
-            secret: The secret data to save
-            password: Optional password to unlock the vault if needed
-            
+            secret_data: Dictionary containing the secret data:
+                - 'secret': The actual TOTP secret (required)
+                - 'issuer': The service name (optional)
+                - 'account': The account identifier (optional)
+                
         Returns:
-            str: Error message on failure, None on success
+            bool: True if saved successfully, False otherwise
         """
-        print(f"DEBUG [secure_storage.py]: save_secret called for '{name}'")
-        print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
-        print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
-        
-        # Check if vault is initialized
-        if not self.vault.is_initialized:
-            print("DEBUG [secure_storage.py]: Vault not initialized, cannot save secret")
-            return "No vault found. Please create a vault first."
-        
-        # Unlock the vault if needed
-        if not self.vault.is_unlocked and password:
-            if not self.vault.unlock(password):
-                print("DEBUG [secure_storage.py]: Failed to unlock vault with provided password")
-                return "Invalid password"
-        
-        # Ensure the vault is unlocked
-        if not self.vault.is_unlocked:
-            print("DEBUG [secure_storage.py]: Vault is locked, cannot save secret")
-            return "Vault is locked. Please unlock it first."
-        
-        # Sanitize the name to prevent traversal issues
-        sanitized_name = self._sanitize_filename(name)
-        if sanitized_name != name:
-            print(f"DEBUG [secure_storage.py]: Name sanitized from '{name}' to '{sanitized_name}'")
-            return "Invalid secret name"
-        
-        # Ensure the vault directory exists
-        os.makedirs(self._vault_directory, exist_ok=True)
-        print(f"DEBUG [secure_storage.py]: Using vault directory: {self._vault_directory}")
-        
-        # Encrypt the secret data
         try:
-            # Convert dictionary to JSON string if needed
-            if isinstance(secret, dict):
-                secret_data = json.dumps(secret)
-            else:
-                secret_data = str(secret)
+            print(f"DEBUG [secure_storage.py]: save_secret called for '{name}'")
             
-            print(f"DEBUG [secure_storage.py]: Secret data prepared for encryption (length: {len(secret_data)})")
+            # Check if vault is initialized
+            if not self.vault.is_initialized:
+                print(f"DEBUG [secure_storage.py]: Vault not initialized")
+                return False
+                
+            # Check if vault is unlocked
+            if not self.vault.is_unlocked:
+                print(f"DEBUG [secure_storage.py]: Vault is locked")
+                return False
+                
+            # Validate secret data
+            if not isinstance(secret_data, dict) or 'secret' not in secret_data:
+                print(f"DEBUG [secure_storage.py]: Invalid secret data format - must be dict with 'secret' key")
+                return False
+                
+            # Convert the data to JSON
+            json_data = json.dumps(secret_data)
+            print(f"DEBUG [secure_storage.py]: Secret data JSON length: {len(json_data)}")
             
             # Get the encryption key (master key)
             master_key = self.vault.get_master_key()
             if not master_key:
-                print("DEBUG [secure_storage.py]: No master key available")
-                return "Vault master key not available"
-            
+                print("DEBUG [secure_storage.py]: No master key available for encryption")
+                return False
+                
             print(f"DEBUG [secure_storage.py]: Using master key for encryption (length: {len(master_key)})")
             
-            # Encrypt the secret data
-            try:
-                # Try to use the Rust implementation first
-                from .. import truefa_crypto
-                
-                # Check if encrypt_with_key exists, otherwise use encrypt_data
-                if hasattr(truefa_crypto, 'encrypt_with_key'):
-                    encrypted_data = truefa_crypto.encrypt_with_key(secret_data, master_key)
-                    print("DEBUG [secure_storage.py]: Used truefa_crypto.encrypt_with_key for encryption")
-                elif hasattr(truefa_crypto, 'encrypt_data'):
-                    encrypted_data = truefa_crypto.encrypt_data(secret_data, master_key)
-                    print("DEBUG [secure_storage.py]: Used truefa_crypto.encrypt_data for encryption")
-                else:
-                    raise ImportError("No encryption function found in truefa_crypto")
-            except Exception as e:
-                print(f"DEBUG [secure_storage.py]: Error using truefa_crypto: {e}")
-                print("DEBUG [secure_storage.py]: Falling back to AES encryption")
-                
-                # Use AES as fallback
-                from Crypto.Cipher import AES
-                from Crypto.Util.Padding import pad
-                
-                # Convert key to bytes if it's a string
-                key = base64.b64decode(master_key) if isinstance(master_key, str) else master_key
-                key = key[:32]  # Ensure key is 32 bytes (256 bits)
-                
-                # Generate a random IV
-                iv = os.urandom(16)
-                
-                # Create cipher and encrypt
-                cipher = AES.new(key, AES.MODE_CBC, iv)
-                data_bytes = secret_data.encode('utf-8')
-                padded_data = pad(data_bytes, AES.block_size)
-                ciphertext = cipher.encrypt(padded_data)
-                
-                # Combine IV and ciphertext for storage
-                encrypted_data = base64.b64encode(iv + ciphertext).decode('utf-8')
-                print(f"DEBUG [secure_storage.py]: Used AES for encryption, result length: {len(encrypted_data)}")
+            # AES encryption (our most reliable method)
+            from Crypto.Cipher import AES
+            from Crypto.Util.Padding import pad
+            from Crypto.Random import get_random_bytes
             
-            # Compute the file path
-            secret_path = os.path.join(self._vault_directory, f"{sanitized_name}.enc")
-            print(f"DEBUG [secure_storage.py]: Saving encrypted secret to: {secret_path}")
+            # Make sure the key is the right format and length
+            key = base64.b64decode(master_key) if isinstance(master_key, str) else master_key
+            key = key[:32]  # Ensure key is 32 bytes (256 bits)
             
-            # Write the encrypted data to file
+            # Convert data to bytes if needed
+            data_bytes = json_data.encode('utf-8') if isinstance(json_data, str) else json_data
+            
+            # Pad the data
+            print(f"DEBUG [secure_storage.py]: Data length before padding: {len(data_bytes)}")
+            padded_data = pad(data_bytes, AES.block_size)
+            print(f"DEBUG [secure_storage.py]: Data length after padding: {len(padded_data)}")
+            
+            # Generate random IV
+            iv = get_random_bytes(16)
+            print(f"DEBUG [secure_storage.py]: IV length: {len(iv)}")
+            
+            # Create cipher and encrypt
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            ciphertext = cipher.encrypt(padded_data)
+            print(f"DEBUG [secure_storage.py]: Ciphertext length: {len(ciphertext)}")
+            
+            # Combine IV and ciphertext
+            encrypted_data = iv + ciphertext
+            print(f"DEBUG [secure_storage.py]: Total encrypted data length: {len(encrypted_data)}")
+            
+            # Get the path to save the secret file
+            secret_path = self._get_secret_path(name)
+            if not secret_path:
+                print(f"DEBUG [secure_storage.py]: Cannot determine path for saving secret")
+                return False
+                
+            print(f"DEBUG [secure_storage.py]: Saving secret to: {secret_path}")
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+            
+            # Save the encrypted data
             with open(secret_path, 'wb') as f:
-                f.write(encrypted_data.encode('utf-8') if isinstance(encrypted_data, str) else encrypted_data)
-            
-            print(f"DEBUG [secure_storage.py]: Secret saved successfully to: {secret_path}")
-            return None  # Success, no error
-        
+                f.write(encrypted_data)
+                
+            print(f"DEBUG [secure_storage.py]: Successfully saved secret")
+            return True
+                
         except Exception as e:
-            print(f"ERROR [secure_storage.py]: Exception saving secret: {e}")
+            print(f"DEBUG [secure_storage.py]: Error saving secret: {e}")
             import traceback
             traceback.print_exc()
-            return f"Error saving secret: {str(e)}"
+            return False
+            
+    def _get_secret_path(self, name):
+        """Get the path to a secret file"""
+        # Sanitize the name to prevent traversal issues
+        sanitized_name = self._sanitize_filename(name)
+        if sanitized_name != name:
+            print(f"DEBUG [secure_storage.py]: Name sanitized from '{name}' to '{sanitized_name}'")
+            return None
+            
+        # Compute the file path for the secret
+        return os.path.join(self._vault_directory, f"{sanitized_name}.enc")
 
     def export_secrets(self, export_path, export_password):
         """

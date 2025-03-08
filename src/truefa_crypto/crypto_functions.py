@@ -50,18 +50,41 @@ def encrypt_data(data, key):
     Encrypt data using the provided key.
     
     Args:
-        data (bytes): The data to encrypt
-        key (bytes): The encryption key
+        data (bytes or str): The data to encrypt
+        key (bytes or str): The encryption key
         
     Returns:
         bytes: The encrypted data with nonce
     """
+    # Convert input types if needed
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    if isinstance(key, str):
+        key = key.encode('utf-8')
+    
+    try:
+        # Try to use the DLL directly with c_ prefix
+        lib = get_lib()
+        if hasattr(lib, 'c_encrypt_data'):
+            try:
+                return lib.c_encrypt_data(data, key)
+            except Exception as e:
+                logger.warning(f"Error calling c_encrypt_data: {e}")
+                # Fall through to fallback
+    except Exception as e:
+        logger.warning(f"Error accessing DLL: {e}")
+    
     # Python fallback implementation
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     import os
     
     # Generate a random nonce
     nonce = os.urandom(12)
+    
+    # Ensure key is right size (256 bits = 32 bytes)
+    if len(key) != 32:
+        import hashlib
+        key = hashlib.sha256(key).digest()
     
     # Create AES-GCM cipher with the key
     cipher = AESGCM(key)
@@ -79,13 +102,34 @@ def decrypt_data(encrypted_data, key):
     
     Args:
         encrypted_data (bytes): The data to decrypt (nonce + ciphertext)
-        key (bytes): The decryption key
+        key (bytes or str): The decryption key
         
     Returns:
         bytes: The decrypted data
     """
+    # Convert key if needed
+    if isinstance(key, str):
+        key = key.encode('utf-8')
+        
+    try:
+        # Try to use the DLL directly with c_ prefix
+        lib = get_lib()
+        if hasattr(lib, 'c_decrypt_data'):
+            try:
+                return lib.c_decrypt_data(encrypted_data, key)
+            except Exception as e:
+                logger.warning(f"Error calling c_decrypt_data: {e}")
+                # Fall through to fallback
+    except Exception as e:
+        logger.warning(f"Error accessing DLL: {e}")
+    
     # Python fallback implementation
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    
+    # Ensure key is right size (256 bits = 32 bytes)
+    if len(key) != 32:
+        import hashlib
+        key = hashlib.sha256(key).digest()
     
     # Extract nonce (first 12 bytes) and ciphertext
     nonce = encrypted_data[:12]

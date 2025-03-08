@@ -667,10 +667,13 @@ class TwoFactorAuth:
                     return "Failed to create vault"
             elif not self.storage.vault.is_unlocked:
                 # Vault exists but is locked - need to unlock it
-                master_password = getpass.getpass("Enter your vault master password: ")
-                if not self.storage.unlock(master_password):
+                # Check if password was provided
+                if password is None:
+                    master_password = getpass.getpass("Enter your vault master password: ")
+                    password = master_password
+                
+                if not self.storage.unlock(password):
                     return "Invalid master password"
-                password = master_password
             
             # Prepare the secret data
             if secret is not None:
@@ -696,11 +699,11 @@ class TwoFactorAuth:
                     'account': self.account or ''
                 }
             
-            # Save the secret to the vault
-            error = self.storage.save_secret(name, data_to_save, password)
-            if error:
-                print(f"DEBUG: Error from save_secret: {error}")
-                return f"Failed to save secret: {error}"
+            # Save the secret to the vault - the updated save_secret returns a boolean
+            success = self.storage.save_secret(name, data_to_save)
+            if not success:
+                print(f"DEBUG: Failed to save secret '{name}'")
+                return "Failed to save secret"
             
             print(f"DEBUG: Successfully saved secret '{name}'")
             return None  # Success

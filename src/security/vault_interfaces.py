@@ -128,7 +128,8 @@ class SecureVault:
     @property
     def is_unlocked(self):
         """Check if the vault is currently unlocked."""
-        return self._unlocked
+        print(f"DEBUG [vault_interfaces.py]: Checking is_unlocked property, value: {self._unlocked}, master_key: {self._master_key is not None}")
+        return self._unlocked and self._master_key is not None
         
     def create_vault(self, vault_password, master_password=None):
         """
@@ -252,6 +253,8 @@ class SecureVault:
                 # Check if the derived key matches the stored hash
                 if derived_key != stored_hash:
                     print(f"DEBUG [vault_interfaces.py]: Password verification failed")
+                    self._unlocked = False
+                    self._master_key = None
                     return False
                     
                 print(f"DEBUG [vault_interfaces.py]: Password verified successfully")
@@ -297,6 +300,8 @@ class SecureVault:
                             except Exception as e:
                                 print(f"DEBUG [vault_interfaces.py]: Error decrypting with AES: {e}")
                                 traceback.print_exc()
+                                self._unlocked = False
+                                self._master_key = None
                                 return False
                     
                     # Store the master key
@@ -311,11 +316,15 @@ class SecureVault:
             except Exception as e:
                 print(f"DEBUG [vault_interfaces.py]: Error verifying password: {e}")
                 traceback.print_exc()
+                self._unlocked = False
+                self._master_key = None
                 return False
             
         except Exception as e:
             print(f"ERROR [vault_interfaces.py]: Exception in unlock: {e}")
             traceback.print_exc()
+            self._unlocked = False
+            self._master_key = None
             return False
             
     def lock(self):
@@ -350,8 +359,9 @@ class SecureVault:
         Returns:
             SecureString: The master key, or None if vault is locked
         """
+        print(f"DEBUG [vault_interfaces.py]: get_master_key called, is_unlocked: {self.is_unlocked}")
         if not self.is_unlocked:
-            logger.error("Vault is locked. Cannot access master key.")
+            print("DEBUG [vault_interfaces.py]: Vault is locked. Cannot access master key.")
             return None
             
         return self._master_key

@@ -19,6 +19,7 @@ from src.security.vault_interfaces import SecureVault
 from src.security.secure_storage import SecureStorage
 from src.totp.auth_opencv import TwoFactorAuth
 from src.security.secure_string import SecureString
+from src.config import get_repo_root
 
 # Make sure the src directory is in the path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -27,12 +28,6 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 os.environ["DEBUG"] = "1"
 
 try:
-    # Import core modules directly
-    print("Importing modules...")
-    from src.totp.auth_opencv import TwoFactorAuth
-    from src.security.vault_interfaces import SecureVault
-    from src.security.secure_string import SecureString
-    from src.utils.screen import clear_screen
     print("Modules imported successfully")
     
     # Modified main function to ensure vault storage works in Docker
@@ -52,7 +47,7 @@ try:
                 app_dir = os.path.dirname(sys.executable)
                 print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
             else:
-                print(f"Running from regular Python. Searching in: {os.getcwd()}")
+                print(f"Running from regular Python. Searching in: {get_repo_root()}")
                 print(f"Current working directory: {os.getcwd()}")
             
             # Import required modules
@@ -66,19 +61,54 @@ try:
             
             # Create the SecureVault
             print("Creating SecureVault...")
+            from src.security.vault_interfaces import SecureVault
             vault = SecureVault()
             print("SecureVault created successfully")
             
             # Create the SecureStorage using our vault instance
             print("Creating SecureStorage...")
-            from src.security.secure_storage import SecureStorage
             storage = SecureStorage(vault=vault)
             print("SecureStorage created successfully")
+            
+            # Track vault unlock state and master password
+            vault_unlocked = False
+            master_password = None
             
             # Create the TwoFactorAuth
             print("Creating TwoFactorAuth...")
             auth = TwoFactorAuth(storage=storage)
+            print(f"Using provided SecureStorage instance")
+            print(f"Using images directory: {os.path.join(get_repo_root(), 'images')}")
             print("TwoFactorAuth created successfully")
+            
+            # Check if vault exists
+            print(f"Checking for vault at {storage.vault_dir}")
+            if os.path.exists(os.path.join(storage.vault_dir, "vault.json")):
+                # Check if the file is valid
+                from src.security.vault_interfaces import SecureVault
+                vault_file = os.path.join(storage.vault_dir, "vault.json")
+                print(f"DEBUG: Checking vault initialization at: {vault_file}")
+                try:
+                    with open(vault_file, 'r') as f:
+                        metadata = json.load(f)
+                        print(f"DEBUG: File exists: {os.path.exists(vault_file)}")
+                        print(f"DEBUG: Vault metadata keys: {list(metadata.keys())}")
+                        
+                        # Check for required fields
+                        required_fields = ["version", "created", "password_hash", "vault_salt"]
+                        if all(field in metadata for field in required_fields):
+                            print(f"DEBUG: Vault is properly initialized with all required fields")
+                        else:
+                            print(f"DEBUG: Vault file missing required fields")
+                except Exception as e:
+                    print(f"DEBUG: Error reading vault metadata: {e}")
+                
+                print(f"Vault exists: {True}")
+            else:
+                print(f"Vault exists: {False}")
+            
+            # Track vault unlock state
+            vault_unlocked = False
             
             # Track authentication status - always start locked
             vault_authenticated = False
@@ -170,6 +200,7 @@ try:
                             try:
                                 # Check if vault is initialized
                                 print(f"Vault initialized: {storage.is_initialized}")
+                                print(f"DEBUG: vault_unlocked tracking variable: {vault_unlocked}")
                                 
                                 # Prepare the secret data
                                 secret_data = {
@@ -185,6 +216,9 @@ try:
                                 else:
                                     print(f"Secret saved as '{name}'.")
                                     debug_vault_status(storage)
+                                    # Update the vault unlocked state
+                                    vault_unlocked = storage.is_unlocked
+                                    print(f"DEBUG: Updated vault_unlocked to {vault_unlocked}")
                             except Exception as e:
                                 print(f"An error occurred: {e}")
                                 traceback.print_exc()
@@ -258,6 +292,7 @@ try:
                                 print(f"DEBUG: Checking vault initialization in menu option 4...")
                                 print(f"DEBUG: storage object id: {id(storage)}")
                                 print(f"DEBUG: storage.vault object id: {id(storage.vault)}")
+                                print(f"DEBUG: vault_unlocked tracking variable: {vault_unlocked}")
                                 
                                 # Enhanced debugging to check vault properties
                                 if hasattr(storage, 'vault'):
@@ -286,6 +321,35 @@ try:
                                 print("No vault found. Please create a vault first.")
                                 continue
                             
+                            # First, make sure the vault is unlocked before listing secrets
+                            print(f"DEBUG: Vault is unlocked: {storage.is_unlocked}")
+                            print(f"DEBUG: vault_unlocked tracking variable: {vault_unlocked}")
+                            print(f"DEBUG: Have master password: {master_password is not None}")
+                            
+                            if not storage.is_unlocked and not vault_unlocked:
+                                print("\nVault is locked. Please enter your master password to view your saved secrets.")
+                                master_password = getpass.getpass("Enter your vault master password: ")
+                                if not master_password:
+                                    print("No password entered. Unable to unlock the vault.")
+                                    continue
+                                if not storage.unlock(master_password):
+                                    print("Invalid password. Unable to unlock the vault.")
+                                    master_password = None
+                                    continue
+                                print("Vault unlocked successfully.")
+                                vault_unlocked = True
+                            else:
+                                print("Using already unlocked vault.")
+                                # Force the vault to be unlocked if our tracking says it should be
+                                if vault_unlocked and not storage.is_unlocked and master_password:
+                                    print("DEBUG: Vault should be unlocked but isn't. Using cached master password.")
+                                    if not storage.unlock(master_password):
+                                        print("Failed to unlock vault with cached password. Please try again.")
+                                        vault_unlocked = False
+                                        master_password = None
+                                        continue
+                                    print("Vault re-unlocked successfully.")
+                                
                             # List the saved secrets
                             try:
                                 secrets_list = storage.list_secrets()
@@ -313,13 +377,47 @@ try:
                                 secret_name = secrets_list[selection - 1]
                                 print(f"Loading secret: {secret_name}")
                                 
-                                # If vault is not unlocked, we need a password
+                                # Check if vault is still unlocked (it should be, but let's be safe)
+                                print(f"DEBUG: Vault is unlocked: {storage.is_unlocked}")
+                                print(f"DEBUG: vault_unlocked tracking variable: {vault_unlocked}")
+                                print(f"DEBUG: Have master password: {master_password is not None}")
+                                
+                                # The vault should already be unlocked at this point, but let's double-check
                                 if not storage.is_unlocked:
-                                    password = getpass.getpass("Enter your vault master password: ")
-                                    storage.unlock(password)
+                                    print("Vault appears to have been locked.")
                                     
-                                # Load and display the secret
-                                secret_data = storage.load_secret(secret_name)
+                                    # Try using the cached master password if we have it
+                                    if master_password:
+                                        print("Attempting to unlock vault with cached password...")
+                                        if storage.unlock(master_password):
+                                            print("Vault successfully unlocked with cached password.")
+                                        else:
+                                            print("Failed to unlock with cached password. Please enter it again.")
+                                            master_password = getpass.getpass("Enter your vault master password: ")
+                                            if not master_password:
+                                                print("No password entered. Unable to unlock the vault.")
+                                                continue
+                                            if not storage.unlock(master_password):
+                                                print("Invalid password. Unable to unlock the vault.")
+                                                master_password = None
+                                                continue
+                                            print("Vault unlocked successfully.")
+                                    else:
+                                        # No cached password, need to ask
+                                        master_password = getpass.getpass("Enter your vault master password: ")
+                                        if not master_password:
+                                            print("No password entered. Unable to unlock the vault.")
+                                            continue
+                                        if not storage.unlock(master_password):
+                                            print("Invalid password. Unable to unlock the vault.")
+                                            master_password = None
+                                            continue
+                                        print("Vault unlocked successfully.")
+                                    
+                                    vault_unlocked = True
+                                    
+                                # Load and display the secret (provide the master password directly)
+                                secret_data = storage.load_secret(secret_name, master_password)
                                 if secret_data:
                                     print(f"\nSecret: {secret_name}")
                                     print(f"Issuer: {secret_data.get('issuer', 'Unknown')}")
@@ -339,6 +437,9 @@ try:
                                         print(f"Error generating codes: {gen_error}")
                                 else:
                                     print(f"Error loading secret: {secret_name}")
+                                
+                                # Update the vault unlocked state
+                                vault_unlocked = storage.is_unlocked
                             except Exception as e:
                                 print(f"Error listing secrets: {e}")
                                 continue
@@ -417,46 +518,47 @@ try:
             
         return 0
 
+    # Function to print debug vault status
     def debug_vault_status(storage):
-        """Debug function to check vault status"""
         print("\nDEBUG: VAULT STATUS CHECK")
-        try:
-            print(f"DEBUG: Vault directory: {storage.vault_dir}")
-            vault_file = os.path.join(storage.vault_dir, "vault.json")
-            print(f"DEBUG: Vault file path: {vault_file}")
-            
-            # Check if directory and file exist
-            dir_exists = os.path.exists(storage.vault_dir)
-            file_exists = os.path.exists(vault_file)
-            print(f"DEBUG: Vault directory exists: {dir_exists}")
-            print(f"DEBUG: Vault file exists: {file_exists}")
-            
-            # If file exists, check its contents
-            if file_exists:
-                try:
-                    with open(vault_file, 'r') as f:
-                        metadata = json.load(f)
-                        print(f"DEBUG: Vault metadata keys: {list(metadata.keys())}")
-                        
-                    # Check for required fields
-                    required_fields = ['version', 'created', 'password_hash', 'vault_salt']
-                    missing = [f for f in required_fields if f not in metadata]
-                    if missing:
-                        print(f"DEBUG: Missing required fields: {missing}")
-                    else:
-                        print(f"DEBUG: All required fields present")
-                except Exception as e:
-                    print(f"DEBUG: Error reading vault file: {e}")
-            
-            # Check the is_initialized property
-            is_init = storage.vault.is_initialized
-            print(f"DEBUG: is_initialized property returns: {is_init}")
-        except Exception as e:
-            print(f"DEBUG: Error checking vault status: {e}")
-            import traceback
-            traceback.print_exc()
+        print(f"DEBUG: Vault directory: {storage.vault_dir}")
+        print(f"DEBUG: Vault file path: {os.path.join(storage.vault_dir, 'vault.json')}")
+        print(f"DEBUG: Vault directory exists: {os.path.exists(storage.vault_dir)}")
+        print(f"DEBUG: Vault file exists: {os.path.exists(os.path.join(storage.vault_dir, 'vault.json'))}")
         
-        print("DEBUG: END VAULT STATUS CHECK\n")
+        # Check metadata if the file exists
+        vault_file = os.path.join(storage.vault_dir, 'vault.json')
+        if os.path.exists(vault_file):
+            try:
+                with open(vault_file, 'r') as f:
+                    metadata = json.load(f)
+                    print(f"DEBUG: Vault metadata keys: {list(metadata.keys())}")
+                    print(f"DEBUG: All required fields present")
+            except Exception as e:
+                print(f"DEBUG: Error reading vault file: {e}")
+            
+        # Now check the is_initialized property
+        print(f"DEBUG: Checking vault initialization at: {os.path.join(storage.vault_dir, 'vault.json')}")
+        print(f"DEBUG: File exists: {os.path.exists(os.path.join(storage.vault_dir, 'vault.json'))}")
+        
+        if os.path.exists(os.path.join(storage.vault_dir, 'vault.json')):
+            try:
+                with open(os.path.join(storage.vault_dir, 'vault.json'), 'r') as f:
+                    metadata = json.load(f)
+                    print(f"DEBUG: Vault metadata keys: {list(metadata.keys())}")
+                    
+                    # Check if all required fields are present
+                    required_fields = ["version", "created", "password_hash", "vault_salt"]
+                    if all(field in metadata for field in required_fields):
+                        print(f"DEBUG: Vault is properly initialized with all required fields")
+                    else:
+                        print(f"DEBUG: Vault file missing required fields")
+            except Exception as e:
+                print(f"DEBUG: Error reading vault metadata: {e}")
+        
+        print(f"DEBUG: is_initialized property returns: {storage.is_initialized}")
+        print(f"DEBUG: is_unlocked property returns: {storage.is_unlocked}")
+        print(f"DEBUG: END VAULT STATUS CHECK\n")
 
     if __name__ == "__main__":
         sys.exit(main())
