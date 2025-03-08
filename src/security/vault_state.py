@@ -447,137 +447,109 @@ class VaultStateManager:
         Unlock the vault with the given password.
         
         Args:
-            password (str): The password to unlock the vault.
+            password: The password to use for unlocking.
             
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if the vault was successfully unlocked, False otherwise.
         """
         try:
-            # Import necessary modules
-            from . import vault_crypto
-            from .secure_string import SecureString
+            print(f"DEBUG [vault_state.py]: Attempting to unlock vault with password of length {len(password) if password else 'None'}")
             
-            # Check if vault exists
-            if not os.path.exists(self.vault_path):
-                print(f"Vault file not found at {self.vault_path}")
+            # Check if the vault is already unlocked
+            if self.is_unlocked:
+                print("DEBUG [vault_state.py]: Vault already unlocked")
+                return True
+            
+            # Load the vault configuration file
+            try:
+                with open(self.vault_path, 'r') as f:
+                    try:
+                        vault_data = json.load(f)
+                        print(f"DEBUG [vault_state.py]: Loaded vault metadata with keys: {list(vault_data.keys())}")
+                    except json.JSONDecodeError:
+                        print("DEBUG [vault_state.py]: Failed to decode vault JSON")
+                        return False
+            except FileNotFoundError:
+                print(f"DEBUG [vault_state.py]: Vault file not found at {self.vault_path}")
                 return False
             
-            # Load vault metadata
-            with open(self.vault_path, 'r') as f:
-                vault_metadata = json.load(f)
-                print(f"Loaded vault metadata: {vault_metadata.keys()}")
+            # Get the password hash for verification
+            stored_password_hash = vault_data.get('password_hash')
+            if not stored_password_hash:
+                print("DEBUG [vault_state.py]: No password_hash in vault data")
+                return False
             
-            # Get vault salt
-            if 'vault_salt' not in vault_metadata:
-                print("Vault salt not found in metadata")
-                if 'salt' in vault_metadata:
-                    print("Using 'salt' instead of 'vault_salt'")
-                    vault_metadata['vault_salt'] = vault_metadata['salt']
-                else:
-                    return False
+            print(f"DEBUG [vault_state.py]: Password hash length: {len(stored_password_hash)}")
             
-            try:
-                vault_salt = base64.b64decode(vault_metadata['vault_salt'])
-            except Exception as e:
-                print(f"Error decoding vault salt: {e}")
-                if isinstance(vault_metadata['vault_salt'], str):
-                    vault_salt = vault_metadata['vault_salt'].encode('utf-8')
-                else:
-                    vault_salt = vault_metadata['vault_salt']
+            # Check if password is provided
+            if not password:
+                print("DEBUG [vault_state.py]: No password provided for unlock")
+                return False
+            
+            # Convert password to bytes if it's a string
+            password_bytes = password if isinstance(password, bytes) else password.encode('utf-8')
+            
+            # Get the vault salt
+            vault_salt = vault_data.get('vault_salt') or vault_data.get('salt')
+            if not vault_salt:
+                print("DEBUG [vault_state.py]: No vault salt found in vault data")
+                return False
+            
+            print(f"DEBUG [vault_state.py]: Vault salt: {vault_salt[:10]}...")
             
             # Verify the password
-            import hashlib
-            if 'password_hash' not in vault_metadata:
-                print("Password hash not found in metadata")
-                # Try creating a new vault with this password
-                return self.create_vault(password)
-            
-            # Get the stored password hash
+            print("DEBUG [vault_state.py]: Computing password hash for verification...")
             try:
-                if isinstance(vault_metadata['password_hash'], str):
-                    try:
-                        stored_hash = bytes.fromhex(vault_metadata['password_hash'])
-                    except ValueError:
-                        # Try base64 decode instead
-                        stored_hash = base64.b64decode(vault_metadata['password_hash'])
-                else:
-                    stored_hash = vault_metadata['password_hash']
+                from .. import truefa_crypto
+                derived_key = truefa_crypto.derive_key(password, vault_salt)
+                print(f"DEBUG [vault_state.py]: Derived key length: {len(derived_key) if derived_key else 'None'}")
             except Exception as e:
-                print(f"Error processing stored password hash: {e}")
+                print(f"DEBUG [vault_state.py]: Error deriving key with truefa_crypto: {e}")
+                print("DEBUG [vault_state.py]: Falling back to PBKDF2...")
+                import hashlib
+                salt_bytes = base64.b64decode(vault_salt)
+                derived_key = hashlib.pbkdf2_hmac('sha256', password_bytes, salt_bytes, 100000, 32)
+                derived_key = base64.b64encode(derived_key).decode('utf-8')
+                print(f"DEBUG [vault_state.py]: Derived key with PBKDF2 (length: {len(derived_key)})")
+            
+            # Compare the derived key hash with the stored hash
+            print(f"DEBUG [vault_state.py]: Checking if derived key matches stored hash...")
+            if not self._verify_password_hash(password_bytes, stored_password_hash):
+                print("DEBUG [vault_state.py]: Password hash verification failed")
                 return False
             
-            print(f"Successfully retrieved stored password hash of length {len(stored_hash)}")
+            print("DEBUG [vault_state.py]: Password hash verified successfully")
             
-            # Ensure password is bytes
-            if isinstance(password, str):
-                password_bytes = password.encode('utf-8')
-            else:
-                password_bytes = password
-            
-            # Compute the hash with the provided password and stored salt
-            computed_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                password_bytes,
-                vault_salt,
-                100000,
-                dklen=32
-            )
-            
-            print(f"Computed hash length: {len(computed_hash)}")
-            
-            # Compare using constant-time comparison
-            import secrets
-            if not secrets.compare_digest(computed_hash, stored_hash):
-                print("Invalid password for vault")
+            # Decrypt the master key
+            encrypted_master_key = vault_data.get('encrypted_master_key')
+            if not encrypted_master_key:
+                print("DEBUG [vault_state.py]: No encrypted_master_key in vault data")
                 return False
             
-            # Load the master key if needed
-            if self._master_key is None:
-                try:
-                    # Get the encrypted master key
-                    encrypted_master_key = vault_metadata.get('master_key')
-                    
-                    if not encrypted_master_key:
-                        # Try to load from master key metadata
-                        master_meta = self.load_master_key_metadata()
-                        if master_meta:
-                            encrypted_master_key = master_meta.get('encrypted_key')
-                    
-                    if not encrypted_master_key:
-                        print("Encrypted master key not found")
-                        return False
-                    
-                    # Decrypt the master key
-                    decrypted_master_key = vault_crypto.decrypt_master_key(encrypted_master_key)
-                    
-                    if not decrypted_master_key:
-                        print("Failed to decrypt master key")
-                        return False
-                    
-                    # Store the master key securely in memory
-                    self._master_key = SecureString(
-                        base64.b64decode(decrypted_master_key) 
-                        if isinstance(decrypted_master_key, str) 
-                        else decrypted_master_key
-                    )
-                    
-                except Exception as e:
-                    print(f"Error decrypting master key: {str(e)}")
+            # Try to decrypt the master key
+            print("DEBUG [vault_state.py]: Attempting to decrypt master key...")
+            try:
+                master_key = vault_crypto.decrypt_with_password(encrypted_master_key, password, vault_salt)
+                print(f"DEBUG [vault_state.py]: Master key decryption result: {type(master_key)}")
+                
+                if not master_key:
+                    print("DEBUG [vault_state.py]: Failed to decrypt master key")
                     return False
-            
-            # Mark the vault as unlocked
-            self._unlocked = True
-            
-            # Update access statistics
-            self.load_state()
-            self.state["last_access"] = datetime.now().isoformat()
-            self.state["access_count"] += 1
-            self.save_state()
-            
-            return True
-            
+                
+                # Set the master key and mark as unlocked
+                self._master_key = master_key
+                self._unlocked = True
+                print("DEBUG [vault_state.py]: Vault unlocked successfully")
+                return True
+            except Exception as e:
+                print(f"DEBUG [vault_state.py]: Exception decrypting master key: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
         except Exception as e:
-            print(f"Error unlocking vault: {str(e)}")
+            print(f"ERROR [vault_state.py]: Exception in unlock method: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def lock(self):
