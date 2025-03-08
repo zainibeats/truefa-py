@@ -87,23 +87,37 @@ class SecureStorage:
     update, delete, export, import).
     """
     
-    def __init__(self, storage_path=None):
+    def __init__(self, storage_path=None, vault_file=None):
         """
-        Initialize the SecureStorage with the given storage path.
-
-        Args:
-            storage_path (str, optional): Path where storage files will be stored.
-                If None, the default location from configuration will be used.
-        """
-        self.storage_path = storage_path or DATA_DIR
+        Initialize the secure storage.
         
-        # Initialize the vault - import locally to avoid circular imports
+        Args:
+            storage_path (str): Path to the storage directory
+            vault_file (str): Path to the vault file
+        """
+        # Determine default paths if not provided
+        if storage_path is None:
+            from ..config import DATA_DIR
+            storage_path = DATA_DIR
+        
+        if vault_file is None:
+            from ..config import VAULT_FILE
+            vault_file = VAULT_FILE
+        
+        # Store the paths
+        self.storage_path = os.path.expanduser(storage_path)
+        self.vault_file = os.path.expanduser(vault_file)
+        self.vault_dir = os.path.dirname(self.vault_file)
+        
+        # Create the vault object
         from .vault import SecureVault
-        self.vault = SecureVault(self.storage_path)
+        self.vault = SecureVault(self.vault_file)
+        
+        # Track if the vault is unlocked
+        self._unlocked = False
         
         # State variables
         self.key = None
-        self._is_unlocked = False
         
         # Set up storage directories with secure permissions
         self._ensure_secure_directory(self.storage_path)
@@ -124,7 +138,7 @@ class SecureStorage:
     @property
     def is_unlocked(self):
         """Check if the storage is unlocked."""
-        return self._is_unlocked
+        return self._unlocked
         
     def create_vault(self, master_password):
         """
@@ -144,7 +158,7 @@ class SecureStorage:
             # In our simplified model, vault_password and master_password are the same
             success = self.vault.create_vault(master_password, master_password)
             if success:
-                self._is_unlocked = True
+                self._unlocked = True
                 print("Secure vault created successfully")
             return success
         except Exception as e:
@@ -166,13 +180,13 @@ class SecureStorage:
         """
         # Clear any existing key
         self.key = None
-        self._is_unlocked = False
+        self._unlocked = False
         
         # First try to unlock vault if initialized
         if self.vault.is_initialized():
             if self.vault.unlock(password):
-                # Only set _is_unlocked to True if vault.unlock succeeds
-                self._is_unlocked = True
+                # Only set _unlocked to True if vault.unlock succeeds
+                self._unlocked = True
                 return True
             else:
                 # Explicit return False if vault.unlock fails to ensure we don't 
@@ -183,7 +197,7 @@ class SecureStorage:
         if password:
             self.key = self.derive_key(password)
             if self.key:
-                self._is_unlocked = True
+                self._unlocked = True
                 return True
         
         return False
@@ -196,7 +210,7 @@ class SecureStorage:
             self.vault.lock()
         
         self.key = None
-        self._is_unlocked = False
+        self._unlocked = False
 
     def has_master_password(self):
         """
@@ -905,14 +919,14 @@ class SecureStorage:
         """
         # Clear any existing keys
         self.key = None
-        self._is_unlocked = False
+        self._unlocked = False
         
         if not self.vault.is_initialized():
             print("No vault exists yet. You'll be prompted to create one when saving a secret.")
             return False
             
         if self.vault.unlock(master_password):
-            self._is_unlocked = True
+            self._unlocked = True
             print("Vault unlocked successfully")
             return True
             
@@ -1037,3 +1051,29 @@ class SecureStorage:
         except Exception as e:
             logger.warning(f"Failed to set secure permissions: {e}")
             return True  # Continue even if permissions fail
+
+    def set_vault_directory(self, directory_path):
+        """
+        Set a custom vault directory.
+        
+        Args:
+            directory_path (str): Path to the vault directory
+        """
+        # Ensure the directory is an absolute path
+        directory_path = os.path.abspath(os.path.expanduser(directory_path))
+        
+        # Create the directory if it doesn't exist
+        os.makedirs(directory_path, exist_ok=True)
+        
+        # Update the vault paths
+        self.vault_dir = directory_path
+        self.vault_file = os.path.join(directory_path, "vault.json")
+        
+        # Create a new vault object with the updated path
+        from .vault import SecureVault
+        self.vault = SecureVault(self.vault_file)
+        
+        # Reset the unlock state
+        self._unlocked = False
+        
+        return True
