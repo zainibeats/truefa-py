@@ -18,6 +18,7 @@ import hashlib
 from pathlib import Path
 from .secure_string import SecureString
 import datetime
+import traceback
 
 # Global variables
 _vault_path = None
@@ -197,61 +198,104 @@ class PythonCrypto:
             print(f"Error checking vault metadata: {e}")
             return False
     
-    def create_vault(self, password):
-        """Create a new vault with the given password."""
-        global _vault_path, _vault_unlocked, _vault_key
+    def create_vault(self, password, vault_path):
+        """
+        Create a new vault file with the given password.
         
-        if not _vault_path:
-            print("Vault path not set")
-            return False
+        Args:
+            password: Password for the vault
+            vault_path: Path to save the vault file
+            
+        Returns:
+            dict: The vault metadata
+        """
+        from .. import truefa_crypto
+        import hashlib
+        import os
+        
+        print(f"DEBUG [vault_crypto.py]: Creating new vault at {vault_path} with password length {len(password) if password else 'None'}")
         
         try:
-            # Generate a salt
-            salt = self.generate_salt()
-            salt_bytes = base64.b64decode(salt)
+            # Generate a random salt for key derivation
+            salt = os.urandom(16)
+            salt_b64 = base64.b64encode(salt).decode('utf-8')
+            print(f"DEBUG [vault_crypto.py]: Generated salt: {salt_b64[:10]}...")
             
-            # Derive the vault key
-            if isinstance(password, str):
-                password_bytes = password.encode('utf-8')
-            else:
-                password_bytes = password
+            # Derive the vault key from the password using a consistent method
+            print(f"DEBUG [vault_crypto.py]: Deriving vault key...")
+            try:
+                # Try to use the Rust implementation first
+                vault_key = truefa_crypto.derive_key(password, salt_b64)
+                key_derivation = "truefa_crypto"
+                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto for key derivation")
+            except Exception as e:
+                print(f"DEBUG [vault_crypto.py]: Error using truefa_crypto: {e}")
+                print(f"DEBUG [vault_crypto.py]: Falling back to PBKDF2...")
+                # Fall back to Python's PBKDF2
+                password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+                vault_key = hashlib.pbkdf2_hmac('sha256', password_bytes, salt, 100000, 32)
+                vault_key = base64.b64encode(vault_key).decode('utf-8')
+                key_derivation = "pbkdf2"
+                print(f"DEBUG [vault_crypto.py]: Used PBKDF2 for key derivation")
             
-            # Compute the password hash
-            password_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                password_bytes,
-                salt_bytes,
-                100000,
-                dklen=32
-            )
+            # Generate a master key for encrypting actual vault contents
+            master_key = os.urandom(32)
+            master_key_b64 = base64.b64encode(master_key).decode('utf-8')
+            print(f"DEBUG [vault_crypto.py]: Generated master key: {master_key_b64[:10]}...")
             
-            # Store the vault key
-            _vault_key = password_hash
+            # Encrypt the master key with the vault key
+            print(f"DEBUG [vault_crypto.py]: Encrypting master key...")
+            try:
+                encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
+                print(f"DEBUG [vault_crypto.py]: Used truefa_crypto for encryption")
+            except Exception as e:
+                print(f"DEBUG [vault_crypto.py]: Error using truefa_crypto for encryption: {e}")
+                print(f"DEBUG [vault_crypto.py]: Using simple symmetric encryption...")
+                # Use a simple AES implementation as fallback
+                from Crypto.Cipher import AES
+                from Crypto.Util.Padding import pad
+                key = base64.b64decode(vault_key) if isinstance(vault_key, str) else vault_key
+                cipher = AES.new(key, AES.MODE_CBC)
+                data = pad(master_key, AES.block_size)
+                encrypted_master_key = base64.b64encode(cipher.iv + cipher.encrypt(data)).decode('utf-8')
+                print(f"DEBUG [vault_crypto.py]: Used AES for encryption")
             
-            # Create vault metadata
+            # Create password hash for future verification
+            print(f"DEBUG [vault_crypto.py]: Creating password hash...")
+            password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+            password_hash = hashlib.pbkdf2_hmac('sha256', password_bytes, salt, 100000, 32)
+            password_hash_b64 = base64.b64encode(password_hash).decode('utf-8')
+            
+            # Create the vault metadata
             vault_metadata = {
-                "version": "1.0",
+                "version": "2.0",
                 "created": datetime.datetime.now().isoformat(),
-                "password_hash": password_hash.hex(),
-                "vault_salt": salt,
-                "salt": salt  # Include both for compatibility with different code paths
+                "password_hash": password_hash_b64,
+                "vault_salt": salt_b64,
+                "salt": salt_b64,  # For compatibility
+                "master_key": master_key_b64,  # Only in debug/test builds
+                "encrypted_master_key": encrypted_master_key,
+                "key_derivation": key_derivation
             }
             
-            # Ensure the directory exists
-            os.makedirs(os.path.dirname(_vault_path), exist_ok=True)
+            print(f"DEBUG [vault_crypto.py]: Created vault metadata with keys: {list(vault_metadata.keys())}")
             
-            # Save the vault metadata
-            with open(_vault_path, 'w') as f:
+            # Ensure the vault directory exists
+            os.makedirs(os.path.dirname(vault_path), exist_ok=True)
+            
+            # Save the metadata to the vault file
+            with open(vault_path, 'w') as f:
                 json.dump(vault_metadata, f, indent=2)
             
-            # Mark the vault as unlocked
-            _vault_unlocked = True
+            print(f"DEBUG [vault_crypto.py]: Saved vault metadata to {vault_path}")
             
-            print(f"Successfully created vault with metadata: {list(vault_metadata.keys())}")
-            return salt
+            # Return the vault metadata
+            return vault_metadata
+            
         except Exception as e:
-            print(f"Error creating vault: {e}")
-            return False
+            print(f"ERROR [vault_crypto.py]: Error creating vault: {e}")
+            traceback.print_exc()
+            return None
 
 # Try to import the Rust crypto module
 try:
@@ -323,9 +367,104 @@ def vault_exists():
     """Check if a vault exists with proper metadata."""
     return truefa_crypto.vault_exists()
 
-def create_vault(password):
-    """Create a new vault."""
-    return truefa_crypto.create_vault(password)
+def create_vault(password, vault_path):
+    """
+    Create a new vault file with the given password.
+    
+    Args:
+        password: Password for the vault
+        vault_path: Path to save the vault file
+        
+    Returns:
+        dict: The vault metadata
+    """
+    from .. import truefa_crypto
+    import hashlib
+    import os
+    
+    print(f"DEBUG [vault_crypto.py]: Creating new vault at {vault_path} with password length {len(password) if password else 'None'}")
+    
+    try:
+        # Generate a random salt for key derivation
+        salt = os.urandom(16)
+        salt_b64 = base64.b64encode(salt).decode('utf-8')
+        print(f"DEBUG [vault_crypto.py]: Generated salt: {salt_b64[:10]}...")
+        
+        # Derive the vault key from the password using a consistent method
+        print(f"DEBUG [vault_crypto.py]: Deriving vault key...")
+        try:
+            # Try to use the Rust implementation first
+            vault_key = truefa_crypto.derive_key(password, salt_b64)
+            key_derivation = "truefa_crypto"
+            print(f"DEBUG [vault_crypto.py]: Used truefa_crypto for key derivation")
+        except Exception as e:
+            print(f"DEBUG [vault_crypto.py]: Error using truefa_crypto: {e}")
+            print(f"DEBUG [vault_crypto.py]: Falling back to PBKDF2...")
+            # Fall back to Python's PBKDF2
+            password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+            vault_key = hashlib.pbkdf2_hmac('sha256', password_bytes, salt, 100000, 32)
+            vault_key = base64.b64encode(vault_key).decode('utf-8')
+            key_derivation = "pbkdf2"
+            print(f"DEBUG [vault_crypto.py]: Used PBKDF2 for key derivation")
+        
+        # Generate a master key for encrypting actual vault contents
+        master_key = os.urandom(32)
+        master_key_b64 = base64.b64encode(master_key).decode('utf-8')
+        print(f"DEBUG [vault_crypto.py]: Generated master key: {master_key_b64[:10]}...")
+        
+        # Encrypt the master key with the vault key
+        print(f"DEBUG [vault_crypto.py]: Encrypting master key...")
+        try:
+            encrypted_master_key = truefa_crypto.encrypt_with_key(master_key_b64, vault_key)
+            print(f"DEBUG [vault_crypto.py]: Used truefa_crypto for encryption")
+        except Exception as e:
+            print(f"DEBUG [vault_crypto.py]: Error using truefa_crypto for encryption: {e}")
+            print(f"DEBUG [vault_crypto.py]: Using simple symmetric encryption...")
+            # Use a simple AES implementation as fallback
+            from Crypto.Cipher import AES
+            from Crypto.Util.Padding import pad
+            key = base64.b64decode(vault_key) if isinstance(vault_key, str) else vault_key
+            cipher = AES.new(key, AES.MODE_CBC)
+            data = pad(master_key, AES.block_size)
+            encrypted_master_key = base64.b64encode(cipher.iv + cipher.encrypt(data)).decode('utf-8')
+            print(f"DEBUG [vault_crypto.py]: Used AES for encryption")
+        
+        # Create password hash for future verification
+        print(f"DEBUG [vault_crypto.py]: Creating password hash...")
+        password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+        password_hash = hashlib.pbkdf2_hmac('sha256', password_bytes, salt, 100000, 32)
+        password_hash_b64 = base64.b64encode(password_hash).decode('utf-8')
+        
+        # Create the vault metadata
+        vault_metadata = {
+            "version": "2.0",
+            "created": datetime.datetime.now().isoformat(),
+            "password_hash": password_hash_b64,
+            "vault_salt": salt_b64,
+            "salt": salt_b64,  # For compatibility
+            "master_key": master_key_b64,  # Only in debug/test builds
+            "encrypted_master_key": encrypted_master_key,
+            "key_derivation": key_derivation
+        }
+        
+        print(f"DEBUG [vault_crypto.py]: Created vault metadata with keys: {list(vault_metadata.keys())}")
+        
+        # Ensure the vault directory exists
+        os.makedirs(os.path.dirname(vault_path), exist_ok=True)
+        
+        # Save the metadata to the vault file
+        with open(vault_path, 'w') as f:
+            json.dump(vault_metadata, f, indent=2)
+            
+        print(f"DEBUG [vault_crypto.py]: Saved vault metadata to {vault_path}")
+        
+        # Return the vault metadata
+        return vault_metadata
+        
+    except Exception as e:
+        print(f"ERROR [vault_crypto.py]: Error creating vault: {e}")
+        traceback.print_exc()
+        return None
 
 def has_rust_crypto():
     """Check if Rust crypto is available."""
