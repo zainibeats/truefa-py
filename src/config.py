@@ -1,16 +1,15 @@
 """
 TrueFA-Py Configuration System
 
-Provides centralized configuration settings and platform-specific paths
-for the application. This module handles:
+Manages application paths, settings, and environment detection with features:
+- Multi-platform support (Windows, macOS, Linux)
+- Secure directory creation with appropriate permissions
+- Portable mode via environment variables
+- DLL/shared library discovery with multi-location search
+- Separate paths for regular and sensitive cryptographic data
 
-- Platform detection and appropriate file path selection
-- Secure directory creation with proper permissions
-- Global application constants
-- Environment-specific configurations
-
-The module implements separate paths for regular data and sensitive
-cryptographic materials, with enhanced security for the latter.
+Security-focused design separates user data from cryptographic materials
+to provide enhanced protection for sensitive authentication secrets.
 """
 
 import os
@@ -27,10 +26,11 @@ APP_VERSION = "0.1.0"
 # that might have permission restrictions
 def is_running_from_program_files():
     """
-    Check if the application is running from a restricted directory like Program Files.
+    Detect if running from a restricted directory (e.g., Program Files).
+    Used to adjust file access behavior in limited-permission environments.
     
     Returns:
-        bool: True if running from a directory that might have permission issues, False otherwise
+        bool: True if in a restricted directory, False otherwise
     """
     if not getattr(sys, 'frozen', False):
         return False  # Not a frozen app, so not installed
@@ -50,10 +50,10 @@ def is_running_from_program_files():
 # Get the repository root directory
 def get_repo_root():
     """
-    Get the root directory of the repository.
+    Determine repository root directory for development and frozen contexts.
     
     Returns:
-        str: The absolute path to the repository root
+        str: Absolute path to the repository/application root
     """
     # If we're running from a frozen executable, use the directory containing the executable
     if getattr(sys, 'frozen', False):
@@ -65,18 +65,15 @@ def get_repo_root():
 # Determine the correct data directory based on platform
 def get_data_directory():
     """
-    Get the platform-appropriate directory for application data.
-    
-    Creates and returns the correct directory for storing application 
-    configuration and non-sensitive data based on platform conventions:
+    Create and return platform-appropriate application data directory:
     - Windows: %APPDATA%\TrueFA
     - macOS: ~/Library/Application Support/TrueFA
-    - Linux/Unix: ~/.truefa
+    - Linux: ~/.truefa
     
-    The directory is automatically created if it doesn't exist.
+    Handles portable mode and environment variable overrides.
     
     Returns:
-        str: Full path to the application data directory
+        str: Path to application data directory (created if needed)
     """
     # Check environment variable override first (useful for Docker)
     env_data_dir = os.environ.get('TRUEFA_DATA_DIR')
@@ -113,26 +110,18 @@ def get_data_directory():
 # Get secure directory with restricted permissions for cryptographic materials
 def get_secure_data_directory():
     """
-    Create and get a secure directory for sensitive cryptographic data.
+    Create directory for sensitive cryptographic data with enhanced security:
+    - Windows: %LOCALAPPDATA% with restrictive ACLs
+    - macOS/Linux: ~/.truefa_secure with 0700 permissions
     
-    Implements platform-specific security measures to create a directory
-    with enhanced protection for storing cryptographic materials:
-    
-    - Windows: Uses %LOCALAPPDATA% with restrictive ACLs
-    - macOS: Creates a directory with 0700 permissions in ~/Library/KeyCrypt
-    - Linux: Creates a directory with 0700 permissions in ~/.truefa_secure
-    
-    The secure directory is intentionally separate from the regular data directory
-    to provide stronger isolation and protection for cryptographic materials.
+    Security features:
+    - Owner-only access permissions
+    - Separate from regular data directory
+    - Non-synced location (prevents cloud exposure)
+    - Fallback paths on permission failure
     
     Returns:
-        str: Full path to the secure data directory with enhanced permissions
-        
-    Security Features:
-    - Restricted file permissions (0700 = owner access only)
-    - Platform-specific access control when available
-    - Non-synced location to prevent cloud exposure
-    - Validation of permissions after creation
+        str: Path to secure directory with enhanced protection
     """
     # Check environment variable override for secure data directory
     env_secure_dir = os.environ.get('TRUEFA_SECURE_DIR')
@@ -227,21 +216,16 @@ DLL_NAME = "truefa_crypto.dll" if platform.system() == "Windows" else "libtruefa
 # Get the DLL path - check multiple locations
 def get_dll_path():
     """
-    Locate the native cryptographic library (DLL/shared object).
-    
-    Performs a comprehensive search for the native cryptographic library
-    across multiple possible locations, handling different runtime environments:
-    
-    - PyInstaller bundled executables
-    - Development environments
+    Locate native cryptographic library using multi-location search strategy:
+    - PyInstaller bundle locations
+    - Development environment paths
     - System-installed libraries
-    - Custom locations specified by environment variables
+    - Docker-specific locations
     
-    The function implements an ordered search strategy, checking the most
-    likely locations first based on the current execution context.
+    Implements prioritized search with logging for diagnostic purposes.
     
     Returns:
-        str or None: Path to the native library if found, None otherwise
+        str or None: Path to native library if found, None otherwise
     """
     # First check if we're running from a PyInstaller bundle
     if getattr(sys, 'frozen', False):
