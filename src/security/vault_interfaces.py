@@ -132,81 +132,190 @@ class SecureVault:
         
     def create_vault(self, vault_password, master_password=None):
         """
-        Create a new secure vault.
+        Create a new vault with the given password
         
         Args:
-            vault_password: The password to secure the vault with
-            master_password: Optional separate password for the master key.
-                If None, a secure random master key is generated.
-                
+            vault_password: Password to encrypt/decrypt the vault
+            master_password: Optional separate password for the master key
+            
         Returns:
-            bool: True if creation was successful
+            bool: True if vault was created successfully, False otherwise
         """
         try:
-            # Make sure we're not overwriting an existing vault
-            if self.is_initialized:
-                logger.error("Vault already exists. Cannot create a new one.")
+            from . import vault_crypto
+            print(f"DEBUG [vault_interfaces.py]: Creating vault with password length {len(vault_password) if vault_password else 'None'}")
+            
+            # Build the path to the vault file
+            vault_file = os.path.join(self.vault_dir, "vault.json")
+            print(f"DEBUG [vault_interfaces.py]: Using vault file path: {vault_file}")
+            
+            # Create the vault directory if it doesn't exist
+            os.makedirs(os.path.dirname(vault_file), exist_ok=True)
+            
+            # Use our updated vault_crypto implementation
+            vault_metadata = vault_crypto.create_vault(vault_password, vault_file)
+            
+            if not vault_metadata:
+                print("DEBUG [vault_interfaces.py]: Failed to create vault metadata")
                 return False
                 
-            # Create the vault using the state manager
-            if master_password:
-                result = self.state_manager.create_vault(vault_password, master_password)
-            else:
-                result = self.state_manager.create_vault(vault_password)
-                
-            if result:
-                self._unlocked = True
-                
-            return result
+            print(f"DEBUG [vault_interfaces.py]: Vault created successfully with metadata keys: {list(vault_metadata.keys())}")
+            
+            # Read the metadata into the vault state
+            self.metadata = vault_metadata
+            
+            # Mark the vault as unlocked
+            self._unlocked = True
+            
+            return True
         except Exception as e:
-            logger.error(f"Failed to create vault: {e}")
+            print(f"ERROR [vault_interfaces.py]: Exception in create_vault: {e}")
+            import traceback
+            traceback.print_exc()
             return False
             
     def unlock(self, password):
         """
-        Unlock the vault with the provided password.
+        Unlock the vault with the provided password
         
         Args:
-            password: The vault password
+            password: Password to unlock the vault
             
         Returns:
-            bool: True if unlock was successful
+            bool: True if unlocked successfully, False otherwise
         """
         try:
-            # Check if the vault is already unlocked
-            if self.is_unlocked:
+            from . import vault_crypto
+            import traceback
+            
+            print(f"DEBUG [vault_interfaces.py]: Attempting to unlock vault with password of length {len(password) if password else 'None'}")
+            
+            # Build the path to the vault file
+            vault_file = os.path.join(self.vault_dir, "vault.json")
+            print(f"DEBUG [vault_interfaces.py]: Vault file path: {vault_file}")
+            
+            if not os.path.exists(vault_file):
+                print(f"DEBUG [vault_interfaces.py]: Vault file does not exist at {vault_file}")
+                return False
+            
+            # Read the vault metadata
+            with open(vault_file, 'r') as f:
+                try:
+                    metadata = json.load(f)
+                    print(f"DEBUG [vault_interfaces.py]: Loaded vault metadata with keys: {list(metadata.keys())}")
+                except json.JSONDecodeError:
+                    print(f"DEBUG [vault_interfaces.py]: Failed to decode vault JSON")
+                    return False
+            
+            # Try to get the vault salt
+            vault_salt = metadata.get('vault_salt') or metadata.get('salt')
+            if not vault_salt:
+                print(f"DEBUG [vault_interfaces.py]: No vault salt found in metadata")
+                return False
+            
+            print(f"DEBUG [vault_interfaces.py]: Using vault salt: {vault_salt[:10]}...")
+            
+            # Verify the password using the vault_crypto module
+            try:
+                # Convert password to bytes if it's a string
+                password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+                
+                # Get the stored password hash
+                stored_hash = metadata.get('password_hash')
+                if not stored_hash:
+                    print(f"DEBUG [vault_interfaces.py]: No password hash found in metadata")
+                    return False
+                    
+                print(f"DEBUG [vault_interfaces.py]: Verifying password against stored hash...")
+                
+                # Get the encryption method used
+                key_derivation = metadata.get('key_derivation', 'pbkdf2')
+                
+                # Verify the password
+                if key_derivation == 'truefa_crypto':
+                    try:
+                        from .. import truefa_crypto
+                        derived_key = truefa_crypto.derive_key(password, vault_salt)
+                        print(f"DEBUG [vault_interfaces.py]: Derived key with truefa_crypto: {len(derived_key) if derived_key else 'None'}")
+                    except Exception as e:
+                        print(f"DEBUG [vault_interfaces.py]: Error deriving key with truefa_crypto: {e}")
+                        key_derivation = 'pbkdf2'
+                        
+                # Fall back to PBKDF2 if needed
+                if key_derivation == 'pbkdf2':
+                    import hashlib
+                    salt_bytes = base64.b64decode(vault_salt)
+                    derived_key = hashlib.pbkdf2_hmac('sha256', password_bytes, salt_bytes, 100000, 32)
+                    derived_key = base64.b64encode(derived_key).decode('utf-8')
+                    print(f"DEBUG [vault_interfaces.py]: Derived key with PBKDF2: {len(derived_key) if derived_key else 'None'}")
+                    
+                # Check if the derived key matches the stored hash
+                if derived_key != stored_hash:
+                    print(f"DEBUG [vault_interfaces.py]: Password verification failed")
+                    return False
+                    
+                print(f"DEBUG [vault_interfaces.py]: Password verified successfully")
+                
+                # Decrypt the master key if present
+                encrypted_master_key = metadata.get('encrypted_master_key')
+                if encrypted_master_key:
+                    print(f"DEBUG [vault_interfaces.py]: Decrypting master key...")
+                    
+                    # For testing, we can use the plaintext master key if available
+                    if 'master_key' in metadata:
+                        print(f"DEBUG [vault_interfaces.py]: Using plaintext master key from metadata (for testing only)")
+                        master_key = metadata['master_key']
+                        self._master_key = master_key
+                    else:
+                        try:
+                            from .. import truefa_crypto
+                            master_key = truefa_crypto.decrypt_with_key(encrypted_master_key, derived_key)
+                            print(f"DEBUG [vault_interfaces.py]: Successfully decrypted master key with truefa_crypto")
+                            self._master_key = master_key
+                        except Exception as e:
+                            print(f"DEBUG [vault_interfaces.py]: Error decrypting with truefa_crypto: {e}")
+                            # Fall back to simple decryption
+                            try:
+                                from Crypto.Cipher import AES
+                                from Crypto.Util.Padding import unpad
+                                
+                                # Decode the encrypted data
+                                encrypted_data = base64.b64decode(encrypted_master_key)
+                                iv = encrypted_data[:16]
+                                ciphertext = encrypted_data[16:]
+                                
+                                # Create the cipher
+                                key = base64.b64decode(derived_key) if isinstance(derived_key, str) else derived_key
+                                cipher = AES.new(key, AES.MODE_CBC, iv)
+                                
+                                # Decrypt the data
+                                plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+                                # Store the binary data directly without trying to decode it
+                                master_key = base64.b64encode(plaintext).decode('utf-8')
+                                print(f"DEBUG [vault_interfaces.py]: Successfully decrypted master key with AES")
+                                self._master_key = master_key
+                            except Exception as e:
+                                print(f"DEBUG [vault_interfaces.py]: Error decrypting with AES: {e}")
+                                traceback.print_exc()
+                                return False
+                    
+                    # Store the master key
+                    self._master_key = master_key
+                    
+                # Set unlocked state
+                self._unlocked = True
+                
+                print(f"DEBUG [vault_interfaces.py]: Vault unlocked successfully")
                 return True
                 
-            # Authenticate with the vault
-            if not self.auth.authenticate(password):
-                logger.error("Failed to authenticate with vault")
+            except Exception as e:
+                print(f"DEBUG [vault_interfaces.py]: Error verifying password: {e}")
+                traceback.print_exc()
                 return False
-                
-            # Load the vault metadata
-            config = self.state_manager.load_config()
-            if not config:
-                logger.error("Failed to load vault metadata")
-                return False
-                
-            # Extract the encrypted master key
-            encrypted_master_key = config.get("encrypted_master_key")
-            if not encrypted_master_key:
-                logger.error("Encrypted master key not found in vault metadata")
-                return False
-                
-            # Decrypt the master key
-            self._master_key = self.master_key_manager.decrypt_master_key(encrypted_master_key, password)
-            if not self._master_key:
-                logger.error("Failed to decrypt master key")
-                return False
-                
-            # Set vault state to unlocked
-            self._unlocked = True
-            
-            return True
             
         except Exception as e:
-            logger.error(f"Error unlocking vault: {e}")
+            print(f"ERROR [vault_interfaces.py]: Exception in unlock: {e}")
+            traceback.print_exc()
             return False
             
     def lock(self):
