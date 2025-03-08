@@ -149,9 +149,9 @@ class TwoFactorAuth:
             self.is_generating = False
             self.should_stop.set()
             time.sleep(0.5)  # Give a moment for the generation to stop
-            return
+            return  # Return to menu without cleaning up or locking the vault
         
-        # Otherwise clean up and exit
+        # Otherwise clean up and exit (only for actual program termination)
         self.cleanup()
         print("\nExiting securely...")
         sys.exit(0)
@@ -161,15 +161,19 @@ class TwoFactorAuth:
         Perform secure cleanup of sensitive data.
         
         Ensures that all secret data is properly zeroized
-        and removed from memory.
+        and removed from memory without affecting the vault's locked state.
         """
         # Clear the TOTP secret if it exists
         if self.secret:
             self.secret.clear()
             self.secret = None
         
-        # Stop continuous generation if active
-        self.is_generating = False
+        # Clear other sensitive data
+        self.issuer = None
+        self.account = None
+        
+        # Note: We intentionally don't lock the vault here to maintain
+        # its state between operations in the same session
 
     def _secure_create_file(self, file_path, content="", mode=0o600):
         """
@@ -644,6 +648,9 @@ class TwoFactorAuth:
             print(f"DEBUG: Vault file exists: {os.path.exists(vault_file)}")
             print(f"DEBUG: Checking vault.is_initialized property: {self.storage.vault.is_initialized}")
             
+            # Track if we created a new vault
+            created_new_vault = False
+            
             # Handle vault initialization
             if not self.storage.vault.is_initialized:
                 # Need to create a new vault
@@ -663,6 +670,7 @@ class TwoFactorAuth:
                     print("Vault created successfully.")
                     # Set the password parameter for the upcoming save operation
                     password = master_password
+                    created_new_vault = True
                 else:
                     return "Failed to create vault"
             elif not self.storage.vault.is_unlocked:
@@ -674,6 +682,11 @@ class TwoFactorAuth:
                 
                 if not self.storage.unlock(password):
                     return "Invalid master password"
+            
+            # If we created a new vault, we need to explicitly unlock it with the password
+            if created_new_vault:
+                print("Unlocking newly created vault...")
+                self.storage.unlock(password)
             
             # Prepare the secret data
             if secret is not None:
@@ -693,8 +706,17 @@ class TwoFactorAuth:
                 if self.secret is None:
                     return "No secret to save"
                 
+                # Get the raw value and ensure it's properly encoded for JSON
+                raw_value = self.secret.get_raw_value()
+                
+                # Convert bytes to base64 string if needed
+                if isinstance(raw_value, bytes):
+                    secret_str = base64.b64encode(raw_value).decode('utf-8')
+                else:
+                    secret_str = str(raw_value)
+                
                 data_to_save = {
-                    'secret': self.secret.get_raw_value(),
+                    'secret': secret_str,
                     'issuer': self.issuer or '',
                     'account': self.account or ''
                 }
