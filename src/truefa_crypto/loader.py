@@ -1,8 +1,9 @@
 """
-DLL Loader for TrueFA Crypto
+TrueFA Crypto DLL Loader
 
-This module handles finding and loading the Rust-based DLL for cryptographic operations.
-If the DLL cannot be found or loaded, it provides mechanisms for using fallback implementations.
+Handles dynamic loading of the Rust cryptographic library with intelligent fallback.
+Implements a robust multi-location search strategy and function-level monitoring
+to ensure cryptographic operations work reliably across different environments.
 """
 
 import os
@@ -31,7 +32,15 @@ _use_fallback_env = os.environ.get('TRUEFA_USE_FALLBACK', '').lower() in ('true'
 _debug_mode = os.environ.get('DEBUG', '').lower() in ('true', '1', 'yes')
 
 def _find_dll_path():
-    """Find the path to the truefa_crypto DLL."""
+    """
+    Search for the truefa_crypto DLL across multiple potential locations.
+    
+    Implements a prioritized search strategy checking PyInstaller bundles,
+    development environments, installed locations, and Docker containers.
+    
+    Returns:
+        str or None: Path to the DLL if found, None otherwise
+    """
     possible_locations = [
         # PyInstaller bundle
         os.path.join(getattr(sys, '_MEIPASS', '.'), "truefa_crypto.dll"),
@@ -74,7 +83,12 @@ def _find_dll_path():
     return None
 
 def _enhance_dll_search_paths():
-    """Add additional paths to system PATH to help find dependencies."""
+    """
+    Augment system PATH to help locate the DLL and its dependencies.
+    
+    Adds the DLL directory, relative paths, and working directory to the
+    system PATH to maximize the chances of successful loading.
+    """
     try:
         # Get all potential directories that might contain our DLL or its dependencies
         search_paths = []
@@ -117,13 +131,20 @@ def _enhance_dll_search_paths():
 
 def find_dll():
     """
-    Attempt to find and load the truefa_crypto DLL/shared library.
+    Load native crypto library with intelligent fallback.
+    
+    Search order:
+    1. Check for cached library
+    2. Check environment variable to force fallback
+    3. Find native library in multiple locations
+    4. Load and configure the library
+    5. Fall back to Python implementation if any step fails
     
     Returns:
         tuple: (dll_path, lib_handle, is_fallback)
-            where dll_path is the path to the DLL,
-            lib_handle is the loaded library or None,
-            is_fallback indicates whether fallback mode is being used
+            - dll_path: Path to the native library or None
+            - lib_handle: Loaded library or fallback module
+            - is_fallback: Whether Python fallback is being used
     """
     global _dll_path, _lib, _is_using_fallback
     
@@ -169,7 +190,15 @@ def find_dll():
     return None, _lib, _is_using_fallback
 
 def _setup_function_signatures(lib):
-    """Set up the function signatures for the loaded DLL."""
+    """
+    Configure function signatures for the loaded native library.
+    
+    Defines argument types and return types for the C functions
+    exposed by the Rust DLL to ensure proper type conversion.
+    
+    Args:
+        lib: Loaded native library handle
+    """
     try:
         # Define the function signatures here
         # Example:
@@ -182,12 +211,13 @@ def _setup_function_signatures(lib):
 
 def get_lib():
     """
-    Get the library handle for crypto operations.
+    Get the crypto library handle, loading it if necessary.
     
-    This will load the DLL if it hasn't been loaded yet.
+    Returns the appropriate library implementation (native or fallback)
+    for use by the crypto functions.
     
     Returns:
-        object: The library module (either DLL or fallback)
+        object: Library module for cryptographic operations
     """
     global _lib
     
@@ -198,10 +228,10 @@ def get_lib():
 
 def is_using_fallback():
     """
-    Check if the fallback implementation is being used.
+    Check whether the Python fallback implementation is active.
     
     Returns:
-        bool: True if fallback is being used, False if DLL is being used
+        bool: True if using Python fallback, False if using native library
     """
     global _is_using_fallback
     
