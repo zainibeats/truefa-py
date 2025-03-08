@@ -1,22 +1,21 @@
 """
-TrueFA-Py: TOTP Authenticator Application
+TrueFA-Py: Two-Factor Authentication Utility
 
-A robust and secure Two-Factor Authentication (2FA) application that 
-implements Time-based One-Time Password (TOTP) authentication according 
-to RFC 6238. This application uses OpenCV for reliable QR code scanning.
+A secure, offline TOTP authenticator implementing RFC 6238 with robust
+security features and privacy-focused design:
 
-Key Features:
-- Secure extraction and storage of TOTP secrets from QR codes
-- Vault-based encryption for protecting authentication secrets
-- Memory-safe handling of sensitive data
+- QR code processing via OpenCV for reliable code extraction
+- Vault-based secret storage with strong encryption
+- Hybrid cryptographic implementation (Rust & Python fallback)
+- Zero network connectivity for enhanced privacy
+- Memory protection for sensitive information
 - Command-line interface with intuitive navigation
-- Secure export and backup capabilities
 
-Security Implementation:
-- Envelope encryption with a master key protected by a vault password
-- Automatic memory sanitization after use
-- Platform-specific secure storage with appropriate permissions
-- Protection against common memory disclosure vulnerabilities
+Architecture:
+- Two-layer security with master key and vault password
+- Automatic memory sanitization for sensitive data
+- Platform-specific secure storage locations
+- Cross-platform compatibility via intelligent fallback mechanism
 """
 
 import sys
