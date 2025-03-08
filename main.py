@@ -269,6 +269,51 @@ try:
                                     print(f"Failed to create vault: {e}")
                                     traceback.print_exc()
                                     continue
+                            else:
+                                # Vault exists, so we need to unlock it first if not already authenticated
+                                if not vault_authenticated:
+                                    master_password = getpass.getpass("Enter your vault master password: ")
+                                    try:
+                                        if storage.unlock(master_password):
+                                            print("Vault unlocked successfully.")
+                                            vault_authenticated = True
+                                        else:
+                                            print("Failed to unlock vault with the provided password.")
+                                            continue
+                                    except Exception as e:
+                                        print(f"Error unlocking vault: {e}")
+                                        continue
+                                
+                                # Now save the secret to the vault
+                                try:
+                                    # Get the secret value
+                                    secret_value = ""
+                                    if hasattr(auth, 'secret') and auth.secret:
+                                        if hasattr(auth.secret, 'get_value'):
+                                            try:
+                                                secret_value = auth.secret.get_value().decode('utf-8') 
+                                            except Exception:
+                                                secret_value = str(auth.secret)
+                                        else:
+                                            secret_value = str(auth.secret)
+                                    
+                                    # Create the secret data
+                                    secret_data = {
+                                        "secret": secret_value,
+                                        "issuer": issuer,
+                                        "account": account
+                                    }
+                                    
+                                    # Save the secret
+                                    result = storage.save_secret(name, secret_data)
+                                    if result is None:  # None means success
+                                        print(f"Secret '{name}' saved successfully to vault.")
+                                    else:
+                                        print(f"Error saving secret: {result}")
+                                except Exception as e:
+                                    print(f"Failed to save secret: {e}")
+                                    if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
+                                        traceback.print_exc()
                         
                         elif choice == "1":
                             # Load QR code from image
