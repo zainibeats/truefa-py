@@ -1,8 +1,19 @@
 """
-TrueFA Crypto Module
+TrueFA Cryptography Module
 
-This module provides secure cryptographic operations through a Rust-based implementation.
-It handles loading the Rust DLL and provides Python bindings for secure operations.
+Provides a unified cryptographic interface with dual implementation strategy:
+1. Primary: High-performance Rust implementation with memory safety features
+2. Fallback: Pure Python implementation for cross-platform compatibility
+
+The module automatically handles loading the appropriate implementation
+with transparent function-level monitoring and intelligent fallback.
+
+Security features:
+- Memory-protected string handling
+- Automatic zeroization of sensitive data
+- AES-256-GCM authenticated encryption
+- Strong key derivation (PBKDF2/Scrypt)
+- Secure random number generation
 """
 
 # Import core functionality from dedicated modules
