@@ -3,46 +3,36 @@
 Reset Vault Files and Test Environment
 
 This script:
-1. Cleans up existing vault files
+1. Cleans up existing vault files (using clean_truefa.py)
 2. Creates test instructions
 3. Prepares the environment for testing with a clean state
 """
 
 import os
 import sys
-import shutil
+import importlib.util
 import traceback
 
-def clean_vault_files():
-    """Remove all vault-related files and directories"""
+def run_clean_truefa():
+    """Run the clean_truefa.py script to clean up all vault-related files and directories"""
     print("Step 1: Cleaning up existing vault files...")
     
-    # Paths to clean up
-    paths_to_clean = [
-        os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "TrueFA-Py"),
-        os.path.join(os.path.expanduser("~"), "AppData", "Local", "TrueFA-Py"),
-        os.path.join(os.path.expanduser("~"), ".truefa"),
-        os.path.join(os.path.expanduser("~"), ".truefa_secure"),
-        os.path.join("C:\\", "test_vault")
-    ]
+    # Get the path to clean_truefa.py
+    clean_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clean_truefa.py")
     
-    # Remove each path
-    for path in paths_to_clean:
+    if os.path.exists(clean_script_path):
         try:
-            if os.path.exists(path):
-                if os.path.isdir(path):
-                    print(f"Removing directory: {path}")
-                    shutil.rmtree(path)
-                else:
-                    print(f"Removing file: {path}")
-                    os.remove(path)
-                print(f"Successfully removed: {path}")
-            else:
-                print(f"Path does not exist: {path}")
+            # Import and run the clean_truefa module
+            spec = importlib.util.spec_from_file_location("clean_truefa", clean_script_path)
+            clean_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(clean_module)
+            print("Cleanup completed using clean_truefa.py")
         except Exception as e:
-            print(f"Error removing {path}: {e}")
-            
-    print("Cleanup completed.")
+            print(f"Error running clean_truefa.py: {e}")
+            print("Continuing with the rest of the script...")
+    else:
+        print(f"Warning: clean_truefa.py not found at {clean_script_path}")
+        print("Skipping cleanup step.")
 
 def create_test_instructions():
     """Create a text file with testing instructions"""
@@ -91,8 +81,8 @@ Notes:
 def main():
     """Main function"""
     try:
-        # Clean up vault files
-        clean_vault_files()
+        # Clean up vault files using clean_truefa.py
+        run_clean_truefa()
         
         # Create test instructions
         create_test_instructions()
