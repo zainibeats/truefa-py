@@ -17,6 +17,7 @@ RUN mkdir C:\vault_data
 
 # Copy the TrueFA executable and associated files
 COPY dist\TrueFA-Py.exe C:\TrueFA\
+COPY dist\TrueFA-Py_Setup_0.1.0.exe C:\TrueFA\
 COPY truefa_crypto\truefa_crypto.dll C:\TrueFA\
 COPY images C:\TrueFA\images
 COPY docker\windows\verify_crypto.ps1 C:\TrueFA\
@@ -28,4 +29,4 @@ RUN setx /M PATH "%PATH%;C:\TrueFA"
 WORKDIR C:\TrueFA
 
 # Keep the container running in interactive mode with instructions
-CMD ["cmd", "/k", "echo TrueFA Test Environment && echo. && echo To verify the crypto module: powershell -ExecutionPolicy Bypass -File C:\\TrueFA\\verify_crypto.ps1 && echo. && echo Run TrueFA-Py.exe to start the application && echo Use TrueFA-Py.exe --vault-dir C:\\vault_data to use persistent storage && echo Type 'exit' when done testing to close the container && echo."] 
+CMD ["cmd", "/k", "echo TrueFA Test Environment && echo. && echo To verify the crypto module: powershell -ExecutionPolicy Bypass -File C:\\TrueFA\\verify_crypto.ps1 && echo. && echo Run TrueFA-Py.exe to start the application && echo Use TrueFA-Py.exe --vault-dir C:\\vault_data to use persistent storage && echo Type 'TrueFA-Py_Setup_0.1.0.exe /S' to run the installer in silent mode && echo Type 'exit' when done testing to close the container && echo."] 
