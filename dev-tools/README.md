@@ -30,6 +30,17 @@ Docker-related files are located in a separate directory:
 
 ## Core Build Scripts
 
+### dev-requirements.txt
+Development dependencies for TrueFA-Py:
+- Includes all core dependencies from the main requirements.txt
+- Adds build and packaging tools (pyinstaller, pefile, setuptools)
+- Adds testing tools (pytest, pytest-cov)
+
+```powershell
+# Install development dependencies
+pip install -r dev-tools/dev-requirements.txt
+```
+
 ### build_package.py
 A comprehensive build script for creating both portable executables and installers. This script:
 - Builds the application with PyInstaller
@@ -65,17 +76,7 @@ PowerShell build script that offers a convenient wrapper for various build optio
 ./dev-tools/build.ps1 -Clean         # Clean build artifacts
 ```
 
-### secure_build_fix.py
-Enhanced build script with cryptographic module verification:
-1. Verifies and validates the Rust cryptographic DLL
-2. Automatically configures fallback to Python implementation if needed
-3. Creates a secure executable with appropriate dependencies
-
-```powershell
-python dev-tools/secure_build_fix.py
-```
-
-### setup.py / truefa_setup.py
+### setup.py
 Set up script for development environment:
 - Builds the Rust crypto library
 - Installs Python dependencies
@@ -96,32 +97,50 @@ Utility script for removing all TrueFA data directories:
 python dev-tools/clean_truefa.py
 ```
 
+### reset_and_test.py
+Testing preparation script that:
+- Uses clean_truefa.py to clean up all existing vault files
+- Creates test instructions for manual testing
+- Prepares the environment for testing with a clean state
+
+```powershell
+python dev-tools/reset_and_test.py
+```
+
 ## Test Scripts (`tests/`)
 
 The `tests` directory contains testing scripts and utilities:
 
-- `create_test_qr.py`: Creates test QR codes for testing
+- `verify_dll_exports.py`: Specifically verifies that all required C functions are properly exported from the DLL
 - `verify_rust_crypto.py`: Comprehensive verification of Rust crypto functionality
-- `simple_rust_test.py`: Basic test of Rust crypto integration
 - `test_vault_creation.py`: Tests vault creation and management
+- `test_vault_persistence.py`: Tests vault persistence across sessions
 - `docker-crypto-init.py`: Initializes crypto module for Docker tests
+- `create_test_qr.py`: Creates test QR codes for testing
 
-To run the Rust crypto verification:
+To run the verification scripts:
 
 ```powershell
-# Run the comprehensive verification
-python dev-tools/tests/verify_rust_crypto.py
+# Run the DLL export verification
+python dev-tools/tests/verify_dll_exports.py
 
-# Or run the simple test
-python dev-tools/tests/simple_rust_test.py
+# Run the comprehensive crypto verification
+python dev-tools/tests/verify_rust_crypto.py
 ```
 
-Additional tests mentioned in documentation but not yet implemented:
+The `verify_dll_exports.py` script is particularly important after making changes to the Rust code or build configuration, as it ensures all required FFI functions are properly exported from the DLL. This script:
 
-- Tests for cryptographic module loading
-- Tests for executable compatibility
-- Tests for secure directory handling
-- Tests for secure storage functionality
+- Searches for the DLL in multiple locations
+- Verifies all required functions are exported
+- Tests basic function calls to confirm functionality
+- Checks if the Python module can properly use the DLL
+- Provides clear pass/fail status with detailed error messages
+
+Additional needed test areas:
+- Cryptographic module loading under various conditions
+- Executable compatibility across Windows versions
+- Secure directory handling for sensitive data
+- Secure storage functionality and encryption/decryption
 
 ## Docker Configuration
 
@@ -140,6 +159,14 @@ Windows testing files:
 ## Development Workflow
 
 1. **Initial Setup**: Use `setup.py` to prepare your development environment
+   ```bash
+   # Install development dependencies
+   pip install -r dev-tools/dev-requirements.txt
+   
+   # Set up the development environment
+   python dev-tools/setup.py
+   ```
+   
 2. **Rust Development**: After modifying Rust code, use `build_rust.py` to rebuild the crypto library
 3. **Building for Testing**: Use `build.ps1` with appropriate options for quick development builds
 4. **Final Builds**: Use `build_package.py` for creating optimized release builds
