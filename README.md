@@ -32,13 +32,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
-#### Building the Application (Coming Soon)
-```bash
-# Build the portable executable
-python dev-tools\build_package.py --portable
+#### Building the Application
+```powershell
+# Build the portable executable with Rust crypto
+.\dev-tools\build.ps1 -BuildRust -Clean -Portable
 
-# Or build with installer
-python dev-tools\build_package.py --installer
+# Build with installer
+.\dev-tools\build.ps1 -BuildRust -Clean -Installer
+
+# Build with both portable and installer
+.\dev-tools\build.ps1 -BuildRust -Clean -Portable -Installer
 ```
 
 ### Docker
@@ -126,6 +129,3 @@ This project is licensed under the MIT License.
 
 Contributions are welcome! Please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md) for contribution guidelines.
 
-## Contact
-
-For issues or questions, please contact the project maintainer.
