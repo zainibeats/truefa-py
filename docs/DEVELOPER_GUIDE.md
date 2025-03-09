@@ -91,6 +91,21 @@ TrueFA-Py supports the following environment variables to customize data directo
 
 These environment variables are particularly useful in containerized environments or when configuring non-standard installations.
 
+## Development Setup
+
+To set up your development environment:
+
+```bash
+git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
+python -m venv venv && .\venv\Scripts\Activate.ps1  # On Windows
+pip install -r requirements.txt
+
+# For Rust crypto development
+cd rust_crypto
+cargo build --release
+cd ..
+```
+
 ## Building TrueFA-Py
 
 ### Building the Rust Cryptography Module
@@ -156,7 +171,7 @@ This will create:
 
 ## Rust Cryptography Integration
 
-TrueFA-Py relies on a native Rust implementation for critical cryptographic operations.
+TrueFA-Py relies on a native Rust implementation for critical cryptographic operations with automatic fallback to Python when needed.
 
 ### Key Rust Functions
 
@@ -168,57 +183,75 @@ TrueFA-Py relies on a native Rust implementation for critical cryptographic oper
 | `c_encrypt_master_key` | Encryption | Encrypts the master key with the vault key |
 | `c_decrypt_master_key` | Decryption | Decrypts the master key with the vault key |
 | `c_create_secure_string` | Memory Security | Stores sensitive strings in protected memory |
-| `c_verify_signature` | Verification | Verifies cryptographic signatures |
+| `c_is_vault_unlocked` | Vault Status | Checks if the vault is currently unlocked |
+| `c_vault_exists` | Vault Existence | Verifies if a vault exists in the specified location |
 
-### Cross-Platform Compatibility
+### Recent Improvements
 
-TrueFA-Py employs a comprehensive strategy to ensure functionality across different platforms and environments:
+The Rust cryptography module has undergone significant enhancements:
 
-#### Windows Compatibility Improvements
+1. **Fixed Function Exports**: 
+   - Corrected the `c_create_secure_string` function to properly handle input data
+   - Implemented proper null pointer checks and error handling
+   - Added missing function signatures for cross-language compatibility
 
-Recent improvements to the Windows implementation include:
+2. **Enhanced DLL Loading**:
+   - Implemented multi-location search strategy for finding the DLL
+   - Added automatic DLL rebuilding if loading fails
+   - Enhanced error detection and reporting for troubleshooting
 
-1. **Enhanced DLL Loading**: The application now searches for the Rust DLL in multiple locations with a robust priority system
-2. **Function-Level Fallback**: Individual functions are monitored for timeouts or errors
-3. **Improved Error Detection**: Better error handling when functions fail or DLL cannot be loaded
-4. **Environment Variable Controls**: Fine-grained control through environment variables like `TRUEFA_USE_FALLBACK`
+3. **Memory Safety**:
+   - Added automatic zeroing of sensitive data in memory
+   - Implemented secure strings to prevent password exposure
+   - Added proper cleanup of cryptographic keys after use
 
-These improvements ensure TrueFA-Py works reliably across different Windows versions and configurations.
-
-#### Docker Support and Windows Containers
-
-TrueFA-Py includes Docker support for Windows containers:
-
-- Windows container-based testing environment
-- Support for both Rust DLL and Python fallback testing
-- Integrated testing for vault creation and cryptographic operations
-- Automatic detection of available implementations
-
-For detailed Windows testing information, see the [Windows Testing](WINDOWS_TESTING.md) documentation.
+4. **Verification and Testing**:
+   - Created comprehensive test suite for all Rust cryptography functions
+   - Added detailed diagnostics and logging for cryptographic operations
+   - Implemented automatic fallback to Python when Rust functions fail
 
 ### Intelligent Fallback Mechanism
 
 TrueFA-Py implements an intelligent fallback system that automatically detects issues with the Rust implementation:
 
-1. **Function-level tracking**: Each Rust function is monitored for timeouts or failures
-2. **Predictive fallback**: Once a function times out, future calls bypass it
-3. **Manual override**: Set `TRUEFA_USE_FALLBACK=1` to force Python implementation
-4. **Transparent behavior**: Application logic remains the same regardless of implementation
+1. **Function-level monitoring**: Each Rust function is monitored for errors
+2. **Session variables**: Cache the implementation state across operations
+3. **Manual override**: Use `TRUEFA_USE_FALLBACK=1` to force Python implementation
+4. **Transparent API**: Same interface regardless of underlying implementation
 
-This ensures that even in environments where the Rust implementation cannot be loaded or encounters issues, the application continues to function correctly.
+This ensures that even when the Rust implementation is unavailable, the application continues to function correctly.
 
-### DLL Loading Strategy
+### Python Integration
 
-The application searches for the Rust DLL in multiple locations:
+The Python code interfaces with the Rust module through a well-defined API:
 
-1. Application directory
-2. PyInstaller bundle directory
-3. Module directory
-4. User's home `.truefa` directory
-5. Current working directory
-6. System library paths
+```python
+# Example of using the Rust crypto module
+import src.truefa_crypto as crypto
 
-This multi-location search strategy maximizes compatibility across different deployment scenarios.
+# Generate random bytes
+random_bytes = crypto.secure_random_bytes(32)
+
+# Create a secure string
+password = crypto.create_secure_string("my_password")
+
+# Check if using fallback
+if crypto.is_using_fallback():
+    print("Using Python fallback implementation")
+else:
+    print("Using Rust native implementation")
+```
+
+### Testing and Verification
+
+To test the Rust crypto integration, use the verification script:
+
+```bash
+# Run the comprehensive verification script
+python dev-tools/tests/verify_rust_crypto.py
+```
+
+This script tests all key Rust functions and provides a detailed report of test results.
 
 ## Testing
 
@@ -272,6 +305,36 @@ Test compatibility across different Windows versions:
 # Run the Windows compatibility check
 .\docker\windows\windows_docker_test.ps1
 ```
+
+### Rust Cryptography Testing
+
+To verify that the Rust cryptography is working correctly:
+
+```bash
+# Run the comprehensive verification script
+python dev-tools/tests/verify_rust_crypto.py
+
+# For a simpler test
+python dev-tools/tests/simple_rust_test.py
+```
+
+The verification scripts test all key Rust functions including:
+- SecureString creation
+- Random bytes generation
+- Encryption and decryption
+- Key derivation
+- Vault operations
+
+### Cleaning Test Data
+
+When testing, you may need to clean up all data directories:
+
+```bash
+# Remove all TrueFA data directories
+python dev-tools/clean_truefa.py
+```
+
+This script removes all vault data, configuration files, and cached secrets across all possible storage locations.
 
 ## Security Considerations
 

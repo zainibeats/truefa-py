@@ -9,32 +9,32 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 - 🔑 Encrypted local vault with master password
 - 📷 QR code scanning from image files
 - 🔐 Two-layer security architecture with envelope encryption
-- 🛡️ Optimized Rust crypto module with robust fallback mechanisms
-- 🖥️ Portable executable with no installation required
-- 🔍 Multiple vault location detection capabilities
-- 📥 Save and retrieve TOTP secrets
-- 🐳 Optional docker installation
+- 🛡️ High-performance Rust crypto with memory protection and automatic fallback
+- 🔄 Session persistence with password caching for convenience
+- 📥 Save and retrieve TOTP secrets with robust encryption
+- 🔍 Intelligent vault location detection with permission handling
+- 🐳 Docker compatibility for containerized environments
 
 ## Installation & Usage
 
 ### Windows
 
-TrueFA-Py provides two deployment options for Windows systems:
+#### From Source (Current Method)
+```bash
+git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
+python -m venv venv && .\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python main.py
+```
 
-#### Quick Install (Recommended)
-- Download the latest `TrueFA-Py_Setup.exe` from the [releases page](https://github.com/zainibeats/truefa-py/releases)
-- Run the installer and follow the instructions
-- Launch from the Start Menu or Desktop shortcut
+#### Building the Application (Coming Soon)
+```bash
+# Build the portable executable
+python dev-tools\build_package.py --portable
 
-#### Portable Version
-- Download `TrueFA-Py-Portable.zip` from the [releases page](https://github.com/zainibeats/truefa-py/releases)
-- Extract and run `TrueFA-Py.exe`
-
-#### System Requirements
-- Windows 10 or higher is recommended
-- Visual C++ Redistributable 2015-2022 must be installed 
-  - Automatically installed by the setup script
-  - Can be downloaded from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+# Or build with installer
+python dev-tools\build_package.py --installer
+```
 
 ### Docker
 
@@ -69,46 +69,23 @@ docker run -it --rm \
 - Place your QR code images in the local `images` folder
 - Vault data is stored in a Docker volume for persistence
 
-### From Source
-```bash
-git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
-python -m venv venv && .\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python main.py
-```
-
 ## Cross-Platform Compatibility
 
 TrueFA-Py is designed with robust cross-platform compatibility:
 
-- **Rust Cryptography DLL**: Provides high-performance, memory-safe cryptographic operations on Windows
-- **Python Fallback Implementation**: Automatically activates when the Rust DLL cannot be loaded
-- **Intelligent Detection**: Seamlessly switches to the appropriate implementation based on your environment
+- **Rust Cryptography Module**: Provides high-performance, memory-safe cryptographic operations on Windows
+- **Python Fallback Implementation**: Automatically activates when the Rust module cannot be loaded
+- **Intelligent Detection**: Seamlessly switches between implementations based on your environment
 
-This dual-implementation approach ensures the application works flawlessly across different Windows systems and other platforms.
+This dual-implementation approach ensures the application works flawlessly across different systems and environments.
 
 ## Documentation
 
-- [User Guide](docs/USER_GUIDE.md) - Installation, configuration, and usage
-- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup and technical details
-- [FAQ](docs/FAQ.md) - Common questions and troubleshooting
-- [Windows Testing](docs/WINDOWS_TESTING.md) - Details on Windows compatibility testing
-- [Development Status](docs/DEVELOPMENT_STATUS.md) - Recent improvements and upcoming features
+- [Development Status](docs/DEVELOPMENT_STATUS.md) - Recent improvements and current state
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Development setup, testing, and technical details
+- [Documentation Index](docs/README.md) - Overview of all available documentation
 
-## Development Setup
-
-```bash
-git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
-python -m venv venv && .\venv\Scripts\Activate.ps1  # On Windows
-pip install -r requirements.txt
-
-# For Rust crypto development
-cd rust_crypto
-cargo build --release
-cd ..
-```
-
-## Usage
+## Basic Usage
 
 ```bash
 python main.py
@@ -123,6 +100,19 @@ This will start the command-line interface with the following options:
 6. Clear screen
 7. Exit
 
+## Security Architecture
+
+TrueFA-Py uses a hybrid approach with a Rust cryptography module for performance and security, with a Python fallback implementation. The secure vault employs envelope encryption:
+
+1. **Vault Password** - Unlocks the vault and decrypts the master key
+2. **Master Key** - Encrypts/decrypts individual TOTP secrets
+
+Key security features include:
+- Memory protection with automatic zeroing of sensitive data
+- AES-256-CBC authenticated encryption
+- Session state management to minimize password entry
+- Envelope encryption to protect master keys and individual secrets
+
 ## License
 
 This project is licensed under the MIT License.
@@ -130,13 +120,6 @@ This project is licensed under the MIT License.
 ## Contributing
 
 Contributions are welcome! Please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md) for contribution guidelines.
-
-## Security Architecture
-
-TrueFA-Py uses a hybrid approach with a Rust cryptography module for performance and security, with a Python fallback implementation. The secure vault employs envelope encryption:
-
-1. **Vault Password** - Unlocks the vault and decrypts the master key
-2. **Master Key** - Encrypts/decrypts individual TOTP secrets
 
 ## Contact
 

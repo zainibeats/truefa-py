@@ -6,36 +6,40 @@ Welcome to the TrueFA-Py documentation. This directory contains comprehensive gu
 
 ### For Users
 
-- [**Main README**](../README.md) - Complete instructions for installing, configuring, and using TrueFA-Py, including a quick start section for new users.
+- [**Main README**](../README.md) - Installation, features, usage, and security architecture
 
-- [**Frequently Asked Questions**](FAQ.md) - Answers to common questions about TrueFA-Py, including general usage, security, troubleshooting, and technical details.
+- [**Development Status**](DEVELOPMENT_STATUS.md) - Current state of the project, recent improvements, and planned enhancements
 
 ### For Developers
 
-- [**Developer Guide**](DEVELOPER_GUIDE.md) - Comprehensive information for developers, including setup instructions, project structure, build process, Rust integration details, testing procedures, security considerations, and troubleshooting tips.
+- [**Developer Guide**](DEVELOPER_GUIDE.md) - Development setup, testing, Rust integration, build process, and security considerations
 
-- [**Windows Testing**](WINDOWS_TESTING.md) - Detailed information about the testing approach for TrueFA-Py on Windows systems, including Docker-based testing framework and compatibility considerations.
+## Project Structure
 
-## Documentation Structure
-
-We've consolidated our documentation into these core guides to make it easier to find the information you need:
-
-1. **Main README**: Everything end-users need to know to install and use TrueFA-Py effectively
-2. **Developer Guide**: Technical documentation for developers who want to build, modify, or contribute
-3. **FAQ**: Quick answers to common questions for both users and developers
-4. **Windows Testing**: Details on Windows compatibility testing methodology and results
-
-Each guide is designed to be comprehensive within its scope while remaining accessible and well-organized.
+```
+truefa-py/
+├── docs/                 # Documentation files
+├── dev-tools/            # Development and build tools
+│   ├── tests/            # Testing scripts
+│   └── build-tools/      # Build configuration files
+├── rust_crypto/          # Rust cryptography module
+│   └── src/              # Rust source code
+├── src/                  # Python source code
+│   ├── totp/             # TOTP implementation
+│   ├── security/         # Security and vault management
+│   ├── truefa_crypto/    # Crypto module with Rust bindings
+│   └── utils/            # Utility functions
+├── images/               # Directory for QR code images
+└── main.py               # Main application entry point
+```
 
 ## Getting Started
 
-- **New users**: Start with the [README's](../README.md) Quick Start Guide section
-- **Developers**: Begin with the [Developer Guide](DEVELOPER_GUIDE.md)
-- **Looking for specific information**: Check the [FAQ](FAQ.md)
-- **Windows compatibility**: Refer to the [Windows Testing](WINDOWS_TESTING.md) documentation
+- For **installation and usage**, see the [Main README](../README.md)
+- For **development setup**, see the [Developer Guide](DEVELOPER_GUIDE.md)
+- For **project status**, see the [Development Status](DEVELOPMENT_STATUS.md)
 
 ## Additional Resources
 
 - GitHub Repository: [TrueFA-Py](https://github.com/zainibeats/truefa-py)
 - Issue Tracker: [GitHub Issues](https://github.com/zainibeats/truefa-py/issues)
-- Release Notes: See the main repository README

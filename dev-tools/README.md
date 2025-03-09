@@ -86,13 +86,35 @@ Set up script for development environment:
 python dev-tools/setup.py
 ```
 
+### clean_truefa.py
+Utility script for removing all TrueFA data directories:
+- Cleans up vault data, configuration files, and cached secrets
+- Useful for testing or completely resetting the application
+- Handles permission issues by attempting multiple removal strategies
+
+```powershell
+python dev-tools/clean_truefa.py
+```
+
 ## Test Scripts (`tests/`)
 
 The `tests` directory contains testing scripts and utilities:
 
 - `create_test_qr.py`: Creates test QR codes for testing
+- `verify_rust_crypto.py`: Comprehensive verification of Rust crypto functionality
+- `simple_rust_test.py`: Basic test of Rust crypto integration
 - `test_vault_creation.py`: Tests vault creation and management
 - `docker-crypto-init.py`: Initializes crypto module for Docker tests
+
+To run the Rust crypto verification:
+
+```powershell
+# Run the comprehensive verification
+python dev-tools/tests/verify_rust_crypto.py
+
+# Or run the simple test
+python dev-tools/tests/simple_rust_test.py
+```
 
 Additional tests mentioned in documentation but not yet implemented:
 
