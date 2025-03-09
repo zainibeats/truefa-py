@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+"""
+TrueFA Data Cleanup Script
+
+This script removes all TrueFA data directories to provide a clean slate
+for testing or when uninstalling the application. Use with caution as it
+will delete all saved secrets and configuration data.
+"""
+
 import os
 import shutil
 import time

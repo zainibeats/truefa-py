@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
-Test Rust Crypto Integration
+Simple Rust Crypto Integration Test
 
-This script tests the basic functionality of the Rust crypto integration.
-It tries to load the Rust DLL and use some basic functions.
+This script performs basic tests of the Rust crypto integration.
+It's a simpler version of the comprehensive verify_rust_crypto.py tool.
 """
 
 import os
@@ -15,8 +15,8 @@ logging.basicConfig(level=logging.DEBUG,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("rust_crypto_test")
 
-# Add the src directory to the path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add the src directory to the path - adjust for the new location
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Import the crypto module
 import src.truefa_crypto as crypto
