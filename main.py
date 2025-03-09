@@ -39,6 +39,12 @@ try:
             int: 0 for successful execution, non-zero for errors
         """
         try:
+            # Track persistent session state
+            session_state = {
+                "vault_unlocked_this_session": False,
+                "master_password": None
+            }
+            
             print("Importing modules...")
             
             # Check if we're running in a compiled binary or as a regular Python script
@@ -107,7 +113,7 @@ try:
             else:
                 print(f"Vault exists: {False}")
             
-            # Track vault unlock state
+            # Track vault unlock state - initialize only once
             vault_unlocked = False
             
             # Track authentication status - always start locked
@@ -176,6 +182,11 @@ try:
                     
                     # Process choice
                     if choice in ["1", "2", "3", "4", "5", "6", "7"]:
+                        # Print debug information about session state
+                        print(f"DEBUG: Before processing choice {choice}:")
+                        print(f"DEBUG:   - session_state: {session_state}")
+                        print(f"DEBUG:   - storage.is_unlocked: {storage.is_unlocked}")
+                        
                         if choice == "7":
                             # Exit
                             print("Exiting TrueFA. Goodbye!")
@@ -323,10 +334,22 @@ try:
                             
                             # First, make sure the vault is unlocked before listing secrets
                             print(f"DEBUG: Vault is unlocked: {storage.is_unlocked}")
-                            print(f"DEBUG: vault_unlocked tracking variable: {vault_unlocked}")
-                            print(f"DEBUG: Have master password: {master_password is not None}")
+                            print(f"DEBUG: session_state: {session_state}")
                             
-                            if not storage.is_unlocked and not vault_unlocked:
+                            # Skip password prompt if we already unlocked it during this session
+                            if session_state["vault_unlocked_this_session"] and not storage.is_unlocked and session_state["master_password"]:
+                                print("Vault was previously unlocked in this session. Unlocking with cached password...")
+                                success = storage.unlock(session_state["master_password"])
+                                if success:
+                                    print("Vault successfully unlocked with cached password.")
+                                else:
+                                    print("Failed to unlock with cached password. Password may have changed.")
+                                    # Reset the session state since our cached password doesn't work
+                                    session_state["vault_unlocked_this_session"] = False
+                                    session_state["master_password"] = None
+                            
+                            # If vault is still not unlocked, prompt for password
+                            if not storage.is_unlocked and not session_state["vault_unlocked_this_session"]:
                                 print("\nVault is locked. Please enter your master password to view your saved secrets.")
                                 master_password = getpass.getpass("Enter your vault master password: ")
                                 if not master_password:
@@ -334,22 +357,14 @@ try:
                                     continue
                                 if not storage.unlock(master_password):
                                     print("Invalid password. Unable to unlock the vault.")
-                                    master_password = None
                                     continue
                                 print("Vault unlocked successfully.")
-                                vault_unlocked = True
+                                # Store in session state for future operations
+                                session_state["vault_unlocked_this_session"] = True
+                                session_state["master_password"] = master_password
                             else:
                                 print("Using already unlocked vault.")
-                                # Force the vault to be unlocked if our tracking says it should be
-                                if vault_unlocked and not storage.is_unlocked and master_password:
-                                    print("DEBUG: Vault should be unlocked but isn't. Using cached master password.")
-                                    if not storage.unlock(master_password):
-                                        print("Failed to unlock vault with cached password. Please try again.")
-                                        vault_unlocked = False
-                                        master_password = None
-                                        continue
-                                    print("Vault re-unlocked successfully.")
-                                
+                            
                             # List the saved secrets
                             try:
                                 secrets_list = storage.list_secrets()
@@ -377,19 +392,16 @@ try:
                                 secret_name = secrets_list[selection - 1]
                                 print(f"Loading secret: {secret_name}")
                                 
-                                # Check if vault is still unlocked (it should be, but let's be safe)
+                                # Check the vault's unlock state
                                 print(f"DEBUG: Vault is unlocked: {storage.is_unlocked}")
-                                print(f"DEBUG: vault_unlocked tracking variable: {vault_unlocked}")
-                                print(f"DEBUG: Have master password: {master_password is not None}")
+                                print(f"DEBUG: session_state: {session_state}")
                                 
-                                # The vault should already be unlocked at this point, but let's double-check
+                                # If vault appears to be locked but we've unlocked it before
                                 if not storage.is_unlocked:
-                                    print("Vault appears to have been locked.")
-                                    
-                                    # Try using the cached master password if we have it
-                                    if master_password:
+                                    if session_state["vault_unlocked_this_session"] and session_state["master_password"]:
+                                        print("Vault appears to have been locked.")
                                         print("Attempting to unlock vault with cached password...")
-                                        if storage.unlock(master_password):
+                                        if storage.unlock(session_state["master_password"]):
                                             print("Vault successfully unlocked with cached password.")
                                         else:
                                             print("Failed to unlock with cached password. Please enter it again.")
@@ -399,9 +411,10 @@ try:
                                                 continue
                                             if not storage.unlock(master_password):
                                                 print("Invalid password. Unable to unlock the vault.")
-                                                master_password = None
                                                 continue
                                             print("Vault unlocked successfully.")
+                                            # Update the cached password with the new one
+                                            session_state["master_password"] = master_password
                                     else:
                                         # No cached password, need to ask
                                         master_password = getpass.getpass("Enter your vault master password: ")
@@ -410,14 +423,16 @@ try:
                                             continue
                                         if not storage.unlock(master_password):
                                             print("Invalid password. Unable to unlock the vault.")
-                                            master_password = None
                                             continue
                                         print("Vault unlocked successfully.")
-                                    
-                                    vault_unlocked = True
-                                    
+                                        # Store the password in session state
+                                        session_state["master_password"] = master_password
+                                        
+                                    # Mark that we've successfully unlocked the vault in this session
+                                    session_state["vault_unlocked_this_session"] = True
+                                
                                 # Load and display the secret (provide the master password directly)
-                                secret_data = storage.load_secret(secret_name, master_password)
+                                secret_data = storage.load_secret(secret_name, session_state["master_password"])
                                 if secret_data:
                                     print(f"\nSecret: {secret_name}")
                                     print(f"Issuer: {secret_data.get('issuer', 'Unknown')}")
@@ -438,8 +453,10 @@ try:
                                 else:
                                     print(f"Error loading secret: {secret_name}")
                                 
-                                # Update the vault unlocked state
-                                vault_unlocked = storage.is_unlocked
+                                # Make sure we retain the session state when returning to the menu
+                                # Even if the vault object's state is lost, we'll remember we unlocked it
+                                if storage.is_unlocked:
+                                    session_state["vault_unlocked_this_session"] = True
                             except Exception as e:
                                 print(f"Error listing secrets: {e}")
                                 continue
