@@ -46,12 +46,14 @@ cd truefa-py
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 
-# Install dependencies
-pip install -r requirements.txt
+# Install development dependencies
+pip install -r dev-tools/dev-requirements.txt
 
 # Setup development environment
 python dev-tools\setup.py
 ```
+
+For additional development tools and scripts, see the [dev-tools/README.md](../dev-tools/README.md) file.
 
 ### Key Components
 
@@ -244,14 +246,24 @@ else:
 
 ### Testing and Verification
 
-To test the Rust crypto integration, use the verification script:
+To test the Rust crypto integration, use the verification scripts:
 
 ```bash
 # Run the comprehensive verification script
 python dev-tools/tests/verify_rust_crypto.py
+
+# For DLL export verification specifically
+python dev-tools/tests/verify_dll_exports.py
 ```
 
-This script tests all key Rust functions and provides a detailed report of test results.
+The verification scripts test all key Rust functions including:
+- SecureString creation
+- Random bytes generation
+- Encryption and decryption
+- Key derivation
+- Vault operations
+
+The `verify_dll_exports.py` script focuses specifically on the C-level FFI integration, ensuring all required functions are properly exported from the DLL and can be called directly.
 
 ## Testing
 
@@ -344,8 +356,8 @@ cd /path/to/truefa-py
 Once inside the container, run the following commands to verify and test the executable:
 
 ```cmd
-# Verify that the Rust crypto module is loaded correctly
-powershell -ExecutionPolicy Bypass -File C:\TrueFA\verify_crypto.ps1
+# Run the application directly
+TrueFA-Py.exe
 
 # Create a test vault
 TrueFA-Py.exe --create-vault --vault-dir C:\vault_data
@@ -353,6 +365,12 @@ TrueFA-Py.exe --create-vault --vault-dir C:\vault_data
 # Run the application with the test vault
 TrueFA-Py.exe --vault-dir C:\vault_data
 ```
+
+> Note: If you need to verify the DLL exports directly, you can run the verification script from the development environment:
+> ```bash
+> python dev-tools/tests/verify_dll_exports.py
+> ```
+> This is more reliable than the included PowerShell script which may have syntax issues.
 
 #### Testing Scenarios
 
@@ -402,7 +420,10 @@ This testing environment is crucial for verifying cross-Windows compatibility an
 The `dev-tools/tests` directory contains automated test scripts:
 
 - `create_test_qr.py`: Creates test QR codes for validation
+- `verify_dll_exports.py`: Validates DLL exports and function availability
+- `verify_rust_crypto.py`: Tests full crypto functionality
 - `test_vault_creation.py`: Tests vault creation and management
+- `test_vault_persistence.py`: Tests data persistence across sessions
 - `docker-crypto-init.py`: Initializes and tests cryptographic operations in Docker environments
 
 ### Windows Compatibility Testing
@@ -411,7 +432,7 @@ Test compatibility across different Windows versions:
 
 ```powershell
 # Run the Windows compatibility check
-.\docker\windows\windows_docker_test.ps1
+.\docker\windows\run_vault_test_docker.ps1
 ```
 
 ### Rust Cryptography Testing
@@ -419,11 +440,11 @@ Test compatibility across different Windows versions:
 To verify that the Rust cryptography is working correctly:
 
 ```bash
-# Run the comprehensive verification script
-python dev-tools/tests/verify_rust_crypto.py
+# Verify DLL exports
+python dev-tools/tests/verify_dll_exports.py
 
-# For a simpler test
-python dev-tools/tests/simple_rust_test.py
+# For comprehensive crypto functionality testing
+python dev-tools/tests/verify_rust_crypto.py
 ```
 
 The verification scripts test all key Rust functions including:
@@ -432,6 +453,8 @@ The verification scripts test all key Rust functions including:
 - Encryption and decryption
 - Key derivation
 - Vault operations
+
+The `verify_dll_exports.py` script focuses specifically on the C-level FFI integration, ensuring all required functions are properly exported from the DLL and can be called directly.
 
 ### Cleaning Test Data
 
