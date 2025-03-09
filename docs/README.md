@@ -1,6 +1,6 @@
 # TrueFA-Py Documentation
 
-Welcome to the TrueFA-Py documentation. This directory contains comprehensive guides to help you use, understand, and contribute to TrueFA-Py.
+Welcome to the TrueFA-Py documentation. This directory contains comprehensive guides to help you use, understand, and contribute to TrueFA-Py
 
 ## Documentation Index
 
@@ -21,6 +21,7 @@ truefa-py/
 ├── dev-tools/            # Development and build tools
 │   ├── tests/            # Testing scripts
 │   └── build-tools/      # Build configuration files
+├── docker/               # Docker files
 ├── rust_crypto/          # Rust cryptography module
 │   └── src/              # Rust source code
 ├── src/                  # Python source code
