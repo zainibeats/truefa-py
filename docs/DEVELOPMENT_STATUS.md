@@ -1,21 +1,6 @@
 # TrueFA-Py Development Status
 
-This document tracks the current state of the TrueFA-Py project, highlighting recent improvements and remaining issues.
-
-## Recent Improvements
-
-- **✅ Fixed QR Code Scanning**: Resolved path validation issues when loading QR codes from images
-- **✅ Enhanced Vault Security**: Added password protection for viewing secret names and implemented password caching
-- **✅ Improved Encryption/Decryption**: Implemented robust AES-256-CBC with proper padding and key handling
-- **✅ Better Error Handling**: Added comprehensive error handling and debug logging
-- **✅ Rust Integration**: Fixed DLL loading mechanism with proper function signatures and robust error handling
-- **✅ Persisting Vault Unlocked State**: Implemented session state tracking to maintain vault unlocked status
-- **✅ JSON Serialization for Bytes**: Fixed issues with saving secret bytes data in JSON-compatible format
-- **✅ Vault Security Robustness**: Ensured the vault remains secure across sessions with proper session state management
-- **✅ Fixed Rust SecureString Creation**: Implemented proper function export in the Rust DLL
-- **✅ Added Crypto Verification Tool**: Created comprehensive testing for all Rust crypto functions
-- **✅ Auto-Rebuild Capability**: Added functionality to automatically rebuild the Rust DLL if loading fails
-- **✅ Rust Key Derivation**: Fixed key derivation to properly handle byte-based salt values
+This document tracks the current state of the TrueFA-Py project and remaining issues
 
 ## Current State
 
