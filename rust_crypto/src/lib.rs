@@ -21,6 +21,10 @@ use once_cell::sync::Lazy;
 use scrypt::{password_hash::{PasswordHasher, SaltString}, Scrypt};
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
 
+// Define C types for FFI
+#[allow(non_camel_case_types)]
+type c_bool = bool;
+
 /// Memory-protected string with automatic zeroization on drop.
 /// Prevents sensitive data exposure through memory dumps or leaks.
 #[pyclass]
@@ -323,6 +327,8 @@ fn truefa_crypto(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 
 // Export functions with C linkage for DLL loading
 
+/// Generate secure random bytes and copy to output buffer.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_secure_random_bytes(size: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
     Python::with_gil(|_py| {
@@ -343,6 +349,8 @@ pub extern "C" fn c_secure_random_bytes(size: usize, out_ptr: *mut u8, out_len: 
     })
 }
 
+/// Create a new vault with the given master password.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_create_vault(password_ptr: *const u8, password_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
     let password = unsafe {
@@ -372,6 +380,8 @@ pub extern "C" fn c_create_vault(password_ptr: *const u8, password_len: usize, o
     })
 }
 
+/// Check if the vault is currently unlocked.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_is_vault_unlocked() -> bool {
     Python::with_gil(|_py| {
@@ -382,6 +392,8 @@ pub extern "C" fn c_is_vault_unlocked() -> bool {
     })
 }
 
+/// Check if a vault has been initialized.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_vault_exists() -> bool {
     Python::with_gil(|_py| {
@@ -392,6 +404,8 @@ pub extern "C" fn c_vault_exists() -> bool {
     })
 }
 
+/// Attempt to unlock the vault with the given password and salt.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_unlock_vault(password_ptr: *const u8, password_len: usize, salt_ptr: *const u8, salt_len: usize) -> bool {
     let password = unsafe {
@@ -418,6 +432,8 @@ pub extern "C" fn c_unlock_vault(password_ptr: *const u8, password_len: usize, s
     })
 }
 
+/// Lock the vault by clearing the active key.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_lock_vault() -> bool {
     Python::with_gil(|_py| {
@@ -428,6 +444,8 @@ pub extern "C" fn c_lock_vault() -> bool {
     })
 }
 
+/// Generate a cryptographically secure random salt for key derivation.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_generate_salt(out_ptr: *mut u8, out_len: *mut usize) -> bool {
     // Generate raw random bytes first
@@ -455,6 +473,8 @@ pub extern "C" fn c_generate_salt(out_ptr: *mut u8, out_len: *mut usize) -> bool
     }
 }
 
+/// Derive a master key from a password and salt.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_derive_master_key(password_ptr: *const u8, password_len: usize, salt_ptr: *const u8, salt_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
     let password = unsafe {
@@ -492,6 +512,8 @@ pub extern "C" fn c_derive_master_key(password_ptr: *const u8, password_len: usi
     })
 }
 
+/// Encrypt the master key using the vault key.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_encrypt_master_key(key_ptr: *const u8, key_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
     let key = unsafe {
@@ -521,6 +543,8 @@ pub extern "C" fn c_encrypt_master_key(key_ptr: *const u8, key_len: usize, out_p
     })
 }
 
+/// Decrypt the master key using the vault key.
+/// This function is exported for FFI.
 #[no_mangle]
 pub extern "C" fn c_decrypt_master_key(encrypted_ptr: *const u8, encrypted_len: usize, out_ptr: *mut u8, out_len: *mut usize) -> bool {
     let encrypted = unsafe {
@@ -552,7 +576,7 @@ pub extern "C" fn c_decrypt_master_key(encrypted_ptr: *const u8, encrypted_len: 
 
 /// Create a secure string object from raw data
 /// This function is exported for FFI
-#[cfg_attr(feature = "export_all_symbols", no_mangle)]
+#[no_mangle]
 pub extern "C" fn c_create_secure_string(data_ptr: *const u8, data_len: usize) -> *mut SecureString {
     if data_ptr.is_null() {
         return std::ptr::null_mut();
