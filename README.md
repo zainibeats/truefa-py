@@ -15,6 +15,17 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 - 🔍 Intelligent vault location detection with permission handling
 - 🐳 Docker compatibility for containerized environments
 
+## Security
+
+TrueFA-Py implements a comprehensive security model to protect your authentication secrets:
+
+- Two-layer encryption with PBKDF2 and AES-GCM
+- Secure memory handling with automatic zeroing
+- Rust implementation of critical cryptographic functions
+- No network transmission of sensitive data
+
+For detailed information about the security implementation, please refer to the [Security Documentation](docs/SECURITY.md).
+
 ## Installation & Usage
 
 ### Windows
