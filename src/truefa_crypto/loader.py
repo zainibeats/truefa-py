@@ -26,6 +26,7 @@ _lib = None
 _detected_dll_issue = False
 _function_timeouts = set()
 _is_using_fallback = False
+_attempted_rebuild = False
 
 # Check environment variables for configuration
 _use_fallback_env = os.environ.get('TRUEFA_USE_FALLBACK', '').lower() in ('true', '1', 'yes')
@@ -129,65 +130,178 @@ def _enhance_dll_search_paths():
     except Exception as e:
         logger.warning(f"Error enhancing DLL search paths: {e}")
 
-def find_dll():
+def _try_rebuild_rust_dll():
     """
-    Load native crypto library with intelligent fallback.
-    
-    Search order:
-    1. Check for cached library
-    2. Check environment variable to force fallback
-    3. Find native library in multiple locations
-    4. Load and configure the library
-    5. Fall back to Python implementation if any step fails
+    Attempt to rebuild the Rust DLL if not found or if loading fails.
     
     Returns:
-        tuple: (dll_path, lib_handle, is_fallback)
-            - dll_path: Path to the native library or None
-            - lib_handle: Loaded library or fallback module
-            - is_fallback: Whether Python fallback is being used
+        bool: True if rebuild was successful, False otherwise
     """
-    global _dll_path, _lib, _is_using_fallback
+    global _attempted_rebuild
     
-    # If already loaded, return cached values
-    if _lib is not None:
-        return _dll_path, _lib, _is_using_fallback
+    # Only try to rebuild once
+    if _attempted_rebuild:
+        return False
     
-    # If fallback mode is forced by environment variable
-    if _use_fallback_env:
-        logger.info("Using Python fallback implementation due to environment variable")
-        _is_using_fallback = True
+    _attempted_rebuild = True
+    
+    logger.info("Attempting to rebuild Rust DLL...")
+    
+    # Define possible locations of the build_rust.py script
+    build_script_paths = [
+        os.path.join(os.getcwd(), "dev-tools", "build_rust.py"),
+        os.path.join(os.getcwd(), "build_rust.py"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "dev-tools", "build_rust.py")
+    ]
+    
+    # Try each possible build script location
+    for script_path in build_script_paths:
+        if os.path.exists(script_path):
+            try:
+                logger.info(f"Found build script at {script_path}, attempting to run...")
+                
+                # Try to import and run the build script
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("build_rust", script_path)
+                build_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(build_module)
+                
+                # If the module has a main function, run it
+                if hasattr(build_module, "main"):
+                    build_module.main()
+                    logger.info("Rust DLL rebuild completed")
+                    return True
+                else:
+                    logger.warning("Build script does not have a main function")
+            except Exception as e:
+                logger.error(f"Error running build script: {e}")
+    
+    logger.error("Could not find or run the Rust build script")
+    return False
+
+def find_dll():
+    """
+    Find and load the native Rust crypto library with fallback capability.
+    
+    Implements a robust search and loading strategy with detailed error reporting.
+    Automatically configures Python ctypes for function calls and sets up
+    fallback to pure Python implementation if necessary.
+    
+    Returns:
+        tuple: (dll_path, lib_module, is_using_fallback)
+            - dll_path: Path to the loaded DLL or None if using fallback
+            - lib_module: Library module (either native or fallback)
+            - is_using_fallback: True if using Python fallback
+    """
+    global _dll_path, _lib, _is_using_fallback, _detected_dll_issue
+
+    # If we already detected an issue, use the fallback right away
+    if _detected_dll_issue and _use_fallback_env:
+        logger.info("Using fallback implementation due to previous DLL issue or environment setting")
         from . import fallback
-        _lib = fallback
-        return None, _lib, _is_using_fallback
-    
-    # Try to find and load the DLL
-    _dll_path = _find_dll_path()
-    
-    if _dll_path:
+        return None, fallback, True
+
+    # Try to find the DLL if we haven't already
+    if _dll_path is None:
+        _dll_path = _find_dll_path()
+        if _dll_path is None:
+            # Try to rebuild the DLL if it's not found
+            if _try_rebuild_rust_dll():
+                # Try to find the DLL again
+                _dll_path = _find_dll_path()
+            
+            if _dll_path is None:
+                logger.warning("Native crypto library not found, using fallback implementation")
+                from . import fallback
+                _is_using_fallback = True
+                return None, fallback, True
+
+    # Try to load the DLL if we haven't already
+    if _lib is None:
         try:
-            # Set up DLL search paths
+            logger.info(f"Attempting to load native crypto library from {_dll_path}")
+            
+            # Enhance DLL search paths to help Windows find dependencies
             _enhance_dll_search_paths()
             
-            # Load the DLL
-            _lib = ctypes.CDLL(_dll_path)
+            # Load the library
+            lib = ctypes.CDLL(_dll_path)
             
-            if _debug_mode:
-                print("Successfully loaded DLL using ctypes")
+            # Set up the function signatures
+            _setup_function_signatures(lib)
             
-            # Set up function signatures
-            _setup_function_signatures(_lib)
-            
+            # Test a simple function to validate the library works
+            try:
+                # Call a simple function to test the library
+                if hasattr(lib, 'c_vault_exists'):
+                    _ = lib.c_vault_exists()
+                    logger.info("Successfully validated Rust crypto library")
+                else:
+                    logger.warning("c_vault_exists function not found in DLL")
+                    raise AttributeError("c_vault_exists function not available")
+            except Exception as e:
+                logger.error(f"Error testing native library: {e}")
+                
+                # Try to rebuild the DLL and load it again
+                if _try_rebuild_rust_dll():
+                    # Try to find and load the DLL again
+                    _dll_path = _find_dll_path()
+                    if _dll_path:
+                        try:
+                            lib = ctypes.CDLL(_dll_path)
+                            _setup_function_signatures(lib)
+                            if hasattr(lib, 'c_vault_exists'):
+                                _ = lib.c_vault_exists()
+                                logger.info("Successfully validated rebuilt Rust crypto library")
+                                _lib = lib
+                                _is_using_fallback = False
+                                return _dll_path, _lib, False
+                        except Exception as rebuild_e:
+                            logger.error(f"Error loading rebuilt library: {rebuild_e}")
+                
+                _detected_dll_issue = True
+                from . import fallback
+                _is_using_fallback = True
+                return None, fallback, True
+                
+            # If we get here, the library is loaded and validated
+            _lib = lib
+            _is_using_fallback = False
+            logger.info("Successfully loaded native crypto library")
             return _dll_path, _lib, False
+            
         except Exception as e:
-            logger.warning(f"Error loading DLL: {e}")
-            _dll_path = None
+            # Log detailed error information
+            error_msg = f"Error loading native crypto library: {e}"
+            logger.error(error_msg)
+            if _debug_mode:
+                print(error_msg)
+            
+            # Try to rebuild the DLL and load it again
+            if _try_rebuild_rust_dll():
+                # Try to find and load the DLL again
+                _dll_path = _find_dll_path()
+                if _dll_path:
+                    try:
+                        lib = ctypes.CDLL(_dll_path)
+                        _setup_function_signatures(lib)
+                        _lib = lib
+                        _is_using_fallback = False
+                        logger.info("Successfully loaded rebuilt Rust crypto library")
+                        return _dll_path, _lib, False
+                    except Exception as rebuild_e:
+                        logger.error(f"Error loading rebuilt library: {rebuild_e}")
+                
+            # Mark that we've detected an issue
+            _detected_dll_issue = True
+            
+            # Fall back to Python implementation
+            from . import fallback
+            _is_using_fallback = True
+            return None, fallback, True
     
-    # If we get here, fall back to Python implementation
-    logger.info("Using Python fallback implementation due to loading issues")
-    _is_using_fallback = True
-    from . import fallback
-    _lib = fallback
-    return None, _lib, _is_using_fallback
+    # Return the cached values
+    return _dll_path, _lib, _is_using_fallback
 
 def _setup_function_signatures(lib):
     """
@@ -200,14 +314,84 @@ def _setup_function_signatures(lib):
         lib: Loaded native library handle
     """
     try:
-        # Define the function signatures here
-        # Example:
-        # lib.secure_random_bytes.argtypes = [ctypes.c_int]
-        # lib.secure_random_bytes.restype = ctypes.POINTER(ctypes.c_ubyte)
-        pass
+        # Define the function signatures for the C API
+        # Secure random bytes
+        lib.c_secure_random_bytes.argtypes = [ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)]
+        lib.c_secure_random_bytes.restype = ctypes.c_bool
+        
+        # Vault operations
+        lib.c_create_vault.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)]
+        lib.c_create_vault.restype = ctypes.c_bool
+        
+        lib.c_is_vault_unlocked.argtypes = []
+        lib.c_is_vault_unlocked.restype = ctypes.c_bool
+        
+        lib.c_vault_exists.argtypes = []
+        lib.c_vault_exists.restype = ctypes.c_bool
+        
+        lib.c_unlock_vault.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t]
+        lib.c_unlock_vault.restype = ctypes.c_bool
+        
+        lib.c_lock_vault.argtypes = []
+        lib.c_lock_vault.restype = ctypes.c_bool
+        
+        # Salt and key operations
+        lib.c_generate_salt.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)]
+        lib.c_generate_salt.restype = ctypes.c_bool
+        
+        lib.c_derive_master_key.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)]
+        lib.c_derive_master_key.restype = ctypes.c_bool
+        
+        lib.c_encrypt_master_key.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)]
+        lib.c_encrypt_master_key.restype = ctypes.c_bool
+        
+        lib.c_decrypt_master_key.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_size_t)]
+        lib.c_decrypt_master_key.restype = ctypes.c_bool
+        
+        # SecureString operations
+        lib.c_create_secure_string.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t]
+        lib.c_create_secure_string.restype = ctypes.c_void_p
+        
+        # Ensure all required functions are available
+        _check_required_functions(lib)
+        
+        logger.info("Successfully configured function signatures for native library")
     except Exception as e:
+        logger.error(f"Error setting function signatures: {e}")
         if _debug_mode:
             print(f"Error setting function signatures: {e}")
+
+def _check_required_functions(lib):
+    """
+    Verify that all required functions are available in the loaded library.
+    
+    Args:
+        lib: Loaded native library handle
+        
+    Raises:
+        AttributeError: If a required function is missing
+    """
+    required_functions = [
+        'c_secure_random_bytes',
+        'c_create_vault',
+        'c_is_vault_unlocked',
+        'c_vault_exists',
+        'c_unlock_vault',
+        'c_lock_vault',
+        'c_generate_salt',
+        'c_derive_master_key',
+        'c_encrypt_master_key',
+        'c_decrypt_master_key',
+        'c_create_secure_string'
+    ]
+    
+    missing = []
+    for func in required_functions:
+        if not hasattr(lib, func):
+            missing.append(func)
+    
+    if missing:
+        raise AttributeError(f"Missing required functions in DLL: {', '.join(missing)}")
 
 def get_lib():
     """
@@ -239,3 +423,14 @@ def is_using_fallback():
         _, _, _is_using_fallback = find_dll()
     
     return _is_using_fallback 
+
+def _reset_dll_cache():
+    """Reset the cached DLL state to force a fresh attempt to load the DLL."""
+    global _dll_path, _lib, _is_using_fallback, _detected_dll_issue, _attempted_rebuild
+    
+    logger.info("Resetting DLL cache")
+    _dll_path = None
+    _lib = None
+    _is_using_fallback = False
+    _detected_dll_issue = False
+    _attempted_rebuild = False 

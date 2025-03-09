@@ -554,20 +554,19 @@ pub extern "C" fn c_decrypt_master_key(encrypted_ptr: *const u8, encrypted_len: 
 /// This function is exported for FFI
 #[cfg_attr(feature = "export_all_symbols", no_mangle)]
 pub extern "C" fn c_create_secure_string(data_ptr: *const u8, data_len: usize) -> *mut SecureString {
+    if data_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    
     let data = unsafe {
         std::slice::from_raw_parts(data_ptr, data_len)
     };
     
-    Python::with_gil(|_py| {
-        match std::str::from_utf8(data) {
-            Ok(s) => {
-                match create_secure_string(s.as_bytes()) {
-                    Ok(secure_string) => {
-                        let boxed = Box::new(secure_string);
-                        Box::into_raw(boxed)
-                    },
-                    Err(_) => std::ptr::null_mut(),
-                }
+    Python::with_gil(|py| {
+        match create_secure_string(data) {
+            Ok(secure_string) => {
+                let boxed = Box::new(secure_string);
+                Box::into_raw(boxed)
             },
             Err(_) => std::ptr::null_mut(),
         }

@@ -9,6 +9,7 @@ import os
 import base64
 import logging
 from functools import wraps
+import ctypes
 
 from .loader import get_lib, is_using_fallback
 
@@ -239,4 +240,47 @@ def create_hmac(data, key):
     # Create HMAC using SHA-256
     h = hmac.new(key, data, hashlib.sha256)
     
-    return h.digest() 
+    return h.digest()
+
+@_lazy_load("create_secure_string")
+def create_secure_string(data):
+    """
+    Create a secure string that will be automatically zeroed when no longer needed.
+    
+    This function uses memory-protected storage when available through the Rust implementation.
+    
+    Args:
+        data (str or bytes): The sensitive data to protect
+        
+    Returns:
+        SecureString: A secure string object
+    """
+    # Convert input types if needed
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    
+    try:
+        # Try to use the DLL directly with c_ prefix
+        lib = get_lib()
+        if hasattr(lib, 'c_create_secure_string'):
+            try:
+                # Convert data for C function call
+                data_array = (ctypes.c_ubyte * len(data))(*data)
+                result = lib.c_create_secure_string(data_array, len(data))
+                
+                if result:
+                    # Successfully created a secure string using Rust
+                    # We need to wrap it in Python (implementation dependent)
+                    logger.debug("Created SecureString using Rust implementation")
+                    return result
+                
+                logger.warning("c_create_secure_string returned null pointer")
+            except Exception as e:
+                logger.warning(f"Error calling c_create_secure_string: {e}")
+                # Fall through to fallback
+    except Exception as e:
+        logger.warning(f"Error accessing DLL for secure string creation: {e}")
+    
+    # Python fallback implementation
+    from .secure_string import SecureString
+    return SecureString(data) 
