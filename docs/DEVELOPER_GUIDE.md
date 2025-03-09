@@ -289,6 +289,114 @@ fallback_salt = truefa_crypto.generate_salt()
 print(f"Fallback salt: {fallback_salt}")
 ```
 
+### Windows Docker Container Testing
+
+TrueFA-Py includes a dedicated Windows Docker testing environment to verify that the executable works correctly on a clean Windows installation. This testing method helps ensure consistent behavior across different Windows systems.
+
+#### Prerequisites
+
+- Docker Desktop for Windows installed and running
+- Windows containers mode enabled (not Linux containers)
+- The TrueFA-Py executable already built in the `dist` directory
+
+#### Setting Up the Testing Environment
+
+The Windows Docker testing environment consists of three key files:
+
+1. **Dockerfile** (`docker/windows/Dockerfile`): 
+   - Creates a clean Windows Server environment
+   - Installs Visual C++ Redistributable (required for Rust DLL)
+   - Sets up directories for the executable and test data
+   - Copies the necessary files for testing
+
+2. **Verification Script** (`docker/windows/verify_crypto.ps1`):
+   - Checks that the Rust crypto DLL is present and loaded correctly
+   - Verifies the cryptography functionality
+   - Ensures no fallback to Python crypto is occurring
+
+3. **Test Runner Script** (`docker/windows/run_vault_test_docker.ps1`):
+   - Builds the Docker image
+   - Creates persistent storage for vault data
+   - Provides an interactive testing environment
+   - Supports resuming the container to test persistence
+
+#### Running the Tests
+
+```powershell
+# Navigate to the project root directory
+cd /path/to/truefa-py
+
+# Create and run a fresh test container
+.\docker\windows\run_vault_test_docker.ps1
+
+# To clean up all test resources
+.\docker\windows\run_vault_test_docker.ps1 -Clean
+
+# To resume a previous test session (for testing persistence)
+.\docker\windows\run_vault_test_docker.ps1 -Resume
+
+# To rebuild the image before testing
+.\docker\windows\run_vault_test_docker.ps1 -BuildImage
+```
+
+#### Inside the Docker Container
+
+Once inside the container, run the following commands to verify and test the executable:
+
+```cmd
+# Verify that the Rust crypto module is loaded correctly
+powershell -ExecutionPolicy Bypass -File C:\TrueFA\verify_crypto.ps1
+
+# Create a test vault
+TrueFA-Py.exe --create-vault --vault-dir C:\vault_data
+
+# Run the application with the test vault
+TrueFA-Py.exe --vault-dir C:\vault_data
+```
+
+#### Testing Scenarios
+
+1. **First-Time User Experience**:
+   - Verify the application runs without errors on first launch
+   - Test vault creation with a master password
+   - Verify that the Rust crypto module is properly loaded (not falling back to Python)
+
+2. **Core Functionality**:
+   - Add TOTP secrets through manual entry or QR code images
+   - Generate and verify TOTP codes
+   - Test navigation and different command options
+
+3. **Persistence**:
+   - Add several TOTP secrets
+   - Exit the container and resume it using the `-Resume` parameter
+   - Verify that all saved secrets are still available and working
+
+4. **Security**:
+   - Verify master password requirements
+   - Check that vault encryption is working correctly
+   - Test that the vault remains locked until properly authenticated
+
+#### Troubleshooting Docker Tests
+
+If you encounter issues with the Docker container:
+
+1. **DLL Loading Problems**:
+   - Check that the `truefa_crypto.dll` is present in `C:\TrueFA\`
+   - Verify Visual C++ Redistributable is properly installed
+   - Run the verification script for detailed diagnostics
+
+2. **Container Access Issues**:
+   - Ensure Docker Desktop is running in Windows containers mode
+   - Check Docker permissions (run as Administrator if needed)
+   - Verify Docker volume mounting is working correctly
+
+3. **Application Crashes**:
+   - Check for error messages in the console
+   - Look for `.dll_crash` marker files in the data directories
+   - Try running with `--verbose` if supported for detailed logs
+
+This testing environment is crucial for verifying cross-Windows compatibility and is not intended for production use.
+
 ### Automated Test Scripts
 
 The `dev-tools/tests` directory contains automated test scripts:
