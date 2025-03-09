@@ -707,19 +707,32 @@ class TwoFactorAuth:
                     return "No secret to save"
                 
                 # Get the raw value and ensure it's properly encoded for JSON
-                raw_value = self.secret.get_raw_value()
-                
-                # Convert bytes to base64 string if needed
-                if isinstance(raw_value, bytes):
-                    secret_str = base64.b64encode(raw_value).decode('utf-8')
-                else:
-                    secret_str = str(raw_value)
-                
-                data_to_save = {
-                    'secret': secret_str,
-                    'issuer': self.issuer or '',
-                    'account': self.account or ''
-                }
+                try:
+                    raw_value = self.secret.get_raw_value()
+                    
+                    # Convert bytes to base64 string if needed
+                    if isinstance(raw_value, bytes):
+                        # If it's bytes, we need to ensure it's saved as a string
+                        try:
+                            # Try to decode as UTF-8 first (if it's text)
+                            secret_str = raw_value.decode('utf-8', errors='replace')
+                        except (UnicodeDecodeError, AttributeError):
+                            # If that fails, use base64 encoding (for binary data)
+                            secret_str = base64.b64encode(raw_value).decode('utf-8')
+                    else:
+                        # If it's already a string or something else, convert to string
+                        secret_str = str(raw_value)
+                    
+                    data_to_save = {
+                        'secret': secret_str,
+                        'issuer': self.issuer or '',
+                        'account': self.account or ''
+                    }
+                except Exception as e:
+                    print(f"ERROR: Exception while processing secret data: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return f"Error processing secret data: {str(e)}"
             
             # Save the secret to the vault - the updated save_secret returns a boolean
             success = self.storage.save_secret(name, data_to_save)

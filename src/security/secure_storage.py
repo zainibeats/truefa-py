@@ -912,9 +912,26 @@ class SecureStorage:
                 return False
                 
             # Convert the data to JSON
-            json_data = json.dumps(secret_data)
-            print(f"DEBUG [secure_storage.py]: Secret data JSON length: {len(json_data)}")
-            
+            try:
+                # Process any bytes objects in the dict to make them JSON serializable
+                processed_data = {}
+                for key, value in secret_data.items():
+                    if isinstance(value, bytes):
+                        try:
+                            # Try to decode as UTF-8
+                            processed_data[key] = value.decode('utf-8', errors='replace')
+                        except (UnicodeDecodeError, AttributeError):
+                            # If decoding fails, use base64 encoding
+                            processed_data[key] = base64.b64encode(value).decode('utf-8')
+                    else:
+                        processed_data[key] = value
+                
+                json_data = json.dumps(processed_data)
+                print(f"DEBUG [secure_storage.py]: Secret data JSON length: {len(json_data)}")
+            except Exception as e:
+                print(f"DEBUG [secure_storage.py]: Error serializing secret data to JSON: {e}")
+                return False
+                
             # Get the encryption key (master key)
             master_key = self.vault.get_master_key()
             if not master_key:

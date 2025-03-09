@@ -167,7 +167,19 @@ class SecureString:
             str: The actual sensitive string value
         """
         # Return the actual value, not the masked representation
-        return self.get()
+        value = self.get()
+        
+        # Ensure we return a string, not bytes, for JSON serialization
+        if isinstance(value, bytes):
+            try:
+                # Try to decode as UTF-8
+                return value.decode('utf-8', errors='replace')
+            except (UnicodeDecodeError, AttributeError):
+                # If decoding fails or not possible, use base64 encoding
+                import base64
+                return base64.b64encode(value).decode('utf-8')
+        
+        return value
         
     def age(self):
         """
