@@ -19,6 +19,11 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 
 ### Windows
 
+#### Prerequisites
+- **Visual C++ Redistributable 2015-2022** - Required for the Rust cryptography module
+  - Download from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+  - This is required for both the portable executable and installed versions
+
 #### From Source (Current Method)
 ```bash
 git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
