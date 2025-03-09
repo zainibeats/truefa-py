@@ -36,6 +36,10 @@ vault_test.py
 vault/
 test_vault/
 
+# Backup files
+*.backup
+*.bak
+
 # Production files
 ez-release/
 build/
