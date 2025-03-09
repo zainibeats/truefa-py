@@ -21,6 +21,20 @@ $volumeName = "truefa-vault-data"
 # Set Docker executable path - use full path since it might not be in PATH
 $dockerExe = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
 
+# Check if Docker is running
+try {
+    $dockerStatus = & $dockerExe info 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Docker is not running or not accessible. Please start Docker Desktop and try again." -ForegroundColor Red
+        Write-Host "Docker error: $dockerStatus" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "ERROR: Failed to run Docker. Is Docker Desktop installed and in your PATH?" -ForegroundColor Red
+    Write-Host "Exception: $_" -ForegroundColor Red
+    exit 1
+}
+
 # Set to current directory
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location (Split-Path -Parent (Split-Path -Parent $scriptDir))
@@ -32,7 +46,14 @@ Write-Host
 
 # Function to build Docker image
 function Build-Image {
-    Write-Host "Building Docker image..." -ForegroundColor Cyan
+    Write-Host "Building Docker image '$imageName'..." -ForegroundColor Cyan
+    
+    # Remove existing image if it exists
+    $imageExists = & $dockerExe images --filter "reference=$imageName" --format "{{.Repository}}"
+    if ($imageExists -eq $imageName) {
+        Write-Host "Removing existing image '$imageName'..." -ForegroundColor Yellow
+        & $dockerExe rmi -f $imageName
+    }
     
     & $dockerExe build -t $imageName -f docker/windows/Dockerfile .
     
@@ -41,7 +62,7 @@ function Build-Image {
         exit 1
     }
     
-    Write-Host "Docker image built successfully." -ForegroundColor Green
+    Write-Host "Docker image '$imageName' built successfully." -ForegroundColor Green
     Write-Host
 }
 
@@ -70,13 +91,32 @@ function Create-Volume {
 
 # Function to start container
 function Start-Container {
-    Write-Host "Starting Docker container..." -ForegroundColor Cyan
+    Write-Host "Starting Docker container '$containerName'..." -ForegroundColor Cyan
     
+    # Check if container with this name already exists and remove it
+    $containerExists = & $dockerExe ps -a --filter "name=$containerName" --format "{{.Names}}"
+    if ($containerExists -eq $containerName) {
+        Write-Host "Container '$containerName' already exists. Removing it..." -ForegroundColor Yellow
+        & $dockerExe rm -f $containerName
+    }
+    
+    # Run with explicit container name
+    Write-Host "Running: docker run -it --name $containerName -v ${volumeName}:C:\vault_data $imageName" -ForegroundColor Gray
     & $dockerExe run -it --name $containerName -v ${volumeName}:C:\vault_data $imageName
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Failed to start Docker container. See error above." -ForegroundColor Red
         exit 1
+    }
+    
+    # Verify container is running with the correct name
+    $runningContainer = & $dockerExe ps --filter "name=$containerName" --format "{{.Names}}"
+    if ($runningContainer -ne $containerName) {
+        Write-Host "WARNING: Container '$containerName' is not running after startup." -ForegroundColor Yellow
+        Write-Host "Container may have exited immediately. Check Docker logs for details:" -ForegroundColor Yellow
+        Write-Host "docker logs $containerName" -ForegroundColor Gray
+    } else {
+        Write-Host "Container '$containerName' is running successfully." -ForegroundColor Green
     }
 }
 
@@ -105,13 +145,28 @@ function Clean-Environment {
     # Remove container if exists
     $containerExists = & $dockerExe ps -a --filter "name=$containerName" --format "{{.Names}}"
     if ($containerExists -eq $containerName) {
+        Write-Host "Removing container '$containerName'..." -ForegroundColor Yellow
         & $dockerExe rm -f $containerName
+    } else {
+        Write-Host "Container '$containerName' not found. Nothing to remove." -ForegroundColor Gray
     }
     
     # Remove volume if exists
     $volumeExists = & $dockerExe volume ls --filter "name=$volumeName" --format "{{.Name}}"
     if ($volumeExists -eq $volumeName) {
+        Write-Host "Removing volume '$volumeName'..." -ForegroundColor Yellow
         & $dockerExe volume rm $volumeName
+    } else {
+        Write-Host "Volume '$volumeName' not found. Nothing to remove." -ForegroundColor Gray
+    }
+    
+    # Remove image if exists
+    $imageExists = & $dockerExe images --filter "reference=$imageName" --format "{{.Repository}}"
+    if ($imageExists -eq $imageName) {
+        Write-Host "Removing image '$imageName'..." -ForegroundColor Yellow
+        & $dockerExe rmi -f $imageName
+    } else {
+        Write-Host "Image '$imageName' not found. Nothing to remove." -ForegroundColor Gray
     }
     
     Write-Host "Docker environment cleaned up successfully." -ForegroundColor Green
