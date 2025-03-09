@@ -1,568 +1,230 @@
 # TrueFA-Py Developer Guide
 
-This comprehensive guide provides all the information needed for developing, building, testing, and securing TrueFA-Py.
+This guide provides information for developing, building, testing, and securing TrueFA-Py.
 
 ## Table of Contents
 
 1. [Development Environment Setup](#development-environment-setup)
-2. [Project Structure](#project-structure)
-3. [Building TrueFA-Py](#building-truefa-py)
-4. [Rust Cryptography Integration](#rust-cryptography-integration)
-5. [Testing](#testing)
-6. [Security Considerations](#security-considerations)
-7. [Distribution](#distribution)
-8. [Troubleshooting](#troubleshooting)
+2. [Building TrueFA-Py](#building-truefa-py)
+3. [Rust Cryptography Integration](#rust-cryptography-integration)
+4. [Testing](#testing)
+5. [Security Considerations](#security-considerations)
+6. [Distribution](#distribution)
+7. [Troubleshooting](#troubleshooting)
 
 ## Development Environment Setup
 
 ### Prerequisites
 
-Before developing TrueFA-Py, ensure you have the following installed:
-
-1. **Python 3.10 or later**
-   - Download from [python.org](https://www.python.org/downloads/)
-   - Ensure Python is added to your PATH during installation
-
-2. **Rust** (Required for cryptography backend)
-   - Install using [rustup](https://rustup.rs/)
-   - Follow the installation instructions for your platform
-
-3. **NSIS** (Optional, for creating Windows installers)
-   - Download from [NSIS website](https://nsis.sourceforge.io/Download)
-   - Install with default options
-
-4. **Visual C++ Redistributable 2015-2022** (Required for Windows)
-   - Download from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-   - Required for using the Rust cryptography module
+- **Python 3.10+**: [python.org](https://www.python.org/downloads/) (ensure it's in PATH)
+- **Rust**: Install via [rustup](https://rustup.rs/) (required for cryptography)
+- **NSIS**: [NSIS website](https://nsis.sourceforge.io/Download) (for Windows installers)
+- **Visual C++ Redistributable 2015-2022**: [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe) (required for Windows)
 
 ### Setting up the Development Environment
 
 ```powershell
-# Clone the repository
-git clone https://github.com/zainibeats/truefa-py.git
-cd truefa-py
-
-# Create a virtual environment
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Install development dependencies
+# Clone and set up the repository
+git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
+python -m venv venv && .\venv\Scripts\Activate.ps1
 pip install -r dev-tools/dev-requirements.txt
-
-# Setup development environment
 python dev-tools\setup.py
 ```
 
-For additional development tools and scripts, see the [dev-tools/README.md](../dev-tools/README.md) file.
-
 ### Key Components
 
-1. **Cryptography Module** (`src/truefa_crypto/`):
-   - Provides bindings to the Rust cryptography library
-   - Includes Python fallback implementations
-   - Handles DLL loading and error detection
+1. **Cryptography Module** (`src/truefa_crypto/`): Rust bindings with Python fallbacks
+2. **TOTP Implementation** (`src/totp/`): TOTP generation and QR code processing
+3. **Vault Management** (`src/security/`): Encrypted storage and authentication
+4. **Configuration System** (`src/config.py`): Settings and path management
 
-2. **TOTP Implementation** (`src/totp/`):
-   - Implements time-based one-time password generation
-   - Handles QR code scanning and processing
-   - Provides secure password management
+### Environment Variables
 
-3. **Vault Management** (`src/vault/`):
-   - Implements secure storage for TOTP secrets
-   - Handles encryption and decryption of vault contents
-   - Manages user authentication and security
+TrueFA-Py supports several environment variables to customize behavior:
 
-4. **Configuration System** (`src/config.py`):
-   - Provides centralized configuration settings
-   - Handles platform-specific paths and portable mode
-   - Supports environment variable overrides for data directories
-
-### Environment Variable Overrides
-
-TrueFA-Py supports the following environment variables to customize data directory locations:
-
-| Environment Variable | Description | Default Location |
-|----------------------|-------------|------------------|
-| `TRUEFA_PORTABLE` | Set to "1" to enable portable mode | Current directory |
-| `TRUEFA_DATA_DIR` | Override main data directory | Platform-specific user directory |
-| `TRUEFA_EXPORTS_DIR` | Override exports directory | `DATA_DIR/exports` |
-| `TRUEFA_CRYPTO_DIR` | Override directory for crypto data | `SECURE_DATA_DIR/crypto` |
-| `TRUEFA_VAULT_FILE` | Override vault file location | `DATA_DIR/vault.dat` |
-| `TRUEFA_SECURE_DIR` | Override secure data directory | Platform-specific secure location |
-| `TRUEFA_USE_FALLBACK` | Set to "1" to force Python fallback | Automatic detection |
-
-These environment variables are particularly useful in containerized environments or when configuring non-standard installations.
-
-## Development Setup
-
-To set up your development environment:
-
-```bash
-git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
-python -m venv venv && .\venv\Scripts\Activate.ps1  # On Windows
-pip install -r requirements.txt
-
-# For Rust crypto development
-cd rust_crypto
-cargo build --release
-cd ..
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TRUEFA_PORTABLE` | Enable portable mode (1=yes) | Current directory |
+| `TRUEFA_DATA_DIR` | Override data directory | Platform user directory |
+| `TRUEFA_USE_FALLBACK` | Force Python fallback (1=yes) | Auto-detection |
 
 ## Building TrueFA-Py
 
 ### Building the Rust Cryptography Module
 
-The Rust cryptography module must be built before the Python application:
-
 ```powershell
-# Build the Rust library
-cd rust_crypto
-cargo build --release
-cd ..
-
-# Alternatively, use the build script:
+# Build the Rust library (direct or via script)
+cd rust_crypto && cargo build --release && cd ..
+# OR
 python dev-tools\build_rust.py
 ```
 
-### Recent Rust Integration Fixes
-
-The Rust cryptography module has undergone significant improvements to resolve critical issues:
-
-1. **Fixed `c_generate_salt` function** that was causing applications to hang on Windows systems:
-   - Eliminated potential deadlocks with Python's GIL
-   - Implemented direct random byte generation using Rust's `OsRng`
-   - Added proper error handling for memory operations
-
-2. **Enhanced fallback mechanism** with automatic detection of DLL function failures and timeouts
-
-### Building Options
-
-TrueFA-Py includes several build tools in the `dev-tools` directory:
-
-#### 1. PowerShell Build Script (Recommended)
+### Building the Application
 
 ```powershell
-# Basic build (creates portable EXE and installer)
-.\dev-tools\build.ps1
+# Build options (combine as needed)
+.\dev-tools\build.ps1 [-BuildRust] [-Clean] [-Portable] [-Installer] [-Console] [-Fallback]
 
-# Build with Rust cryptography backend first
-.\dev-tools\build.ps1 -BuildRust -Clean -Portable
-
-# Build with console window (for debugging)
-.\dev-tools\build.ps1 -Console
-
-# Force use of Python fallback implementation
-.\dev-tools\build.ps1 -Fallback
+# Example: Build everything with fresh Rust compilation
+.\dev-tools\build.ps1 -BuildRust -Clean -Portable -Installer
 ```
 
-#### Creating Distribution Packages
-
-For Windows distribution:
-
-```powershell
-# Build portable package and installer
-.\dev-tools\build.ps1 -BuildRust -Clean -Portable
-
-# Create Windows distribution package
-python dev-tools\build_package.py --portable --installer
-```
-
-This will create:
-- `dist/TrueFA-Py-Windows.zip` (portable version)
-- `dist/TrueFA-Py_Setup.exe` (installer version)
+This creates:
+- `dist/TrueFA-Py.exe` (portable version)
+- `dist/TrueFA-Py_Setup_0.1.0.exe` (installer version)
 
 ## Rust Cryptography Integration
 
-TrueFA-Py relies on a native Rust implementation for critical cryptographic operations with automatic fallback to Python when needed.
+TrueFA-Py uses Rust for critical cryptographic operations with Python fallbacks when needed.
 
-### Key Rust Functions
+### Key Functions
 
-| Function | Purpose | Description |
-|----------|---------|-------------|
-| `c_secure_random_bytes` | Random Generation | Generates cryptographically secure random bytes |
-| `c_generate_salt` | Key Derivation | Creates a cryptographically secure salt for key derivation |
-| `c_derive_master_key` | Key Management | Derives a master key from a password and salt |
-| `c_encrypt_master_key` | Encryption | Encrypts the master key with the vault key |
-| `c_decrypt_master_key` | Decryption | Decrypts the master key with the vault key |
-| `c_create_secure_string` | Memory Security | Stores sensitive strings in protected memory |
-| `c_is_vault_unlocked` | Vault Status | Checks if the vault is currently unlocked |
-| `c_vault_exists` | Vault Existence | Verifies if a vault exists in the specified location |
+| Function | Purpose |
+|----------|---------|
+| `c_secure_random_bytes` | Secure random bytes generation |
+| `c_generate_salt` | Salt creation for key derivation |
+| `c_create_secure_string` | Protected memory for sensitive data |
+| `c_derive_master_key` | Master key derivation from password |
+| `c_encrypt/decrypt_master_key` | Key encryption/decryption |
 
 ### Recent Improvements
 
-The Rust cryptography module has undergone significant enhancements:
+- Fixed function exports with proper error handling
+- Enhanced DLL loading with multi-location search
+- Implemented secure memory management
+- Added comprehensive verification and test suites
 
-1. **Fixed Function Exports**: 
-   - Corrected the `c_create_secure_string` function to properly handle input data
-   - Implemented proper null pointer checks and error handling
-   - Added missing function signatures for cross-language compatibility
+### Intelligent Fallback
 
-2. **Enhanced DLL Loading**:
-   - Implemented multi-location search strategy for finding the DLL
-   - Added automatic DLL rebuilding if loading fails
-   - Enhanced error detection and reporting for troubleshooting
+The system automatically detects issues and falls back to Python:
+- Function-level error monitoring
+- Session state caching
+- Manual override via `TRUEFA_USE_FALLBACK=1`
 
-3. **Memory Safety**:
-   - Added automatic zeroing of sensitive data in memory
-   - Implemented secure strings to prevent password exposure
-   - Added proper cleanup of cryptographic keys after use
-
-4. **Verification and Testing**:
-   - Created comprehensive test suite for all Rust cryptography functions
-   - Added detailed diagnostics and logging for cryptographic operations
-   - Implemented automatic fallback to Python when Rust functions fail
-
-### Intelligent Fallback Mechanism
-
-TrueFA-Py implements an intelligent fallback system that automatically detects issues with the Rust implementation:
-
-1. **Function-level monitoring**: Each Rust function is monitored for errors
-2. **Session variables**: Cache the implementation state across operations
-3. **Manual override**: Use `TRUEFA_USE_FALLBACK=1` to force Python implementation
-4. **Transparent API**: Same interface regardless of underlying implementation
-
-This ensures that even when the Rust implementation is unavailable, the application continues to function correctly.
-
-### Python Integration
-
-The Python code interfaces with the Rust module through a well-defined API:
-
-```python
-# Example of using the Rust crypto module
-import src.truefa_crypto as crypto
-
-# Generate random bytes
-random_bytes = crypto.secure_random_bytes(32)
-
-# Create a secure string
-password = crypto.create_secure_string("my_password")
-
-# Check if using fallback
-if crypto.is_using_fallback():
-    print("Using Python fallback implementation")
-else:
-    print("Using Rust native implementation")
-```
-
-### Testing and Verification
-
-To test the Rust crypto integration, use the verification scripts:
+### Testing Rust Integration
 
 ```bash
-# Run the comprehensive verification script
-python dev-tools/tests/verify_rust_crypto.py
-
-# For DLL export verification specifically
-python dev-tools/tests/verify_dll_exports.py
+# Verify the integration with these tools
+python dev-tools/tests/verify_dll_exports.py  # Checks FFI exports
+python dev-tools/tests/verify_rust_crypto.py  # Tests functionality
 ```
-
-The verification scripts test all key Rust functions including:
-- SecureString creation
-- Random bytes generation
-- Encryption and decryption
-- Key derivation
-- Vault operations
-
-The `verify_dll_exports.py` script focuses specifically on the C-level FFI integration, ensuring all required functions are properly exported from the DLL and can be called directly.
 
 ## Testing
 
-### Unit Testing
-
-Run unit tests with pytest:
+### Unit and Integration Testing
 
 ```bash
-# Run all tests
-pytest dev-tools/tests/
+# Run unit tests
+pytest dev-tools/tests/  # All tests
+pytest dev-tools/tests/test_vault_creation.py  # Specific test
 
-# Run specific test
-pytest dev-tools/tests/test_vault_creation.py
-```
-
-### Integration Testing
-
-To test the cryptography module integration:
-
-```python
-import truefa_crypto
-
-# Test random bytes generation
-random_bytes = truefa_crypto.secure_random_bytes(32)
-print(f"Generated {len(random_bytes)} random bytes")
-
-# Test salt generation
-salt = truefa_crypto.generate_salt()
-print(f"Generated salt: {salt}")
-
-# Test fallback mechanism
-import os
-os.environ["TRUEFA_USE_FALLBACK"] = "1"
-fallback_salt = truefa_crypto.generate_salt()
-print(f"Fallback salt: {fallback_salt}")
+# Clean test data when needed
+python dev-tools/clean_truefa.py
 ```
 
 ### Windows Docker Container Testing
 
-TrueFA-Py includes a dedicated Windows Docker testing environment to verify that the executable works correctly on a clean Windows installation. This testing method helps ensure consistent behavior across different Windows systems.
-
 #### Prerequisites
+- Docker Desktop (Windows containers mode)
+- Built executables in `dist` directory
 
-- Docker Desktop for Windows installed and running
-- Windows containers mode enabled (not Linux containers)
-- The TrueFA-Py executable already built in the `dist` directory
+#### Test Environment Setup
 
-#### Setting Up the Testing Environment
+The Docker testing environment includes:
+- **Dockerfile** with Visual C++ Redistributable and test files
+- **Verification Script** to check DLL functionality
+- **Test Runner Script** with volume support for persistence testing
+- **Test QR Code** for verifying QR functionality
 
-The Windows Docker testing environment consists of three key files:
-
-1. **Dockerfile** (`docker/windows/Dockerfile`): 
-   - Creates a clean Windows Server environment
-   - Installs Visual C++ Redistributable (required for Rust DLL)
-   - Sets up directories for the executable and test data
-   - Copies the necessary files for testing
-
-2. **Verification Script** (`docker/windows/verify_crypto.ps1`):
-   - Checks that the Rust crypto DLL is present and loaded correctly
-   - Verifies the cryptography functionality
-   - Ensures no fallback to Python crypto is occurring
-
-3. **Test Runner Script** (`docker/windows/run_vault_test_docker.ps1`):
-   - Builds the Docker image
-   - Creates persistent storage for vault data
-   - Provides an interactive testing environment
-   - Supports resuming the container to test persistence
-
-#### Running the Tests
+#### Running Docker Tests
 
 ```powershell
-# Navigate to the project root directory
-cd /path/to/truefa-py
-
-# Create and run a fresh test container
-.\docker\windows\run_vault_test_docker.ps1
-
-# To clean up all test resources
-.\docker\windows\run_vault_test_docker.ps1 -Clean
-
-# To resume a previous test session (for testing persistence)
-.\docker\windows\run_vault_test_docker.ps1 -Resume
-
-# To rebuild the image before testing
-.\docker\windows\run_vault_test_docker.ps1 -BuildImage
+# Container management options (combine as needed)
+.\docker\windows\run_vault_test_docker.ps1 [-Clean] [-Resume] [-BuildImage]
 ```
 
-#### Inside the Docker Container
+#### Testing Areas
 
-Once inside the container, run the following commands to verify and test the executable:
+Inside the container, test these key areas:
 
-```cmd
-# Run the application directly
-TrueFA-Py.exe
+1. **Portable Executable**: Basic functionality and vault operations
+   ```cmd
+   TrueFA-Py.exe --create-vault --vault-dir C:\vault_data
+   TrueFA-Py.exe --vault-dir C:\vault_data
+   ```
 
-# Create a test vault
-TrueFA-Py.exe --create-vault --vault-dir C:\vault_data
+2. **QR Code Scanning**: Using the included test image
+   ```cmd
+   # When prompted for QR code path, enter:
+   C:\TrueFA\images\test_qr.png
+   ```
 
-# Run the application with the test vault
-TrueFA-Py.exe --vault-dir C:\vault_data
-```
+3. **Installer**: Silent installation and functionality
+   ```cmd
+   # Install and verify
+   TrueFA-Py_Setup_0.1.0.exe /S
+   dir "C:\Program Files (x86)\TrueFA-Py"
+   "C:\Program Files (x86)\TrueFA-Py\TrueFA-Py.exe" --vault-dir C:\vault_data
+   
+   # Optional: Test uninstallation
+   "C:\Program Files (x86)\TrueFA-Py\Uninstall.exe" /S
+   ```
 
-> Note: If you need to verify the DLL exports directly, you can run the verification script from the development environment:
-> ```bash
-> python dev-tools/tests/verify_dll_exports.py
-> ```
-> This is more reliable than the included PowerShell script which may have syntax issues.
-
-#### Testing Scenarios
-
-1. **First-Time User Experience**:
-   - Verify the application runs without errors on first launch
-   - Test vault creation with a master password
-   - Verify that the Rust crypto module is properly loaded (not falling back to Python)
-
-2. **Core Functionality**:
-   - Add TOTP secrets through manual entry or QR code images
-   - Generate and verify TOTP codes
-   - Test navigation and different command options
-
-3. **Persistence**:
-   - Add several TOTP secrets
-   - Exit the container and resume it using the `-Resume` parameter
-   - Verify that all saved secrets are still available and working
-
-4. **Security**:
-   - Verify master password requirements
-   - Check that vault encryption is working correctly
-   - Test that the vault remains locked until properly authenticated
+4. **Persistence**: Test across container restarts using the Resume flag
 
 #### Troubleshooting Docker Tests
 
-If you encounter issues with the Docker container:
-
-1. **DLL Loading Problems**:
-   - Check that the `truefa_crypto.dll` is present in `C:\TrueFA\`
-   - Verify Visual C++ Redistributable is properly installed
-   - Run the verification script for detailed diagnostics
-
-2. **Container Access Issues**:
-   - Ensure Docker Desktop is running in Windows containers mode
-   - Check Docker permissions (run as Administrator if needed)
-   - Verify Docker volume mounting is working correctly
-
-3. **Application Crashes**:
-   - Check for error messages in the console
-   - Look for `.dll_crash` marker files in the data directories
-   - Try running with `--verbose` if supported for detailed logs
-
-This testing environment is crucial for verifying cross-Windows compatibility and is not intended for production use.
-
-### Automated Test Scripts
-
-The `dev-tools/tests` directory contains automated test scripts:
-
-- `create_test_qr.py`: Creates test QR codes for validation
-- `verify_dll_exports.py`: Validates DLL exports and function availability
-- `verify_rust_crypto.py`: Tests full crypto functionality
-- `test_vault_creation.py`: Tests vault creation and management
-- `test_vault_persistence.py`: Tests data persistence across sessions
-- `docker-crypto-init.py`: Initializes and tests cryptographic operations in Docker environments
-
-### Windows Compatibility Testing
-
-Test compatibility across different Windows versions:
-
-```powershell
-# Run the Windows compatibility check
-.\docker\windows\run_vault_test_docker.ps1
-```
-
-### Rust Cryptography Testing
-
-To verify that the Rust cryptography is working correctly:
-
-```bash
-# Verify DLL exports
-python dev-tools/tests/verify_dll_exports.py
-
-# For comprehensive crypto functionality testing
-python dev-tools/tests/verify_rust_crypto.py
-```
-
-The verification scripts test all key Rust functions including:
-- SecureString creation
-- Random bytes generation
-- Encryption and decryption
-- Key derivation
-- Vault operations
-
-The `verify_dll_exports.py` script focuses specifically on the C-level FFI integration, ensuring all required functions are properly exported from the DLL and can be called directly.
-
-### Cleaning Test Data
-
-When testing, you may need to clean up all data directories:
-
-```bash
-# Remove all TrueFA data directories
-python dev-tools/clean_truefa.py
-```
-
-This script removes all vault data, configuration files, and cached secrets across all possible storage locations.
+Common issues include:
+- **DLL Loading Problems**: Check DLL presence and Visual C++ installation
+- **QR Code Issues**: Verify test image exists and path is correct
+- **Container Access**: Ensure Windows containers mode and proper permissions
+- **Installation Issues**: Check paths and try without silent mode if needed
 
 ## Security Considerations
 
-### Cryptographic Design
+TrueFA-Py implements a comprehensive security model to protect sensitive authentication data. For detailed information about the security implementation, please refer to the [Security Documentation](SECURITY.md).
 
-TrueFA-Py uses a two-layer security model:
+### Key Security Features
 
-1. **Outer Layer**: User's master password derives a key using PBKDF2 with 100,000 iterations
-2. **Inner Layer**: Master key encrypts individual TOTP secrets using AES-GCM
+- Two-layer encryption model with PBKDF2 and AES-GCM
+- Secure memory handling with automatic zeroing
+- Rust implementation of critical cryptographic functions
+- Platform-specific security optimizations
 
-### Implementation Security
+For security auditing, focus on these critical components:
 
-#### Memory Safety
-
-- Sensitive data (passwords, keys) use secure memory when available
-- Memory is explicitly zeroed when no longer needed
-- Secure strings prevent accidental logging or exposure
-
-#### Authentication
-
-- The master password is never stored, only a derived key verification value
-- Failed authentication attempts do not reveal timing information about password correctness
-
-#### Transport Security
-
-- No network communication for core cryptographic operations
-- QR codes can be loaded from files rather than direct camera access
-
-### Audit Recommendations
-
-For security auditing, focus on:
-
-1. The Rust cryptography implementation in `rust_crypto/src/`
+1. Rust cryptography in `rust_crypto/src/`
 2. Python-Rust binding in `src/truefa_crypto/__init__.py`
-3. Vault implementation in `src/vault/vault.py`
-4. Secret handling in `src/totp/auth_opencv.py`
+3. Vault implementation in `src/security/vault.py`
+4. TOTP handling in `src/totp/auth_opencv.py`
 
 ## Distribution
 
 ### Windows Distribution
 
-1. Run the build script with installer option:
-   ```powershell
-   .\dev-tools\build.ps1 -BuildRust -Clean -Installer
-   ```
-
-2. Verify the installer in `dist/TrueFA-Py_Setup.exe`
-
-### Docker Distribution
-
-1. Build the Docker image:
-   ```bash
-   docker build -t truefa-py -f docker/Dockerfile .
-   ```
-
-2. Run with development volumes:
-   ```bash
-   docker run -it --rm \
-     -v /path/to/store/vault:/home/truefa/.truefa \
-     -v /path/to/your/images:/app/images \
-     truefa-py
-   ```
-
-3. Key Docker features:
-   - OpenCV dependencies for QR code scanning
-   - Multi-stage build with optimized Rust library
-   - Volume mounts for images and vault data
-   - Non-root user for enhanced security
-   - Custom entrypoint script with fallback capabilities
+```powershell
+# Create distribution packages (combine as needed)
+.\dev-tools\build.ps1 -BuildRust -Clean -Portable -Installer
+```
 
 ### Portable Distribution
 
-1. Build the portable package:
-   ```powershell
-   .\dev-tools\build.ps1 -BuildRust -Clean -Portable
-   ```
-
-2. Verify the package in `dist/TrueFA-Py-Windows.zip`
+- Output: `dist/TrueFA-Py.exe`
+- Self-contained with minimal dependencies
+- Supports custom vault locations
 
 ## Troubleshooting
 
-### Common Development Issues
+### Common Issues
 
 #### Rust DLL Not Found
-
-**Symptoms**: Error loading the Rust DLL, such as `ImportError: DLL load failed`
-
-**Solution**:
-- Ensure Rust is installed and the DLL is built (`cargo build --release`)
-- Check that the DLL is in one of the expected locations
-- Look for `.dll_crash` marker file in `.truefa` directory
-- Try with `TRUEFA_USE_FALLBACK=1` to bypass the Rust implementation
+- Ensure Rust is installed and DLL is built
+- Check expected locations or use fallback (`TRUEFA_USE_FALLBACK=1`)
 
 #### Build Failures
+- Use `-Clean` option for fresh builds
+- Check for Python environment conflicts
 
-**Symptoms**: PyInstaller fails to build the application
-
-**Solution**:
-- Use the `-Clean` option to start with a fresh build
-- Check PyInstaller logs in the `
+#### Permission Issues
+- Run as administrator for system directories
+- Use custom vault location with `-VaultDir` option
