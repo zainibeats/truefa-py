@@ -7,12 +7,13 @@ Welcome to the TrueFA-Py documentation. This directory contains comprehensive gu
 ### For Users
 
 - [**Main README**](../README.md) - Installation, features, usage, and security architecture
+- [**FAQ**](docs/FAQ.md)
 
-- [**Development Status**](DEVELOPMENT_STATUS.md) - Current state of the project, recent improvements, and planned enhancements
 
 ### For Developers
 
 - [**Developer Guide**](DEVELOPER_GUIDE.md) - Development setup, testing, Rust integration, build process, and security considerations
+- [**Development Status**](DEVELOPMENT_STATUS.md) - Current state of the project, recent improvements, and planned enhancements
 
 ## Project Structure
 
