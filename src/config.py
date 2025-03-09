@@ -159,13 +159,12 @@ def get_secure_data_directory():
         # This will restrict access to only the owner account
         try:
             # Use icacls to set permissions (Windows-specific)
-            # This denies access to everyone except the owner
+            # This grants access to the owner but still allows administrators to manage files if needed
             subprocess.run([
                 "icacls", 
                 secure_dir, 
                 "/inheritance:r",  # Remove inherited permissions
                 "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Grant full control to owner
-                "/deny", f"*S-1-1-0:(OI)(CI)(DE,DC)",  # Deny everyone delete/change permissions
             ], check=False, capture_output=True)
         except Exception as e:
             print(f"Warning: Could not set secure permissions: {e}")

@@ -152,8 +152,8 @@ class SecureStorage:
         
         # Set up storage directories with secure permissions
         self._ensure_secure_directory(self._vault_directory)
+        # Define exports path but don't create it until needed
         self.exports_path = os.path.join(self._vault_directory, 'exports')
-        self._ensure_secure_directory(self.exports_path)
         
         # Load existing master password state
         self.master_file = os.path.join(self._vault_directory, '.master')
@@ -1046,8 +1046,15 @@ class SecureStorage:
             export_path += '.gpg'
         
         try:
+            # Create exports directory only when needed
+            self._ensure_secure_directory(self.exports_path)
+            
             # Create temporary export file
             temp_export = os.path.join(self.exports_path, '.temp_export')
+            
+            # Clean up any existing temp files
+            if os.path.exists(temp_export):
+                os.remove(temp_export)
             
             # Write secrets to temp file
             secrets_count = 0
@@ -1065,17 +1072,6 @@ class SecureStorage:
                 json.dump(secrets, f, indent=4)
             
             try:
-                # Set up secure exports directory
-                os.makedirs(self.exports_path, mode=0o700, exist_ok=True)
-                
-                # Clean up any existing temp files
-                if os.path.exists(temp_export):
-                    os.remove(temp_export)
-                
-                # Write secrets to temp file
-                with open(temp_export, 'w') as f:
-                    json.dump(secrets, f, indent=4)
-                
                 # Set up GPG environment
                 gpg_env = os.environ.copy()
                 gpg_env['GNUPGHOME'] = self.exports_path

@@ -116,6 +116,26 @@ def main():
                 traceback.print_exc()
                 
         print("Exiting securely...")
+        # Clean up any temporary files that might have been created
+        try:
+            from config import TEMP_DIR
+            import shutil
+            
+            # Clean up the temp directory but don't delete the directory itself
+            if os.path.exists(TEMP_DIR):
+                print(f"Cleaning up temporary files in {TEMP_DIR}")
+                for item in os.listdir(TEMP_DIR):
+                    item_path = os.path.join(TEMP_DIR, item)
+                    try:
+                        if os.path.isfile(item_path):
+                            os.unlink(item_path)
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                    except Exception as e:
+                        print(f"Error cleaning up {item_path}: {e}")
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+            
         return 0
         
     except Exception as e:
