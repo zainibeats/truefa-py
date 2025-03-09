@@ -7,8 +7,6 @@ Welcome to the TrueFA-Py documentation. This directory contains comprehensive gu
 ### For Users
 
 - [**Main README**](../README.md) - Installation, features, usage, and security architecture
-- [**FAQ**](docs/FAQ.md)
-
 
 ### For Developers
 
