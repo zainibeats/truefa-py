@@ -6,20 +6,19 @@ FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 SHELL ["cmd", "/S", "/C"]
 
-# Install Visual C++ Redistributable (required for many Python C extensions and Rust DLLs)
-ADD https://aka.ms/vs/17/release/vc_redist.x64.exe C:/vc_redist.x64.exe
-RUN C:/vc_redist.x64.exe /install /quiet /norestart
+# Install Visual C++ Redistributable (required for Rust DLLs)
+ADD https://aka.ms/vs/17/release/vc_redist.x64.exe C:\vc_redist.x64.exe
+RUN C:\vc_redist.x64.exe /install /quiet /norestart
+RUN del C:\vc_redist.x64.exe
 
 # Setup a testing environment
 RUN mkdir C:\TrueFA
-RUN mkdir C:\TrueFA\images
 RUN mkdir C:\vault_data
 
 # Copy the TrueFA executable and associated files
 COPY dist\TrueFA-Py.exe C:\TrueFA\
 COPY dist\TrueFA-Py_Setup_0.1.0.exe C:\TrueFA\
 COPY truefa_crypto\truefa_crypto.dll C:\TrueFA\
-COPY images C:\TrueFA\images
 COPY docker\windows\verify_crypto.ps1 C:\TrueFA\
 
 # Add TrueFA to the PATH for easy access
