@@ -240,6 +240,16 @@ try:
             # Main loop for command-line interface
             while True:
                 try:
+                    # Security check: Periodically verify vault state is accurate
+                    if hasattr(storage, 'verify_unlocked') and session_state["vault_unlocked_this_session"]:
+                        debug_print("Performing periodic security check of vault state...")
+                        if not storage.verify_unlocked():
+                            debug_print("Security check failed: vault reports as locked but session thinks it's unlocked")
+                            debug_print("Resetting session state to locked for security")
+                            session_state["vault_unlocked_this_session"] = False
+                        else:
+                            debug_print("Security check passed: vault state and session state are in sync")
+                    
                     # Display menu
                     print("\n=== TrueFA ===")
                     print("1. Load QR code from image")
@@ -311,8 +321,19 @@ try:
                             else:
                                 print(f"Secret saved as '{name}'.")
                                 
-                            # Update session state
-                            debug_print(f"Updated vault_unlocked to {vault_unlocked}")
+                                # Update session state if the vault is now unlocked
+                                debug_print(f"After save_secret - storage.is_unlocked: {storage.is_unlocked}")
+                                debug_print(f"After save_secret - storage.vault.is_unlocked: {storage.vault.is_unlocked}")
+                                
+                                # Verify the vault is truly unlocked using the secure method
+                                is_truly_unlocked = storage.verify_unlocked()
+                                debug_print(f"Secure verification after save: is_truly_unlocked = {is_truly_unlocked}")
+                                
+                                if is_truly_unlocked:
+                                    # Update the session state with confidence
+                                    session_state["vault_unlocked_this_session"] = True
+                                    session_state["master_password"] = auth.last_used_password if hasattr(auth, 'last_used_password') else None
+                                    debug_print("Updated session_state to mark vault as securely verified and unlocked")
                         else:
                             print("No secret to save. Please load a QR code or enter a secret first.")
                             continue
@@ -405,27 +426,31 @@ try:
                             print("No vault found. Please create a vault first.")
                             continue
                             
-                        # Check if vault is already unlocked
-                        debug_print(f"Vault is unlocked: {storage.is_unlocked}")
-                        debug_print(f"session_state: {session_state}")
+                        # Check if vault is already unlocked 
+                        debug_print(f"Before unlock check - Vault is unlocked: {storage.is_unlocked}")
                         
-                        # If the vault is already unlocked, skip directly to listing secrets
-                        if storage.is_unlocked:
-                            debug_print("Vault is already unlocked, proceeding directly to listing secrets")
+                        # Use the secure verification method to check if truly unlocked
+                        is_truly_unlocked = storage.verify_unlocked()
+                        debug_print(f"Secure verification result: is_truly_unlocked = {is_truly_unlocked}")
+                            
+                        # If the vault is already unlocked (verified), skip directly to listing secrets
+                        if is_truly_unlocked:
+                            debug_print("Vault is verified as unlocked, proceeding directly to listing secrets")
                         # If vault was unlocked earlier in the session but object state was lost, restore it
                         elif session_state["vault_unlocked_this_session"] and session_state["master_password"]:
                             print("Restoring vault unlock state from session...")
                             success = storage.unlock(session_state["master_password"])
-                            if success:
-                                debug_print("Vault successfully unlocked with cached password.")
+                            # Verify the unlock was successful with the secure method
+                            if success and storage.verify_unlocked():
+                                debug_print("Vault successfully unlocked with cached password and verified.")
                             else:
                                 print_warning("Failed to restore vault unlock state. Please re-enter your password.")
                                 # Reset the session state since our cached password doesn't work
                                 session_state["vault_unlocked_this_session"] = False
                                 session_state["master_password"] = None
-                        
-                        # If vault is still not unlocked, prompt for password
-                        if not storage.is_unlocked:
+                                
+                        # Final check - if vault is still not unlocked, prompt for password
+                        if not storage.verify_unlocked():
                             print("\nVault is locked. Please enter your master password to view your saved secrets.")
                             master_password = getpass.getpass("Enter your vault master password: ")
                             if not master_password:
@@ -434,6 +459,12 @@ try:
                             if not storage.unlock(master_password):
                                 print("Invalid password. Unable to unlock the vault.")
                                 continue
+                                
+                            # Verify unlock was successful with secure method
+                            if not storage.verify_unlocked():
+                                print_warning("Failed to verify vault unlock. Please try again.")
+                                continue
+                                
                             print("Vault unlocked successfully.")
                             # Store in session state for future operations
                             session_state["vault_unlocked_this_session"] = True
