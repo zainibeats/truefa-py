@@ -7,10 +7,11 @@ This guide provides information for developing, building, testing, and securing 
 1. [Development Environment Setup](#development-environment-setup)
 2. [Building TrueFA-Py](#building-truefa-py)
 3. [Rust Cryptography Integration](#rust-cryptography-integration)
-4. [Testing](#testing)
-5. [Security Considerations](#security-considerations)
-6. [Distribution](#distribution)
-7. [Troubleshooting](#troubleshooting)
+4. [Logging System](#logging-system)
+5. [Testing](#testing)
+6. [Security Considerations](#security-considerations)
+7. [Distribution](#distribution)
+8. [Troubleshooting](#troubleshooting)
 
 ## Development Environment Setup
 
@@ -47,6 +48,8 @@ TrueFA-Py supports several environment variables to customize behavior:
 | `TRUEFA_PORTABLE` | Enable portable mode (1=yes) | Current directory |
 | `TRUEFA_DATA_DIR` | Override data directory | Platform user directory |
 | `TRUEFA_USE_FALLBACK` | Force Python fallback (1=yes) | Auto-detection |
+| `TRUEFA_DEBUG` | Enable debug mode (1=yes) | Disabled |
+| `TRUEFA_LOG` | Enable file logging (1=yes) | Enabled |
 
 ## Building TrueFA-Py
 
@@ -108,6 +111,91 @@ The system automatically detects issues and falls back to Python:
 python dev-tools/tests/verify_dll_exports.py  # Checks FFI exports
 python dev-tools/tests/verify_rust_crypto.py  # Tests functionality
 ```
+
+## Logging System
+
+TrueFA-Py implements a standardized logging system based on Python's built-in `logging` module.
+
+### Logging Architecture
+
+The logging system in `src/utils/logger.py` provides:
+
+1. **Dual-Channel Logging**:
+   - Console output (configurable level)
+   - File logging (separate level control)
+   - Control via command-line flags: `--debug`, `--no-log`
+
+2. **Log Levels**:
+   - DEBUG: Detailed development information
+   - INFO: General information messages
+   - WARNING: Potential issues (default console level)
+   - ERROR: Operation failures
+   - CRITICAL: Application-breaking issues
+
+3. **File Organization**:
+   - Log files stored in `~/.truefa/logs/`
+   - Timestamp-based naming: `truefa_YYYYMMDD_HHMMSS.log`
+
+### Logging vs. Debug System
+
+TrueFA-Py has two systems for different purposes:
+
+- **Logging System** (`logger.py`): Structured, persistent logging with multiple levels
+- **Debug System** (`debug.py`): Simple on/off toggle for development-time debugging
+
+For all new code, use the logging system functions.
+
+### Usage
+
+#### Command-Line Options
+
+```bash
+# Standard: warnings in console, all to file
+python main.py
+
+# Debug mode: debug messages in console, all to file
+python main.py --debug
+
+# No file logging: warnings in console only
+python main.py --no-log
+```
+
+#### Logging Functions
+
+```python
+from src.utils.logger import debug, info, warning, error, critical
+
+# For detailed implementation details
+debug("Processing value: {}", some_value)
+
+# For general information
+info("Operation completed successfully")
+
+# For potential issues that don't stop execution
+warning("Deprecated method used")
+
+# For operation failures
+error("Failed to open file: {}", filename)
+
+# For application-breaking issues
+critical("System cannot continue: {}", error_msg)
+```
+
+### Best Practices
+
+1. **Use Appropriate Levels** based on message importance and audience
+2. **Include Context** such as object IDs and relevant values (avoid logging secrets)
+3. **Configure External Modules** with `logging.getLogger('module_name').setLevel(level)`
+
+### Log Format
+
+```
+[2023-03-09 15:42:45] DEBUG [main.py:154]: Importing modules...
+[2023-03-09 15:42:45] INFO [vault.py:235]: Vault created successfully
+[2023-03-09 15:42:46] WARNING [secure_memory.py:102]: Fallback implementation used
+```
+
+Each entry includes timestamp, level, source location, and the actual message.
 
 ## Testing
 
