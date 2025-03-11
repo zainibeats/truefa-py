@@ -1,17 +1,19 @@
 # TrueFA-Py Documentation
 
-Welcome to the TrueFA-Py documentation. This directory contains comprehensive guides to help you use, understand, and contribute to TrueFA-Py
+Welcome to the TrueFA-Py documentation. This directory contains comprehensive guides to help you use, understand, and contribute to TrueFA-Py.
 
 ## Documentation Index
 
 ### For Users
 
 - [**Main README**](../README.md) - Installation, features, usage, and security architecture
+- [**Security Documentation**](SECURITY.md) - Detailed security model and implementation
 
 ### For Developers
 
 - [**Developer Guide**](DEVELOPER_GUIDE.md) - Development setup, testing, Rust integration, build process, and security considerations
 - [**Development Status**](DEVELOPMENT_STATUS.md) - Current state of the project, recent improvements, and planned enhancements
+- [**Dev Tools README**](../dev-tools/README.md) - Build scripts and development utilities documentation
 
 ## Project Structure
 
@@ -38,6 +40,7 @@ truefa-py/
 - For **installation and usage**, see the [Main README](../README.md)
 - For **development setup**, see the [Developer Guide](DEVELOPER_GUIDE.md)
 - For **project status**, see the [Development Status](DEVELOPMENT_STATUS.md)
+- For **security details**, see the [Security Documentation](SECURITY.md)
 
 ## Additional Resources
 

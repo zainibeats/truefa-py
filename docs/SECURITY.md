@@ -11,6 +11,8 @@ This document describes the security model, cryptographic implementations, and b
 5. [Authentication](#authentication)
 6. [Security Considerations](#security-considerations)
 7. [Audit Guidelines](#audit-guidelines)
+8. [References](#references)
+9. [Related Documentation](#related-documentation)
 
 ## Cryptographic Design
 
@@ -94,6 +96,8 @@ The secure vault implements several security features:
 - **Periodic Checks**: State verification is performed regularly during application operation
 - **Fail-Secure**: Any verification failures default to a locked state for maximum security
 
+Implementation: [src/security/secure_storage.py:verify_unlocked()](../src/security/secure_storage.py) method
+
 ## Memory Management
 
 ### Secure Memory Handling
@@ -111,6 +115,8 @@ TrueFA-Py implements several memory protection mechanisms:
 - String comparison operations use constant-time algorithms
 - Automatic clearing when strings go out of scope
 - Protection against accidental logging or printing
+
+Implementation: [src/security/secure_string.py](../src/security/secure_string.py) and Rust-based implementation in [rust_crypto/src](../rust_crypto/src)
 
 ## Authentication
 
@@ -191,4 +197,10 @@ For security auditing, focus on these critical components:
 - [OWASP Cryptographic Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html)
 - [NIST SP 800-63B Digital Identity Guidelines](https://pages.nist.gov/800-63-3/sp800-63b.html)
 - [Rust Security Advisory Database](https://rustsec.org/)
-- [TrueFA-Py Developer Guide](DEVELOPER_GUIDE.md) 
+
+## Related Documentation
+
+- [Developer Guide](DEVELOPER_GUIDE.md) - Development setup and technical details
+- [Development Status](DEVELOPMENT_STATUS.md) - Current state and security improvements
+- [Documentation Index](README.md) - Overview of all available documentation
+- [Main README](../README.md) - Project overview and high-level security architecture 

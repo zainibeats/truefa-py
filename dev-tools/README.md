@@ -63,7 +63,6 @@ The `tests` directory contains testing scripts and utilities:
 - `verify_rust_crypto.py`: Comprehensive verification of Rust crypto functionality
 - `test_vault_creation.py`: Tests vault creation and management
 - `test_vault_persistence.py`: Tests vault persistence across sessions
-- And more...
 
 ## Development Workflow
 
@@ -72,6 +71,13 @@ The `tests` directory contains testing scripts and utilities:
 3. **Building for Testing**: Use `build.ps1` with appropriate options
 4. **Final Builds**: Use `build_package.py` for creating optimized release builds
 5. **Testing**: Use appropriate test scripts from the `dev-tools/tests` directory
+
+## Related Documentation
+
+- [Developer Guide](../docs/DEVELOPER_GUIDE.md) - Comprehensive development documentation
+- [Security Documentation](../docs/SECURITY.md) - Security architecture and implementation details
+- [Development Status](../docs/DEVELOPMENT_STATUS.md) - Current project state and recent improvements
+- [Documentation Index](../docs/README.md) - Overview of all available documentation
 
 ## Additional Information
 

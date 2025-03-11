@@ -12,6 +12,7 @@ This guide provides information for developing, building, testing, and securing 
 6. [Security Considerations](#security-considerations)
 7. [Distribution](#distribution)
 8. [Troubleshooting](#troubleshooting)
+9. [Related Documentation](#related-documentation)
 
 ## Development Environment Setup
 
@@ -76,6 +77,8 @@ This creates:
 - `dist/TrueFA-Py.exe` (portable version)
 - `dist/TrueFA-Py_Setup_0.1.0.exe` (installer version)
 
+See [dev-tools/README.md](../dev-tools/README.md) for detailed build script documentation.
+
 ## Rust Cryptography Integration
 
 TrueFA-Py uses Rust for critical cryptographic operations with Python fallbacks when needed.
@@ -96,6 +99,8 @@ TrueFA-Py uses Rust for critical cryptographic operations with Python fallbacks 
 - Enhanced DLL loading with multi-location search
 - Implemented secure memory management
 - Added comprehensive verification and test suites
+
+The security implementation details are further described in the [Security Documentation](SECURITY.md#rust-implementation).
 
 ### Intelligent Fallback
 
@@ -316,3 +321,11 @@ For security auditing, focus on these critical components:
 #### Permission Issues
 - Run as administrator for system directories
 - Use custom vault location with `-VaultDir` option
+
+## Related Documentation
+
+- [Security Documentation](SECURITY.md) - Detailed security model and implementation
+- [Development Status](DEVELOPMENT_STATUS.md) - Current state and recent improvements
+- [Dev Tools README](../dev-tools/README.md) - Build scripts and development utilities
+- [Documentation Index](README.md) - Overview of all available documentation
+- [Main README](../README.md) - Project overview and high-level architecture

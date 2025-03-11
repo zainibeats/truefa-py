@@ -1,6 +1,6 @@
 # TrueFA-Py Development Status
 
-This document tracks the current state of the TrueFA-Py project and remaining issues
+This document tracks the current state of the TrueFA-Py project and remaining issues.
 
 ## Current State
 
@@ -16,27 +16,28 @@ The project has reached a significant milestone with both portable executable an
 
 ## Completed Milestones
 
-1. **Rust Cryptography Integration**:
-   - Successfully fixed `c_create_secure_string` function and properly exported it in the DLL
-   - Implemented intelligent fallback mechanism for cryptography operations
-   - Added comprehensive verification tools for testing cryptography functions
+### 1. Rust Cryptography Integration
+- Successfully fixed `c_create_secure_string` function and properly exported it in the DLL
+- Implemented intelligent fallback mechanism for cryptography operations
+- Added comprehensive verification tools for testing cryptography functions
+- Added [state verification system](SECURITY.md#vault-state-verification) for vault security
 
-2. **Build System**:
-   - Created and validated both portable executable and installer packages
-   - Implemented flexible build options with PowerShell scripts
-   - Added Docker-based testing environment for cross-environment validation
+### 2. Build System
+- Created and validated both portable executable and installer packages
+- Implemented flexible build options with PowerShell scripts
+- Added Docker-based testing environment for cross-environment validation
 
-3. **Docker Container Testing**:
-   - Successfully tested both portable executable and installer in Windows Docker containers
-   - Verified vault persistence across application restarts
-   - Confirmed correct behavior with protected storage locations
+### 3. Docker Container Testing
+- Successfully tested both portable executable and installer in Windows Docker containers
+- Verified vault persistence across application restarts
+- Confirmed correct behavior with protected storage locations
 
-4. **Standardized Logging System**:
-   - Implemented Python's built-in logging module with flexible configuration
-   - Added independent control of console and file logging levels
-   - Created support for four distinct logging modes (normal, debug, no-log, debug+no-log)
-   - Added detailed log formatting with timestamps, source files, and line numbers
-   - Ensured backward compatibility with existing debug print statements
+### 4. Standardized Logging System
+- Implemented Python's built-in logging module with flexible configuration
+- Added independent control of console and file logging levels
+- Created support for four distinct logging modes (normal, debug, no-log, debug+no-log)
+- Added detailed log formatting with timestamps, source files, and line numbers
+- Ensured backward compatibility with existing debug print statements
 
 ## Technical Details
 
@@ -65,6 +66,8 @@ The project has reached a significant milestone with both portable executable an
 - Enhanced vault unlocking mechanism to require master password before viewing secret names
 - Implemented password caching to minimize repeated password prompts
 - Fixed issues with vault state management to maintain unlock state
+- Added [deep verification](SECURITY.md#vault-state-verification) of vault unlock state
+- Implemented fail-secure approach defaulting to locked state on verification failures
 
 ### Installation and Distribution
 - Successfully packaged both portable executable and installer versions
@@ -72,4 +75,8 @@ The project has reached a significant milestone with both portable executable an
 - Validated that the Rust DLL is correctly loaded in both portable and installed versions
 - Verified that vault persistence works correctly across application sessions
 
-For detailed testing instructions, refer to the [Developer Guide](DEVELOPER_GUIDE.md)
+## Related Documentation
+
+- [Developer Guide](DEVELOPER_GUIDE.md) - Detailed setup and testing instructions
+- [Security Documentation](SECURITY.md) - Security architecture and implementation details
+- [Documentation Index](README.md) - Overview of all available documentation
