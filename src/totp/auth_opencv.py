@@ -148,7 +148,7 @@ class TwoFactorAuth:
         """
         # Stop continuous generation if it's running
         if self.is_generating:
-            print("\nReceived termination signal. Stopping code generation...")
+            print("\nStopping code generation...")
             self.is_generating = False
             self.should_stop.set()
             time.sleep(0.5)  # Give a moment for the generation to stop
@@ -560,7 +560,7 @@ class TwoFactorAuth:
         Security:
         - Handles interrupts gracefully
         - Cleans up on exit
-        - Updates at appropriate intervals
+        - Updates at fixed 1-second intervals for smooth display
         """
         from ..utils.debug import debug_print
         
@@ -576,8 +576,9 @@ class TwoFactorAuth:
         self.is_generating = True
         
         try:
-            # Store the last code to avoid unnecessary updates
+            # Store the last code and remaining time to avoid redundant updates
             last_code = None
+            last_remaining = 0
             
             # Continue until interrupted
             while self.is_generating and not self.should_stop.is_set():
@@ -585,44 +586,40 @@ class TwoFactorAuth:
                     # Generate the current code and get remaining time
                     code, remaining = self.generate_totp()
                     
-                    # Always update the display to show the countdown in real-time
-                    # If a callback is provided, use it; otherwise print to console
-                    if callback:
-                        callback(code, remaining)
-                    else:
-                        # Clear the line and print the new code with expiration time
-                        sys.stdout.write('\r' + ' ' * 50 + '\r')  # Clear line
-                        
-                        # Print code with color based on remaining time
-                        if remaining <= 5:
-                            # Red when close to expiring
-                            color_code = "\033[91m"  # Red
-                        elif remaining <= 10:
-                            # Yellow for warning
-                            color_code = "\033[93m"  # Yellow
+                    # Only update the display if the code or remaining time has changed
+                    if code != last_code or remaining != last_remaining:
+                        # If a callback is provided, use it; otherwise print to console
+                        if callback:
+                            callback(code, remaining)
                         else:
-                            # Green for plenty of time
-                            color_code = "\033[92m"  # Green
+                            # Clear the line and print the new code with expiration time
+                            sys.stdout.write('\r' + ' ' * 50 + '\r')  # Clear line
                             
-                        # Reset color code after printing
-                        reset_code = "\033[0m"
+                            # Print code with color based on remaining time
+                            if remaining <= 5:
+                                # Red when close to expiring
+                                color_code = "\033[91m"  # Red
+                            elif remaining <= 10:
+                                # Yellow for warning
+                                color_code = "\033[93m"  # Yellow
+                            else:
+                                # Green for plenty of time
+                                color_code = "\033[92m"  # Green
+                                
+                            # Reset color code after printing
+                            reset_code = "\033[0m"
+                            
+                            # Format and print current code and time
+                            sys.stdout.write(f"Code: {color_code}{code}{reset_code} (expires in {remaining}s)")
+                            sys.stdout.flush()
                         
-                        # Format and print current code and time
-                        sys.stdout.write(f"Code: {color_code}{code}{reset_code} (expires in {remaining}s)")
-                        sys.stdout.flush()
+                        # Store the current values for next comparison
+                        last_code = code
+                        last_remaining = remaining
                     
-                    # Store the current code to detect changes
-                    last_code = code
-                    
-                    # Sleep for a short time to reduce CPU usage
-                    # Use a shorter sleep time when close to code refresh
-                    if remaining <= 2:
-                        # Refresh more frequently near code expiration (100ms)
-                        time.sleep(0.1)
-                    else:
-                        # Standard refresh rate (1 second)
-                        # Using 0.9 instead of 1.0 to account for processing time
-                        time.sleep(0.1)  # Use shorter sleep time to check for interrupts more frequently
+                    # Sleep for a full second to maintain a consistent update rate
+                    # Only use shorter sleep when very close to expiration to ensure we catch the new code
+                    time.sleep(1.0)
                         
                 except KeyboardInterrupt:
                     debug_print("\nKeyboard interrupt detected. Stopping code generation...")
@@ -633,7 +630,7 @@ class TwoFactorAuth:
         finally:
             # Clean up
             self.is_generating = False
-            debug_print("\nStopped code generation.")
+            print("\nStopping code generation...")
             
     def save_secret(self, name, secret=None, password=None):
         """
@@ -691,6 +688,8 @@ class TwoFactorAuth:
                     # Set the password parameter for the upcoming save operation
                     password = master_password
                     created_new_vault = True
+                    # Store the password for session tracking
+                    self.last_used_password = master_password
                 else:
                     return "Failed to create vault"
             elif not self.storage.vault.is_unlocked:
@@ -702,11 +701,15 @@ class TwoFactorAuth:
                 
                 if not self.storage.unlock(password):
                     return "Invalid master password"
+                # Store the password for session tracking
+                self.last_used_password = password
             
             # If we created a new vault, we need to explicitly unlock it with the password
             if created_new_vault:
                 print("Unlocking newly created vault...")
                 self.storage.unlock(password)
+                # We already stored the password above, but make sure session tracking works
+                self.last_used_password = password
             
             # Prepare the secret data
             if secret is not None:

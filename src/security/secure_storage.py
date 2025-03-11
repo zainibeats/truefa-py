@@ -184,6 +184,45 @@ class SecureStorage:
         """Check if the storage is unlocked."""
         return self._unlocked
         
+    def verify_unlocked(self):
+        """
+        Securely verify that the vault is truly unlocked by checking the master key.
+        
+        This is more secure than just checking a boolean flag because it actually verifies
+        that the master key is available and valid.
+        
+        Returns:
+            bool: True if the vault is truly unlocked, False otherwise
+        """
+        try:
+            # First do a quick check of the boolean flag
+            if not self._unlocked:
+                debug("Storage reports as locked via _unlocked flag")
+                return False
+                
+            # Then verify that the vault object also reports as unlocked
+            if not self.vault.is_unlocked:
+                debug("Vault reports as locked but storage reports as unlocked - fixing inconsistency")
+                self._unlocked = False
+                return False
+                
+            # Then try to actually get the master key - the real test
+            master_key = self.vault.get_master_key()
+            if not master_key:
+                debug("Failed to get master key despite unlocked flags - vault is not truly unlocked")
+                # Fix the incorrect state
+                self._unlocked = False
+                return False
+                
+            # If we got here, the vault is truly unlocked
+            debug("Verified vault is truly unlocked with valid master key")
+            return True
+        except Exception as e:
+            error(f"Error verifying unlock state: {e}")
+            # If there's an error, assume locked for security
+            self._unlocked = False
+            return False
+
     def create_vault(self, master_password):
         """
         Create a new secure vault for storing TOTP secrets.
@@ -211,11 +250,11 @@ class SecureStorage:
             
             if success:
                 info("Secure vault created successfully")
-                try:
-                    vault_data = self.vault.get_metadata()
-                    debug(f"Created vault data keys: {list(vault_data.keys())}")
-                except Exception as e:
-                    error(f"Error reading created vault: {e}")
+                # Update our internal unlocked state since a newly created vault is unlocked
+                self._unlocked = True
+                debug("Set internal unlocked state to True after vault creation")
+                # Don't try to access get_metadata() which doesn't exist
+                debug(f"Vault is now initialized: {self.vault.is_initialized}")
             return success
         except Exception as e:
             error(f"Error creating vault: {str(e)}")
@@ -238,6 +277,7 @@ class SecureStorage:
             # Check if already unlocked
             if self.vault.is_unlocked:
                 debug("Vault already unlocked, no need to unlock again")
+                self._unlocked = True  # Ensure our internal state matches
                 return True
                 
             # Check if vault is initialized
@@ -260,6 +300,11 @@ class SecureStorage:
                 debug("Attempting to unlock vault...")
                 success = self.vault.unlock(password)
                 debug(f"Vault unlock result: {success}")
+                
+                # Update our internal state to match the vault's unlocked state
+                if success:
+                    self._unlocked = True
+                    
                 return success
             except Exception as e:
                 error(f"Exception unlocking vault: {e}")

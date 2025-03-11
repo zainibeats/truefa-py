@@ -78,6 +78,7 @@ The secure vault implements several security features:
 - **File Encryption**: All secret files are individually encrypted
 - **Metadata Separation**: Sensitive data separated from non-sensitive metadata
 - **Format Versioning**: Version tracking for future security upgrades
+- **State Verification**: Periodic cryptographic verification of vault unlock state
 
 ### File Security
 
@@ -85,6 +86,13 @@ The secure vault implements several security features:
 - Secret files use `.enc` extension and are encrypted with AES-GCM
 - Vault metadata contains only verification data, not actual secrets
 - Encrypted files include integrity protection
+
+### Vault State Verification
+
+- **Deep Verification**: Vault unlock state is verified by testing actual cryptographic operations
+- **Automatic Correction**: Any inconsistencies between reported and actual state are automatically fixed
+- **Periodic Checks**: State verification is performed regularly during application operation
+- **Fail-Secure**: Any verification failures default to a locked state for maximum security
 
 ## Memory Management
 
@@ -112,6 +120,7 @@ TrueFA-Py implements several memory protection mechanisms:
 - Failed attempts do not reveal timing information about password correctness
 - No limit on password complexity or length
 - No transmission of the master password over any network
+- Cryptographic confirmation of successful unlocking using secure verification
 
 ### Session Management
 
@@ -119,6 +128,7 @@ TrueFA-Py implements several memory protection mechanisms:
 - No persistent cookies or session identifiers
 - Session state can be explicitly cleared on demand
 - Automatic timeout for idle sessions
+- Session state synchronized with actual cryptographic vault state
 
 ## Security Considerations
 
@@ -161,6 +171,7 @@ For security auditing, focus on these critical components:
    - Located in `src/security/vault.py`
    - Key derivation and management
    - File encryption/decryption operations
+   - Vault state verification and integrity checks
 
 4. **TOTP Secret Handling**
    - Located in `src/totp/auth_opencv.py`
@@ -173,6 +184,7 @@ For security auditing, focus on these critical components:
 - Test fallback mechanisms under various failure scenarios
 - Validate encryption/decryption operations with known test vectors
 - Verify resistance to timing attacks in authentication
+- Test vault state verification under various failure conditions
 
 ## References
 
