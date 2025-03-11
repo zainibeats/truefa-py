@@ -10,7 +10,9 @@ The project has reached a significant milestone with both portable executable an
 
 ## Outstanding Issues
 
-1. **OpenCV in Portable Version**: QR code scanning functionality requires OpenCV dependencies. While the portable executable itself doesn't bundle OpenCV, we've added Python and OpenCV to the Windows Docker container to support scanning of static QR code images. This enables testing of the full QR code functionality from image files without requiring a physical camera.
+1. **OpenCV in Portable Version**: QR code scanning functionality requires OpenCV dependencies. The portable executable itself doesn't bundle OpenCV, and we currently have challenges with OpenCV support in the Windows Docker container. This remains a limitation for testing the QR code functionality in containerized environments.
+
+2. **Windows Container OpenCV Support**: The Windows Docker container currently cannot support OpenCV installation, which limits the ability to test QR code scanning functionality in containerized Windows environments. Users testing in Windows containers will not be able to use QR code scanning features.
 
 ## Completed Milestones
 
@@ -29,6 +31,13 @@ The project has reached a significant milestone with both portable executable an
    - Verified vault persistence across application restarts
    - Confirmed correct behavior with protected storage locations
 
+4. **Standardized Logging System**:
+   - Implemented Python's built-in logging module with flexible configuration
+   - Added independent control of console and file logging levels
+   - Created support for four distinct logging modes (normal, debug, no-log, debug+no-log)
+   - Added detailed log formatting with timestamps, source files, and line numbers
+   - Ensured backward compatibility with existing debug print statements
+
 ## Technical Details
 
 ### Rust Cryptography Integration
@@ -39,7 +48,18 @@ The project has reached a significant milestone with both portable executable an
 - Created a verification tool to test all Rust crypto functions
 - Fixed key derivation to properly handle byte-based salt values
 
-For detailed information about the security implementation, please refer to the [Security Documentation](SECURITY.md).
+### Logging System
+- Replaced custom debug print implementation with standard Python logging
+- Added command-line flags for independent control of console and file logging
+- Implemented four logging modes to suit different usage scenarios:
+  - Regular mode: Warnings in console, all levels in file log
+  - Debug mode: All debug messages in console and file log
+  - No-log mode: Only warnings in console with no file logging
+  - Debug without logging: Debug messages in console without file logging
+- Added detailed log formatting with timestamps, source files, and line numbers
+- Ensured backward compatibility through a debug_print wrapper function
+- Created centralized logger configuration system for consistent logging across modules
+- Log files are stored in `~/.truefa/logs/` with timestamp-based naming
 
 ### Vault Security
 - Enhanced vault unlocking mechanism to require master password before viewing secret names
