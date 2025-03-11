@@ -42,7 +42,8 @@ if (-not $NoBuild) {
     if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
     
     # Run the build script with both portable and installer options
-    & .\dev-tools\build.ps1 -Clean -Portable -Installer
+    # Ensure logging is enabled but debug is disabled in release builds
+    & .\dev-tools\build.ps1 -Clean -Portable -Installer -DisableLogging:$False
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Build failed with code $LASTEXITCODE"

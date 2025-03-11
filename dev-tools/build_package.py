@@ -43,6 +43,8 @@ def setup_parser():
                         help="Hide console window (not recommended for CLI applications)")
     parser.add_argument("--fallback", action="store_true", 
                         help="Force use of Python fallback implementation")
+    parser.add_argument("--config-logging", type=str, default="logging=enabled,debug=disabled",
+                        help="Configure logging settings (format: logging=[enabled|disabled],debug=[enabled|disabled])")
     return parser
 
 def check_requirements():
@@ -290,20 +292,74 @@ VSVersionInfo(
     
     print("✓ Created version information file")
 
-def setup_environment(use_fallback):
+def configure_logging_settings(config_str):
+    """
+    Configure logging settings in the source code based on config string.
+    
+    Args:
+        config_str (str): Configuration string in format "logging=enabled|disabled,debug=enabled|disabled"
+        
+    Returns:
+        tuple: (logging_enabled, debug_enabled) boolean values
+    """
+    print(f"Configuring logging settings: {config_str}")
+    
+    # Default settings
+    logging_enabled = True
+    debug_enabled = False
+    
+    # Parse configuration string
+    try:
+        parts = config_str.split(',')
+        for part in parts:
+            key, value = part.strip().split('=')
+            if key.lower() == 'logging':
+                logging_enabled = value.lower() == 'enabled'
+            elif key.lower() == 'debug':
+                debug_enabled = value.lower() == 'enabled'
+    except Exception as e:
+        print(f"Error parsing logging configuration: {e}")
+        print("Using default settings: logging=enabled, debug=disabled")
+    
+    print(f"Logging configuration: logging={'enabled' if logging_enabled else 'disabled'}, "
+          f"debug={'enabled' if debug_enabled else 'disabled'}")
+    
+    # Create a temporary environment file that will be included in the build
+    env_file = '_build_env.py'
+    with open(env_file, 'w') as f:
+        f.write(f"""# Build-time environment settings
+# This file is generated during the build process and should not be edited manually
+LOGGING_ENABLED = {logging_enabled}
+DEBUG_ENABLED = {debug_enabled}
+""")
+    
+    return logging_enabled, debug_enabled
+
+def setup_environment(use_fallback, logging_enabled=True, debug_enabled=False):
     """Set up environment variables for the build."""
+    # Set environment variables for the build process
     if use_fallback:
-        print("Configuring build to use Python fallback implementation")
-        os.environ["TRUEFA_USE_FALLBACK"] = "true"
+        os.environ["TRUEFA_USE_FALLBACK"] = "1"
+        print("Using Python fallback implementation for cryptography")
     else:
-        print("Configuring build to use Rust crypto implementation")
-        os.environ["TRUEFA_USE_FALLBACK"] = "false"
+        os.environ.pop("TRUEFA_USE_FALLBACK", None)
+        print("Using native Rust cryptography implementation")
     
-    # Create or update .env file
-    with open(".env", "w") as f:
-        f.write(f"TRUEFA_USE_FALLBACK={'true' if use_fallback else 'false'}\n")
+    # Set logging environment variables
+    if logging_enabled:
+        os.environ["TRUEFA_LOG"] = "1"
+        print("File logging enabled")
+    else:
+        os.environ.pop("TRUEFA_LOG", None)
+        print("File logging disabled")
     
-    print(f"✓ Updated .env file to use {'Python fallback' if use_fallback else 'Rust implementation'}")
+    # Set debug environment variables
+    if debug_enabled:
+        os.environ["TRUEFA_DEBUG"] = "1" 
+        print("Debug mode enabled")
+    else:
+        os.environ.pop("TRUEFA_DEBUG", None)
+        print("Debug mode disabled")
 
 def build_executable(spec_file):
     """Build the executable using PyInstaller."""
@@ -484,10 +540,13 @@ def main():
         
     # Check for DLL
     dll_available, dll_path = check_dll()
+    
+    # Configure logging settings
+    logging_enabled, debug_enabled = configure_logging_settings(args.config_logging)
         
     # Set up environment (use fallback if requested)
     use_fallback = args.fallback or not dll_available
-    setup_environment(use_fallback)
+    setup_environment(use_fallback, logging_enabled, debug_enabled)
     
     # Create version file
     create_version_file()

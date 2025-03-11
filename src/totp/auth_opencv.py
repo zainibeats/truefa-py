@@ -37,10 +37,13 @@ import hashlib  # For file integrity verification
 import json
 import random
 import logging
+import shutil  # For copying files
+from src.utils.logger import warning, info, error
 
 # Import new security modules
 from ..security.file_integrity import FileIntegrityVerifier, add_hmac_to_file, verify_file_integrity
 from ..security.security_events import record_security_event
+from ..utils.debug import debug_print
 
 class TwoFactorAuth:
     """
@@ -74,10 +77,10 @@ class TwoFactorAuth:
         
         # Use provided storage or create a new one
         if storage is not None:
-            print("Using provided SecureStorage instance")
+            debug_print("Using provided SecureStorage instance")
             self.storage = storage
         else:
-            print("Creating new SecureStorage instance")
+            debug_print("Creating new SecureStorage instance")
             from ..security.secure_storage import SecureStorage
             self.storage = SecureStorage()
         
@@ -153,7 +156,7 @@ class TwoFactorAuth:
         
         # Otherwise clean up and exit (only for actual program termination)
         self.cleanup()
-        print("\nExiting securely...")
+        #print("\nExiting securely...")
         sys.exit(0)
 
     def cleanup(self):
@@ -212,7 +215,7 @@ class TwoFactorAuth:
                 os.chmod(temp_path, mode)
             except Exception as e:
                 # Continue even if chmod fails, this is best-effort
-                print(f"Warning: Could not set file permissions: {e}")
+                warning(f"Could not set file permissions: {e}")
             
             # Move temp file to final location (atomic on POSIX systems)
             if os.path.exists(file_path):
@@ -275,69 +278,71 @@ class TwoFactorAuth:
 
     def extract_secret_from_qr(self, image_path):
         """
-        Extract TOTP secret from a QR code image using OpenCV.
+        Extract TOTP secret from a QR code image.
         
         Args:
-            image_path: Path to the QR code image file
+            image_path (str): Path to the QR code image
             
         Returns:
-            tuple: (SecureString containing the secret, or None if failed,
-                   Error message string or None if successful)
-                   
-        Security:
-        - Validates and sanitizes image path
-        - Uses OpenCV's QR code detector
+            tuple: (SecureString or None, str) - The extracted secret and status message
+            
+        Features:
+        - Validates image path for security
+        - Extracts otpauth:// URL from QR code
+        - Parses URL to extract secret, issuer, and account
         - Securely stores extracted secret
         """
+        from ..utils.debug import debug_print
+        
         try:
             # Import OpenCV
             import cv2
-            print("DEBUG: OpenCV imported successfully")
+            debug_print("OpenCV imported successfully")
             
             # Check if image_path is None
             if image_path is None:
-                print("DEBUG: image_path is None")
+                debug_print("image_path is None")
                 return None, "No image path provided"
             
             # Validate the image path
             valid_path, error_msg = self._validate_image_path(image_path)
             if not valid_path:
-                print(f"DEBUG: Path validation failed: {error_msg}")
+                debug_print(f"Path validation failed: {error_msg}")
                 return None, error_msg
             
-            print(f"DEBUG: Reading image from validated path: {valid_path}")
+            debug_print(f"Reading image from validated path: {valid_path}")
             
             # Load the image using OpenCV
             img = cv2.imread(valid_path)
             if img is None:
-                print(f"DEBUG: Failed to read image: {valid_path}")
+                debug_print(f"Failed to read image: {valid_path}")
                 return None, f"Could not read image: {valid_path}"
             
-            print(f"DEBUG: Image loaded successfully, shape: {img.shape}")
+            debug_print(f"Image loaded successfully, shape: {img.shape}")
             
             # Initialize QR Code detector
             detector = cv2.QRCodeDetector()
             
             # Detect and decode
-            print("DEBUG: Attempting to detect and decode QR code...")
+            debug_print("Attempting to detect and decode QR code...")
             data, bbox, _ = detector.detectAndDecode(img)
             
-            print(f"DEBUG: QR code data: {data if data else 'None'}")
-            print(f"DEBUG: QR code bounding box: {bbox if bbox is not None else 'None'}")
+            debug_print(f"QR code data: {data if data else 'None'}")
+            debug_print(f"QR code bounding box: {bbox if bbox is not None else 'None'}")
             
             # Process QR code data
             if data:
-                print(f"DEBUG: Raw QR data: {data}")
+                debug_print(f"Raw QR data: {data}")
                 if data.startswith('otpauth://'):
                     parsed = urllib.parse.urlparse(data)
                     params = dict(urllib.parse.parse_qsl(parsed.query))
                     
-                    print(f"DEBUG: Parsed params: {params}")
+                    debug_print(f"Parsed params: {params}")
                     
                     if 'secret' in params:
                         # Extract and normalize the secret
                         secret = params['secret']
-                        print(f"DEBUG: Raw secret from QR: {secret}")
+                        debug_print(f"Raw secret from QR: {secret}")
                         
                         # Create a secure string from the extracted secret
                         secure_secret = SecureString(secret)
@@ -348,28 +353,35 @@ class TwoFactorAuth:
                             path = path[1:]
                         
                         if ':' in path:
-                            self.issuer, self.account = path.split(':', 1)
-                        else:
-                            self.account = path
-                            self.issuer = params.get('issuer', '')
+                            issuer_account = path.split(':')
+                            if len(issuer_account) >= 2:
+                                self.issuer = issuer_account[0]
+                                self.account = issuer_account[1]
                         
-                        print(f"DEBUG: Parsed issuer: {self.issuer}, account: {self.account}")
+                        # If issuer is in params, it takes precedence
+                        if 'issuer' in params:
+                            self.issuer = params['issuer']
+                            
+                        debug_print(f"Parsed issuer: {self.issuer}, account: {self.account}")
                         
-                        # Store the secret
+                        # Store the secret in the instance for later use with continuous_generate
                         self.secret = secure_secret
-                        return secure_secret, None
+                        debug_print("Secret successfully stored in the TwoFactorAuth instance")
+                        
+                        return secure_secret, "Secret extracted successfully"
+                    else:
+                        return None, "QR code does not contain a valid TOTP secret"
+                else:
+                    return None, "QR code does not contain an otpauth:// URL"
+            else:
+                return None, "No QR code detected in the image"
                 
-                return None, "No secret parameter found in otpauth URL"
-            
-            return None, "QR code not found or doesn't contain a valid otpauth URL"
         except ImportError as e:
-            print(f"DEBUG: ImportError: {e}")
-            return None, "OpenCV is required for QR scanning. Please install it with 'pip install opencv-python'"
+            debug_print(f"ImportError: {e}")
+            return None, "OpenCV not available. Cannot process QR codes."
         except Exception as e:
-            print(f"DEBUG: Exception in extract_secret_from_qr: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None, f"Error processing image: {e}"
+            debug_print(f"Exception in extract_secret_from_qr: {str(e)}")
+            return None, f"Error processing QR code: {str(e)}"
 
     def _validate_image_path(self, image_path):
         """
@@ -387,15 +399,17 @@ class TwoFactorAuth:
         - Validates path is within allowed directory
         - Checks file existence
         """
+        from ..utils.debug import debug_print
+        
         # Basic validation
         if image_path is None:
-            print("DEBUG: image_path is None")
+            debug_print("image_path is None")
             return None, "No image path provided"
             
         try:
             # Clean up the path
             image_path = str(image_path).strip().strip("'").strip('"')
-            print(f"DEBUG: Raw image path after cleanup: {image_path}")
+            debug_print(f"Raw image path after cleanup: {image_path}")
             
             # Ensure images directory exists
             os.makedirs(self.images_dir, exist_ok=True)
@@ -410,7 +424,7 @@ class TwoFactorAuth:
             
             # Try each path
             for path in paths_to_try:
-                print(f"DEBUG: Trying path: {path}")
+                debug_print(f"Trying path: {path}")
                 if os.path.exists(path) and os.path.isfile(path):
                     # Validate file extension
                     _, ext = os.path.splitext(path)
@@ -434,18 +448,18 @@ class TwoFactorAuth:
                             break
                     
                     if not is_allowed:
-                        print(f"Security warning: Path outside of allowed directories: {full_path}")
+                        debug_print(f"Security warning: Path outside of allowed directories: {full_path}")
                         return None, "Path is outside of allowed directories"
                     
-                    print(f"DEBUG: Found valid image at: {full_path}")
+                    debug_print(f"Found valid image at: {full_path}")
                     return full_path, None
             
             # If we get here, no valid path was found
             return None, f"Could not find image file: {image_path}"
             
         except Exception as e:
-            print(f"DEBUG: Path validation error: {str(e)}")
-            return None, f"Invalid path: {str(e)}"
+            debug_print(f"Path validation error: {str(e)}")
+            return None, f"Error validating path: {str(e)}"
 
     def generate_totp(self, secret=None, return_remaining=True):
         """
@@ -463,6 +477,8 @@ class TwoFactorAuth:
             If error or no secret:
                 (None, 0) or None depending on return_remaining
         """
+        from ..utils.debug import debug_print
+        
         # Use stored secret if none provided
         if secret is None:
             secret = self.secret
@@ -491,7 +507,7 @@ class TwoFactorAuth:
                     else:
                         secret_value = str(value)
                 except Exception as e:
-                    print(f"Error getting value: {e}")
+                    debug_print(f"Error getting value: {e}")
                     secret_value = str(secret)
             else:
                 # Try direct string conversion as a last resort
@@ -503,8 +519,8 @@ class TwoFactorAuth:
                 if self.is_generating:
                     sys.stdout.write("\r")  # Move cursor to beginning of line
                 
-                print(f"DEBUG: Secret length: {len(secret_value)}", end="")
-                print(f" | Secret type: {type(secret_value).__name__}", end="")
+                debug_print(f"Secret length: {len(secret_value)}", end="")
+                debug_print(f" | Secret type: {type(secret_value).__name__}", end="")
                 
                 # Only add newline if not in continuous generation mode
                 if not self.is_generating:
@@ -525,8 +541,7 @@ class TwoFactorAuth:
         except Exception as e:
             # Log error in debug mode
             if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
-                print(f"ERROR: Failed to generate TOTP code: {e}")
-                traceback.print_exc()
+                debug_print(f"Failed to generate TOTP code: {e}")
             return None, 0 if return_remaining else None
 
     def continuous_generate(self, callback=None, debug_mode=False):
@@ -547,6 +562,8 @@ class TwoFactorAuth:
         - Cleans up on exit
         - Updates at appropriate intervals
         """
+        from ..utils.debug import debug_print
+        
         # Check if a secret is available
         if not self.secret:
             print("No secret key available. Please load a secret first.")
@@ -608,14 +625,15 @@ class TwoFactorAuth:
                         time.sleep(0.1)  # Use shorter sleep time to check for interrupts more frequently
                         
                 except KeyboardInterrupt:
-                    print("\nKeyboard interrupt detected. Stopping code generation...")
+                    debug_print("\nKeyboard interrupt detected. Stopping code generation...")
                     self.should_stop.set()
-                    break
+                    
         except Exception as e:
-            print(f"ERROR: Exception in continuous_generate: {e}")
+            debug_print(f"ERROR: Exception in continuous_generate: {e}")
         finally:
+            # Clean up
             self.is_generating = False
-            print("\nStopped code generation.")
+            debug_print("\nStopped code generation.")
             
     def save_secret(self, name, secret=None, password=None):
         """
@@ -629,6 +647,8 @@ class TwoFactorAuth:
         Returns:
             str: Error message on failure, None on success
         """
+        from ..utils.debug import debug_print
+        
         try:
             # Basic validation
             if not name or not isinstance(name, str):
@@ -645,8 +665,8 @@ class TwoFactorAuth:
             
             # Get the vault file path
             vault_file = os.path.join(self.storage.vault_dir, "vault.json")
-            print(f"DEBUG: Vault file exists: {os.path.exists(vault_file)}")
-            print(f"DEBUG: Checking vault.is_initialized property: {self.storage.vault.is_initialized}")
+            debug_print(f"Vault file exists: {os.path.exists(vault_file)}")
+            debug_print(f"Checking vault.is_initialized property: {self.storage.vault.is_initialized}")
             
             # Track if we created a new vault
             created_new_vault = False
@@ -729,24 +749,20 @@ class TwoFactorAuth:
                         'account': self.account or ''
                     }
                 except Exception as e:
-                    print(f"ERROR: Exception while processing secret data: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    debug_print(f"Exception while processing secret data: {e}")
                     return f"Error processing secret data: {str(e)}"
             
             # Save the secret to the vault - the updated save_secret returns a boolean
             success = self.storage.save_secret(name, data_to_save)
             if not success:
-                print(f"DEBUG: Failed to save secret '{name}'")
+                debug_print(f"Failed to save secret '{name}'")
                 return "Failed to save secret"
-            
-            print(f"DEBUG: Successfully saved secret '{name}'")
-            return None  # Success
+                
+            debug_print(f"Successfully saved secret '{name}'")
+            return None
             
         except Exception as e:
-            print(f"ERROR: Exception in save_secret: {e}")
-            import traceback
-            traceback.print_exc()
+            debug_print(f"Exception in save_secret: {e}")
             return f"Error saving secret: {str(e)}"
 
     def load_secret(self, name, password=None):
@@ -911,52 +927,82 @@ class TwoFactorAuth:
 
     def get_all_secrets(self):
         """
-        Get a list of all saved secrets.
+        Get a list of all saved secrets with integrity verification.
         
         Returns:
-            list: List of secret names or empty list if none found
+            list: Names of all saved secrets
             
         Security:
-        - Performs integrity check on listed secrets
-        - Filters out potentially compromised files
+        - Verifies integrity of each secret
+        - Logs integrity violations
+        - Includes backup verification
         """
+        from ..utils.debug import debug_print
+        
         try:
-            all_secrets = self.storage.get_all_secrets()
-            verified_secrets = []
+            # Get the list of secrets from the vault
+            if not self.storage.vault.is_unlocked:
+                return []
+                
+            # Get the list of secrets
+            secrets = self.storage.list_secrets()
             
-            # Verify the integrity of each secret's backup
-            for secret_name in all_secrets:
+            # Verify each secret's integrity
+            verified_secrets = []
+            hmac_key = self.storage.vault.get_hmac_key()
+            
+            for secret_name in secrets:
                 try:
                     # Get the path to the secret file
-                    secret_file_path = self.storage.get_secret_path(secret_name)
+                    secret_path = os.path.join(self.storage.vault_dir, f"{secret_name}.json")
                     
-                    # Get a key for HMAC - derive from the storage key if available
-                    hmac_key = None
-                    if hasattr(self.storage, 'key') and self.storage.key:
-                        hmac_key = hashlib.sha256(self.storage.key).digest()
+                    # Verify the file's integrity
+                    is_valid, _ = verify_file_integrity(secret_path, hmac_key)
                     
-                    # Check if we have an integrity-protected backup
-                    backup_path = f"{secret_file_path}.backup"
+                    if not is_valid:
+                        # Try to use the backup if available
+                        backup_path = os.path.join(self.storage.vault_dir, f"{secret_name}.json.bak")
+                        if os.path.exists(backup_path):
+                            is_backup_valid, _ = verify_file_integrity(backup_path, hmac_key)
+                            if is_backup_valid:
+                                # Use the backup instead
+                                debug_print(f"Using integrity-verified backup for {secret_name}")
+                                # Restore the backup
+                                shutil.copy2(backup_path, secret_path)
+                                verified_secrets.append(secret_name)
+                                continue
                     
+                    # If we get here, either the original is valid or both are invalid
+                    if is_valid:
+                        verified_secrets.append(secret_name)
+                    else:
+                        # Record integrity violation but still include in list
+                        self._record_security_event("integrity_violation", 
+                                                   {"secret": secret_name})
+                        debug_warning(f"Integrity check failed for {secret_name}")
+                        verified_secrets.append(secret_name)
+                    
+                    # Also check backup integrity for monitoring purposes
+                    backup_path = os.path.join(self.storage.vault_dir, f"{secret_name}.json.bak")
                     if os.path.exists(backup_path):
                         # Verify the backup's integrity
                         is_valid, _ = verify_file_integrity(backup_path, hmac_key)
                         if not is_valid:
                             # Record and log integrity violation, but still include in list
-                            record_security_event("integrity_violation")
-                            print(f"Warning: Integrity check failed for {secret_name}")
+                            self._record_security_event("integrity_violation")
+                            debug_warning(f"Integrity check failed for {secret_name}")
                     
                     # Add to verified list regardless of integrity status to allow user access
                     verified_secrets.append(secret_name)
                     
                 except Exception as e:
-                    print(f"Warning: Error checking integrity for {secret_name}: {str(e)}")
+                    debug_warning(f"Error checking integrity for {secret_name}: {str(e)}")
                     # Still include in list to avoid blocking user access
                     verified_secrets.append(secret_name)
             
             return verified_secrets
         except Exception as e:
-            print(f"Error retrieving secrets: {e}")
+            debug_print(f"Error retrieving secrets: {e}")
             return []
 
     def _find_storage_dirs(self):
@@ -974,13 +1020,15 @@ class TwoFactorAuth:
         Returns:
             str: Path to the images directory
         """
+        from ..utils.debug import debug_print
+        
         try:
             # Determine the executable directory for resource paths
             if getattr(sys, 'frozen', False):
                 # Running as compiled executable
                 app_dir = os.path.dirname(sys.executable)
                 bundle_dir = getattr(sys, '_MEIPASS', app_dir)
-                print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
+                debug_print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
                 
                 # First check if we have write permission to the app directory
                 test_file = os.path.join(app_dir, 'images', '.test')
@@ -1000,7 +1048,7 @@ class TwoFactorAuth:
                     user_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'TrueFA-Py', 'images')
                     os.makedirs(user_dir, exist_ok=True)
                     images_dir = os.getenv('QR_IMAGES_DIR', user_dir)
-                    print(f"Using personal images directory in Documents folder: {user_dir}")
+                    debug_print(f"Using personal images directory in Documents folder: {user_dir}")
             else:
                 # Running in normal Python environment
                 images_dir = os.getenv('QR_IMAGES_DIR', os.path.join(os.getcwd(), 'images'))
@@ -1008,15 +1056,15 @@ class TwoFactorAuth:
             # Ensure the directory exists
             os.makedirs(images_dir, exist_ok=True)
             
-            print(f"Using images directory: {images_dir}")
+            debug_print(f"Using images directory: {images_dir}")
             return images_dir
             
         except Exception as e:
-            print(f"Error setting up storage directories: {e}")
-            # Fallback to current directory
+            debug_print(f"Error setting up storage directories: {e}")
+            # Fallback to a simple directory in the current working directory
             fallback_dir = os.path.join(os.getcwd(), 'images')
             os.makedirs(fallback_dir, exist_ok=True)
-            print(f"Using fallback images directory: {fallback_dir}")
+            debug_print(f"Using fallback images directory: {fallback_dir}")
             return fallback_dir
 
     def set_secret(self, secret_value, issuer="", account=""):
@@ -1031,19 +1079,21 @@ class TwoFactorAuth:
         Returns:
             bool: True if successful, False otherwise
         """
+        from ..utils.debug import debug_print
+        
         try:
             # Convert string to SecureString if needed
             if isinstance(secret_value, str):
                 # Make sure it's a proper base32 string first
                 base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
                 if not base32_pattern.match(secret_value):
-                    print("Warning: Secret doesn't appear to be in base32 format. Attempting to encode it.")
+                    debug_print("Warning: Secret doesn't appear to be in base32 format. Attempting to encode it.")
                     try:
                         # Try to encode it as base32 if it's not already
                         secret_bytes = secret_value.encode('utf-8')
                         secret_value = base64.b32encode(secret_bytes).decode('utf-8')
                     except Exception as encoding_error:
-                        print(f"Error encoding secret as base32: {encoding_error}")
+                        debug_print(f"Error encoding secret as base32: {encoding_error}")
                 
                 # Create a SecureString with the correct encoding
                 self.secret = SecureString(secret_value.encode('utf-8'))
@@ -1059,13 +1109,13 @@ class TwoFactorAuth:
                 totp = pyotp.TOTP(self.secret.get())
                 test_code = totp.now()
                 if test_code:
-                    print(f"Secret validated successfully.")
+                    debug_print(f"Secret validated successfully.")
                     return True
             except Exception as totp_error:
-                print(f"Warning: Could not generate TOTP code with the provided secret: {totp_error}")
+                debug_warning(f"Could not generate TOTP code with the provided secret: {totp_error}")
                 # We'll continue anyway since the secret might be valid in another format
                 
             return True
         except Exception as e:
-            print(f"Error setting secret: {e}")
+            debug_print(f"Error setting secret: {e}")
             return False

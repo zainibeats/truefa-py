@@ -13,6 +13,8 @@ import ctypes
 import logging
 import platform
 from pathlib import Path
+from ..config import CRYPTO_LIB_PATH
+from ..utils.debug import debug_print
 
 # Configure logging
 logger = logging.getLogger("truefa_crypto.loader")
@@ -73,13 +75,13 @@ def _find_dll_path():
     for location in possible_locations:
         if os.path.exists(location):
             if _debug_mode:
-                print(f"DLL found at: {location}")
+                debug_print(f"DLL found at: {location}")
             return location
     
     if _debug_mode:
-        print("DLL not found in any standard location")
+        debug_print("DLL not found in any standard location")
         for location in possible_locations:
-            print(f"DLL not found at: {location}")
+            debug_print(f"DLL not found at: {location}")
     
     return None
 
@@ -125,7 +127,7 @@ def _enhance_dll_search_paths():
         os.environ['PATH'] = new_path
         
         if _debug_mode:
-            print(f"Enhanced DLL search paths: {new_path}")
+            debug_print(f"Enhanced DLL search paths: {new_path}")
             
     except Exception as e:
         logger.warning(f"Error enhancing DLL search paths: {e}")
@@ -275,7 +277,7 @@ def find_dll():
             error_msg = f"Error loading native crypto library: {e}"
             logger.error(error_msg)
             if _debug_mode:
-                print(error_msg)
+                debug_print(error_msg)
             
             # Try to rebuild the DLL and load it again
             if _try_rebuild_rust_dll():
@@ -359,7 +361,7 @@ def _setup_function_signatures(lib):
     except Exception as e:
         logger.error(f"Error setting function signatures: {e}")
         if _debug_mode:
-            print(f"Error setting function signatures: {e}")
+            debug_print(f"Error setting function signatures: {e}")
 
 def _check_required_functions(lib):
     """
@@ -434,3 +436,65 @@ def _reset_dll_cache():
     _is_using_fallback = False
     _detected_dll_issue = False
     _attempted_rebuild = False 
+
+def _setup_dll_search_paths():
+    """
+    Configure the DLL search paths to help Windows find the crypto DLL.
+    """
+    try:
+        import os
+        
+        # Get the directory of the current script or executable
+        if getattr(sys, 'frozen', False):
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        # Get the directory containing the DLL
+        dll_dir = os.path.dirname(_dll_path) if _dll_path else base_dir
+        
+        # Set environment variable for DLL paths
+        if 'PATH' in os.environ:
+            # Add our paths to the beginning of PATH
+            new_path = f"{dll_dir}{os.pathsep}{os.environ['PATH']}"
+            os.environ['PATH'] = new_path
+            debug_print(f"Enhanced DLL search paths: {new_path}")
+    except Exception:
+        pass
+
+def _initialize_ffi():
+    """Initialize the FFI interface."""
+    global _dll, _is_initialized
+    
+    try:
+        # Make sure we have the DLL path
+        if not _dll_path:
+            error_msg = "Crypto library not found. Please install the TrueFA Rust crypto component."
+            debug_print(error_msg)
+            raise ImportError(error_msg)
+        
+        # Set up search paths on Windows
+        if platform.system() == "Windows":
+            _setup_dll_search_paths()
+        
+        # Load the shared library/DLL
+        try:
+            _dll = ctypes.CDLL(_dll_path)
+        except Exception as e:
+            error_msg = f"Failed to load crypto library {_dll_path}: {e}"
+            debug_print(error_msg)
+            raise ImportError(error_msg)
+
+        # Setup function signatures
+        try:
+            _setup_function_signatures()
+        except Exception as e:
+            debug_print(f"Error setting function signatures: {e}")
+            raise
+
+        _is_initialized = True
+        
+    except Exception as e:
+        _is_initialized = False
+        raise e 

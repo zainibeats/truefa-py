@@ -13,6 +13,7 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 - 🔄 Session persistence with password caching for convenience
 - 📥 Save and retrieve TOTP secrets with robust encryption
 - 🔍 Intelligent vault location detection with permission handling
+- 📊 Flexible logging system with independent console and file logging control
 - 🐳 Docker compatibility for containerized environments
 
 ## Security
@@ -107,7 +108,17 @@ This dual-implementation approach ensures the application works flawlessly acros
 ## Basic Usage
 
 ```bash
+# Start the application
 python main.py
+
+# Show version information
+python main.py --version
+
+# Enable debug output
+python main.py --debug
+
+# Disable logging to file
+python main.py --no-log
 ```
 
 This will start the command-line interface with the following options:
@@ -118,6 +129,8 @@ This will start the command-line interface with the following options:
 5. Export secrets
 6. Clear screen
 7. Exit
+
+For details on all command-line options, logging configuration, and development information, please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md).
 
 ## Security Architecture
 

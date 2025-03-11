@@ -16,9 +16,16 @@ import warnings
 import hashlib
 import hmac
 from .secure_string import SecureString, create_secure_string, secure_random_bytes
+import logging
 
-# Emit a warning when this module is loaded
+# Add logger import:
+logger = logging.getLogger(__name__)
+
+# Replace:
 warnings.warn("Using Python fallback implementation for crypto operations. Security is REDUCED.")
+
+# With:
+logger.warning("Using Python fallback implementation for crypto operations. Security is REDUCED.")
 
 def encrypt_data(data, key):
     """

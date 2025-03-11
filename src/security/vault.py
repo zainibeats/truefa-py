@@ -27,6 +27,8 @@ import base64
 import logging
 import warnings
 from typing import Optional, Dict, Any, Tuple, List, Union, Set
+from ..utils.debug import debug_print
+from src.utils.logger import warning, info, error, debug, critical
 
 # Import our new modules
 from .vault_crypto import (
@@ -121,9 +123,9 @@ except ImportError:
         
         # Also ensure images directory exists
         os.makedirs(dirs['images_dir'], exist_ok=True)
-        print(f"Using images directory: {dirs['images_dir']}")
+        info(f"Using images directory: {dirs['images_dir']}")
     except Exception as e:
-        print(f"Critical error setting up secure directories: {e}")
+        critical(f"Critical error setting up secure directories: {e}")
         sys.exit(1)
 
 # Import Rust-based cryptography module with pure-Python fallback
@@ -181,8 +183,8 @@ try:
         return True
         
 except ImportError as e:
-    print(f"WARNING: Failed to import src.truefa_crypto: {str(e)}")
-    print("Creating fallback implementation")
+    warning(f"Failed to import src.truefa_crypto: {str(e)}")
+    info("Creating fallback implementation")
     
     # Define a pure-Python fallback implementation
     class _DummyModule:
@@ -204,13 +206,13 @@ except ImportError as e:
             try:
                 os.makedirs(self.vault_dir, exist_ok=True)
             except Exception as e:
-                print(f"Error creating vault directory: {e}")
+                error(f"Error creating vault directory: {e}")
                 
             # Load vault state if it exists
             self._load_vault_state()
             
             # Print for debugging
-            print("Initialized dummy truefa_crypto module")
+            debug("Initialized dummy truefa_crypto module")
             
         def _load_vault_state(self):
             """Load vault state from disk if it exists."""
@@ -225,7 +227,7 @@ except ImportError as e:
                             self._vault_password_hash = base64.b64decode(self._vault_password_hash_b64)
                             self._vault_initialized = True
                 except Exception as e:
-                    print(f"Error loading vault state: {e}")
+                    error(f"Error loading vault state: {e}")
             
         def _save_vault_state(self):
             """Save vault state to disk."""
@@ -244,16 +246,16 @@ except ImportError as e:
                     }
                     json.dump(metadata, f)
             except Exception as e:
-                print(f"Error saving vault state: {e}")
+                error(f"Error saving vault state: {e}")
         
         def set_vault_path(self, vault_meta_path):
             """Set the vault metadata path to use for operations."""
             import os
-            self._vault_meta_file = vault_meta_path
-            self.vault_dir = os.path.dirname(vault_meta_path)
-            print(f"Set vault path to: {vault_meta_path}")
-            # Reload vault state to match the new path
-            self._load_vault_state()
+            # Validate the path type
+            if isinstance(vault_meta_path, (str, bytes, os.PathLike)):
+                self._vault_meta_file = os.path.abspath(os.path.normpath(vault_meta_path))
+                debug(f"Set vault path to: {vault_meta_path}")
+                return True
         
         # SecureString implementation
         class SecureString:
@@ -306,27 +308,25 @@ except ImportError as e:
             if hasattr(self, '_vault_initialized') and self._vault_initialized:
                 return True
                 
-            # For debugging
-            import os
-            if hasattr(self, '_vault_meta_file'):
-                meta_file = self._vault_meta_file
-                print(f"DEBUG: Checking meta file at {meta_file}")
-                meta_exists = os.path.exists(meta_file)
-                print(f"DEBUG: Meta file exists: {meta_exists}")
-                return meta_exists
+            # Try to find the metadata file
+            meta_file = os.path.join(os.path.dirname(self._vault_meta_file), "vault.json")
+            meta_exists = os.path.exists(meta_file)
+            debug(f"Checking meta file at {meta_file}")
+            debug(f"Meta file exists: {meta_exists}")
             
-            # If we don't have the attribute, use the default location
-            # from the parent class if possible
-            if hasattr(self, 'vault_dir'):
-                meta_path = os.path.join(self.vault_dir, "vault.meta")
-                print(f"DEBUG: Checking meta file at {meta_path}")
-                meta_exists = os.path.exists(meta_path)
-                print(f"DEBUG: Meta file exists: {meta_exists}")
-                return meta_exists
+            if meta_exists:
+                return True
             
-            # At this point, we can't determine if the vault exists
-            # Always returning True for debug purposes
-            print("DEBUG: Could not determine vault existence, defaulting to True")
+            # Check in the directory itself
+            meta_path = os.path.join(self.vault_dir, "vault.json")
+            meta_exists = os.path.exists(meta_path)
+            debug(f"Checking meta file at {meta_path}")
+            debug(f"Meta file exists: {meta_exists}")
+            
+            if meta_exists:
+                return True
+            
+            debug("Could not determine vault existence, defaulting to True")
             return True
             
         def create_vault(self, password):
@@ -364,7 +364,7 @@ except ImportError as e:
             import os as os_module  # Use os_module consistently
             
             if not password:
-                print("ERROR: Empty password not allowed")
+                error("ERROR: Empty password not allowed")
                 return False
             
             # IMPORTANT: Get the path from the correct location that matches where the vault was created
@@ -383,18 +383,18 @@ except ImportError as e:
                 if os_module.path.exists(path):
                     self.vault_meta_path = path
                     self.vault_dir = os_module.path.dirname(path)
-                    print(f"Found vault metadata at: {path}")
+                    info(f"Found vault metadata at: {path}")
                     break
             
             if not self.vault_meta_path:
                 # If not found, use the default path but print a warning
                 self.vault_meta_path = os_module.path.join(self.vault_dir, "vault.meta")
-                print(f"WARNING: Using default vault path: {self.vault_meta_path}")
+                warning(f"Using default vault path: {self.vault_meta_path}")
             
-            print(f"Attempting to unlock vault using metadata at: {self.vault_meta_path}")
+            info(f"Attempting to unlock vault using metadata at: {self.vault_meta_path}")
             
             if not os_module.path.exists(self.vault_meta_path):
-                print(f"Vault not initialized - vault metadata not found at: {self.vault_meta_path}")
+                warning(f"Vault not initialized - vault metadata not found at: {self.vault_meta_path}")
                 return False
                 
             # Load vault state from metadata file
@@ -405,7 +405,7 @@ except ImportError as e:
                     stored_hash_b64 = meta_data.get('password_hash')
                     
                     if not stored_salt:
-                        print("No salt found in vault metadata")
+                        warning("No salt found in vault metadata")
                         return False
                         
                     # Set the initialized flag to True since we have valid metadata
@@ -428,12 +428,12 @@ except ImportError as e:
                         
                         # Secure comparison to avoid timing attacks
                         if not secrets.compare_digest(test_hash, stored_hash):
-                            print("Incorrect password")
+                            debug("Incorrect password")
                             # Log failed attempt (in a real system, you might want to limit attempts)
-                            print(f"WARNING: Failed vault authentication attempt at {datetime.now().isoformat()}")
+                            warning(f"Failed vault authentication attempt at {datetime.now().isoformat()}")
                             return False
                         
-                        print("Password validation successful")
+                        info("Password validation successful")
                     else:
                         # Legacy format without password hash
                         # Store the hash now for future use
@@ -449,10 +449,10 @@ except ImportError as e:
                         with open(self.vault_meta_path, 'w') as f:
                             json.dump(meta_data, f)
                         
-                        print("Vault metadata upgraded with password hash for better security")
+                        info("Vault metadata upgraded with password hash for better security")
             except Exception as e:
-                print(f"Error reading vault metadata: {e}")
-                print(f"Path: {self.vault_meta_path}")
+                error(f"Error reading vault metadata: {e}")
+                error(f"Path: {self.vault_meta_path}")
                 import traceback
                 traceback.print_exc()
                 return False
@@ -460,7 +460,7 @@ except ImportError as e:
             # Only if password is verified, unlock the vault
             self._is_unlocked = True  # Match the variable name used in create_vault (was _vault_unlocked)
             self.vault_salt = stored_salt  # Match the variable name used elsewhere (was _vault_salt)
-            print("Vault unlocked successfully")
+            info("Vault unlocked successfully")
             return True
             
         def lock_vault(self):
@@ -649,15 +649,13 @@ class SecureVault:
         self._load_vault_state()
 
     def _load_vault_state(self):
-        """Load vault state from the state file if it exists."""
+        """Load the vault state from disk if it exists."""
         try:
-            # Tell vault_crypto where to find the vault
+            # Import vault_crypto to initialize the key management system
             try:
                 from . import vault_crypto
-                if hasattr(vault_crypto, 'set_vault_path'):
-                    vault_crypto.set_vault_path(self.vault_path)
             except ImportError:
-                print("Warning: Could not import vault_crypto module")
+                warning("Could not import vault_crypto module")
             
             # Load state file if it exists
             if os.path.exists(self.state_file):
@@ -668,50 +666,47 @@ class SecureVault:
                 if 'error_states' in state:
                     self._error_states.update(state['error_states'])
             
-            print(f"Checking for vault at {os.path.dirname(self.vault_path)}")
+            debug(f"Checking for vault at {os.path.dirname(self.vault_path)}")
             vault_exists = os.path.exists(self.vault_path)
-            print(f"Vault exists: {vault_exists}")
+            debug(f"Vault exists: {vault_exists}")
             
             return True
         except Exception as e:
-            print(f"Error loading vault state: {e}")
+            error(f"Error loading vault state: {e}")
             return False
 
-    @property
-    def is_initialized(self):
-        """Check if the vault has been initialized."""
+    def is_properly_initialized(self, vault_path=None):
+        """Check if the vault is properly initialized with all required fields."""
         try:
-            # Check directly if the vault file exists and has required fields
-            vault_path = os.path.join(self.vault_dir, "vault.json")
+            if vault_path is None:
+                vault_path = self.vault_path
+                
+            debug(f"Checking vault initialization at: {vault_path}")
             
-            print(f"DEBUG [vault.py]: Checking vault initialization at: {vault_path}")
             if not os.path.exists(vault_path):
-                print(f"DEBUG [vault.py]: Vault file does not exist")
+                debug("Vault file does not exist")
                 return False
                 
-            # Check if the file has required fields
-            try:
-                with open(vault_path, 'r') as f:
-                    metadata = json.load(f)
+            # Read vault metadata
+            with open(vault_path, 'r') as f:
+                metadata = json.load(f)
+                
+            debug(f"Vault metadata keys: {list(metadata.keys())}")
+            
+            # Check if all required fields are present
+            required_fields = ["version", "created", "password_hash", "vault_salt"]
+            for field in required_fields:
+                if field not in metadata:
+                    debug(f"Missing required field: {field}")
+                    return False
                     
-                # Log the metadata for debugging
-                print(f"DEBUG [vault.py]: Vault metadata keys: {list(metadata.keys())}")
-                
-                # Check for critical fields
-                required_fields = ["version", "password_hash", "vault_salt"]
-                for field in required_fields:
-                    if field not in metadata:
-                        print(f"DEBUG [vault.py]: Missing required field: {field}")
-                        return False
-                        
-                print(f"DEBUG [vault.py]: Vault is properly initialized")
-                return True
-            except Exception as e:
-                print(f"DEBUG [vault.py]: Error reading vault metadata: {e}")
-                return False
-                
+            debug("Vault is properly initialized")
+            return True
+        except json.JSONDecodeError as e:
+            debug(f"Error reading vault metadata: {e}")
+            return False
         except Exception as e:
-            print(f"DEBUG [vault.py]: Error in is_initialized: {e}")
+            debug(f"Error in is_initialized: {e}")
             return False
 
     def is_unlocked(self):
@@ -726,49 +721,37 @@ class SecureVault:
 
     def create_vault(self, vault_password, master_password=None):
         """
-        Create a new vault with the given password and optional master password.
+        Create a new vault with the given password.
         
         Args:
-            vault_password (str): The password to access the vault.
-            master_password (str, optional): If provided, the master key will be derived from
-                this password. Otherwise, a random master key will be generated.
-                
+            vault_password (str): The password to secure the vault
+            master_password (str, optional): Optional separate master password
+            
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if vault created successfully, False otherwise
             
         Security:
-        - Password is hashed and salted before storage
-        - Master key is randomly generated or derived from master password
-        - Both sensitive parameters are handled as SecureString to minimize exposure
+        - Creates secure directory with restricted permissions
+        - Generates random master key or derives one from master password
+        - Encrypts master key with vault password
+        - Stores only encrypted data on disk
         """
         try:
-            # Create the vault directory
-            os.makedirs(self.vault_dir, exist_ok=True)
+            # Use the vault state manager to create a vault
+            success = self.state_manager.create_vault(vault_password, master_password)
             
-            # Create the vault using vault_crypto
-            if master_password:
-                # If a master password is provided, use it to derive the master key
-                secure_master_password = SecureString(master_password)
-                success = self.state_manager.create_vault(vault_password, master_password)
-                secure_master_password.clear()
-            else:
-                # Otherwise, let the state manager generate a random master key
-                success = self.state_manager.create_vault(vault_password)
+            if success:
+                # Get the master key that was just created
+                self._master_key = self.state_manager.get_master_key()
                 
-            if not success:
-                return False
-                
-            # Load the initial vault state
-            self._load_vault_state()
+                # Update state
+                self._is_locked = False
+                self._is_unlocked = True
             
-            # Set unlocked state
-            self._is_locked = False
-            self._is_unlocked = True
-            
-            return True
+            return success
             
         except Exception as e:
-            print(f"Error creating vault: {e}")
+            error(f"Error creating vault: {e}")
             return False
 
     def unlock(self, password):
@@ -787,7 +770,7 @@ class SecureVault:
         - Failed attempts are tracked for potential lockout
         """
         try:
-            print(f"Using vault metadata at: {self.vault_path}")
+            info(f"Using vault metadata at: {self.vault_path}")
             
             # Unlock using the state manager
             success = self.state_manager.unlock(password)
@@ -800,7 +783,7 @@ class SecureVault:
                 self._is_locked = False
                 self._is_unlocked = True
                 
-                print("Vault unlocked successfully.")
+                info("Vault unlocked successfully.")
                 return True
             else:
                 # Track failed attempts
@@ -810,11 +793,11 @@ class SecureVault:
                 # Save updated error state
                 self._save_error_state()
                 
-                print("Invalid password for vault")
+                debug("Incorrect password")
                 return False
                 
         except Exception as e:
-            print(f"Error unlocking vault: {str(e)}")
+            error(f"Error unlocking vault: {str(e)}")
             
             # Track the error
             self._error_states["file_access_errors"] += 1
@@ -835,29 +818,27 @@ class SecureVault:
 
     def lock(self):
         """
-        Lock the vault by clearing the master key from memory.
+        Lock the vault.
         
         Returns:
-            bool: True if successfully locked, False otherwise.
+            bool: True if successful, False otherwise.
         """
         try:
             # Use the state manager to lock the vault
             success = self.state_manager.lock()
             
-            # Clear our copy of the master key
-            if self._master_key is not None:
-                if isinstance(self._master_key, SecureString):
-                    self._master_key.clear()
+            if success:
+                # Clear the master key from memory
                 self._master_key = None
-            
-            # Update state
-            self._is_locked = True
-            self._is_unlocked = False
+                
+                # Update state
+                self._is_locked = True
+                self._is_unlocked = False
             
             return success
             
         except Exception as e:
-            print(f"Error locking vault: {e}")
+            error(f"Error locking vault: {e}")
             return False
 
     def change_vault_password(self, current_password, new_password):
@@ -884,7 +865,7 @@ class SecureVault:
             return success
             
         except Exception as e:
-            print(f"Error changing vault password: {e}")
+            error(f"Error changing vault password: {e}")
             
             # Track the error
             self._error_states["file_access_errors"] += 1
@@ -920,7 +901,7 @@ class SecureVault:
             return success
             
         except Exception as e:
-            print(f"Error changing master password: {e}")
+            error(f"Error changing master password: {e}")
             
             # Track the error
             self._error_states["file_access_errors"] += 1
@@ -958,7 +939,7 @@ class SecureVault:
                     handle = win32file._get_osfhandle(f.fileno())
                     win32file.FlushFileBuffers(handle)
                 except Exception as e:
-                    print(f"Failed to flush file buffers: {e}")
+                    warning(f"Failed to flush file buffers: {e}")
             
             # Rename the temporary file to the final file name
             # This is an atomic operation on most file systems
@@ -969,13 +950,13 @@ class SecureVault:
                     if os.path.exists(backup_file):
                         os.remove(backup_file)
                     os.rename(self.state_file, backup_file)
-                    print(f"Created backup of error state file: {backup_file}")
+                    debug(f"Created backup of error state file: {backup_file}")
                 
                 os.rename(temp_file, self.state_file)
-                print(f"Saved error state to {self.state_file}")
+                debug(f"Saved error state to {self.state_file}")
                 return True
             except Exception as e:
-                print(f"Failed to rename temporary file: {e}")
+                error(f"Failed to rename temporary file: {e}")
                 
                 # Try to recover if the temporary file was written but not renamed
                 if os.path.exists(temp_file):
@@ -985,11 +966,11 @@ class SecureVault:
                             with open(self.state_file, 'w') as dst:
                                 dst.write(src.read())
                         os.remove(temp_file)
-                        print(f"Recovered error state using copy method")
+                        info(f"Recovered error state using copy method")
                         return True
                     except Exception as copy_err:
-                        print(f"Failed to recover error state: {copy_err}")
+                        error(f"Failed to recover error state: {copy_err}")
                         return False
         except Exception as e:
-            print(f"Failed to save error state: {e}")
+            error(f"Failed to save error state: {e}")
             return False

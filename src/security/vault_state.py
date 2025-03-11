@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .vault_directory import secure_atomic_write, secure_file_permissions
+from src.utils.logger import debug, info, warning, error, critical
 
 class VaultStateManager:
     """
@@ -121,7 +122,7 @@ class VaultStateManager:
                 self.config = config
                 return config
         except Exception as e:
-            print(f"Error loading vault configuration: {e}")
+            error(f"Error loading vault configuration: {e}")
             return None
     
     def save_config(self, config=None):
@@ -145,7 +146,7 @@ class VaultStateManager:
             content = json.dumps(self.config, indent=2)
             return secure_atomic_write(self.vault_path, content)
         except Exception as e:
-            print(f"Error saving vault configuration: {e}")
+            error(f"Error saving vault configuration: {e}")
             return False
     
     def load_state(self):
@@ -164,7 +165,7 @@ class VaultStateManager:
                 self.state = state
                 return state
         except Exception as e:
-            print(f"Error loading vault state: {e}")
+            error(f"Error loading vault state: {e}")
             return self.state
     
     def save_state(self, state=None):
@@ -192,7 +193,7 @@ class VaultStateManager:
             content = json.dumps(self.state, indent=2)
             return secure_atomic_write(self.state_file, content)
         except Exception as e:
-            print(f"Error saving vault state: {e}")
+            error(f"Error saving vault state: {e}")
             return False
     
     def create_vault_metadata(self, salt):
@@ -258,7 +259,7 @@ class VaultStateManager:
             content = json.dumps(master_meta, indent=2)
             return secure_atomic_write(self.master_key_path, content)
         except Exception as e:
-            print(f"Error saving master key metadata: {e}")
+            error(f"Error saving master key metadata: {e}")
             return False
     
     def load_master_key_metadata(self):
@@ -276,7 +277,7 @@ class VaultStateManager:
                 metadata = json.load(f)
                 return metadata
         except Exception as e:
-            print(f"Error loading master key metadata: {e}")
+            error(f"Error loading master key metadata: {e}")
             return None
     
     def create_vault(self, vault_password, master_password=None):
@@ -292,152 +293,163 @@ class VaultStateManager:
             bool: True if successful, False otherwise.
         """
         try:
-            print(f"DEBUG: Starting vault creation process...")
+            debug("Starting vault creation process...")
             
             # Import necessary modules
-            from . import vault_crypto
-            from .secure_string import SecureString
-            
-            # Create the vault directory if it doesn't exist
-            os.makedirs(self.vault_dir, exist_ok=True)
-            
-            # Generate a salt for the vault password
-            vault_salt = vault_crypto.generate_salt()
-            print(f"DEBUG: Generated vault salt: {vault_salt[:10]}...")
-            
-            # Create a password hash
+            from secrets import token_bytes
             import hashlib
-            if isinstance(vault_password, str):
-                password_bytes = vault_password.encode('utf-8')
-            else:
-                password_bytes = vault_password
-                
-            if isinstance(vault_salt, str):
-                try:
-                    salt_bytes = base64.b64decode(vault_salt)
-                except:
-                    salt_bytes = vault_salt.encode('utf-8')
-            else:
-                salt_bytes = vault_salt
             
-            print(f"DEBUG: Computing password hash...")    
-            key_bytes = hashlib.pbkdf2_hmac(
-                'sha256',
-                password_bytes,
-                salt_bytes,
-                100000,
-                dklen=32
-            )
-            password_hash = key_bytes
-            
-            # Generate or derive a master key
-            if master_password:
-                # Derive master key from master password
-                if isinstance(master_password, str):
-                    master_bytes = master_password.encode('utf-8')
-                else:
-                    master_bytes = master_password
-                
-                print(f"DEBUG: Deriving master key from master password...")
-                master_key_bytes = vault_crypto.derive_master_key(master_bytes, salt_bytes)
-                master_key = SecureString(master_key_bytes)
-            else:
-                # Generate a random master key
-                print(f"DEBUG: Generating random master key...")
-                master_key_bytes = os.urandom(32)  # 32 bytes = 256 bits
-                master_key = SecureString(master_key_bytes)
-            
-            # Store the master key securely in memory
-            self._master_key = master_key
-            
-            # Encrypt the master key with the vault password
-            if hasattr(master_key, 'get_value'):
-                master_key_value = master_key.get_value()
-            else:
-                master_key_value = master_key.get()
-            
-            print(f"DEBUG: Encrypting master key...")
-            encrypted_master_key = vault_crypto.encrypt_master_key(master_key_value)
-            
-            # Ensure all binary data is properly encoded for JSON
-            # Convert password hash to base64 (not hex) to match what verify_password expects
-            password_hash_str = base64.b64encode(password_hash).decode('utf-8')
-            salt_str = base64.b64encode(salt_bytes).decode('utf-8')
-            
-            # Convert encrypted_master_key to a base64 string if it's bytes
-            if isinstance(encrypted_master_key, bytes):
-                encrypted_master_key_str = base64.b64encode(encrypted_master_key).decode('utf-8')
-            else:
-                encrypted_master_key_str = encrypted_master_key
-            
-            # Create metadata for the vault
-            vault_metadata = {
-                "version": "1.0",
-                "created": datetime.now().isoformat(),
-                "password_hash": password_hash_str,
-                "vault_salt": salt_str,
-                "salt": salt_str,  # Include both for compatibility with different code paths
-                "master_key": encrypted_master_key_str,
-                "encrypted_master_key": encrypted_master_key_str  # Include both names for compatibility
-            }
-            
-            # Save the vault metadata
-            print(f"DEBUG: Saving vault metadata to {self.vault_path}")
-            with open(self.vault_path, 'w') as f:
-                json.dump(vault_metadata, f, indent=2)
-                
-            print(f"DEBUG: Created vault metadata with keys: {list(vault_metadata.keys())}")
-            print(f"DEBUG: password_hash format: {type(password_hash_str)}, length: {len(password_hash_str)}")
-            print(f"DEBUG: vault_salt format: {type(salt_str)}, length: {len(salt_str)}")
-            
-            # Save the master key metadata
-            self.save_master_key_metadata(vault_salt, encrypted_master_key)
-            
-            # Mark the vault as unlocked
-            self._unlocked = True
-            
-            # Create state file separately but don't overwrite the main vault file
-            state_path = os.path.join(self.vault_dir, "state.json")
             try:
-                # Create the initial state
-                state = {
-                    "last_access": datetime.now().isoformat(),
-                    "access_count": 1,
+                from src.truefa_crypto import (
+                    c_secure_random_bytes,
+                    c_generate_salt,
+                    c_derive_vault_key,
+                    c_encrypt_master_key
+                )
+                
+                # Generate a new salt for the vault
+                vault_salt = c_generate_salt()
+                if not vault_salt:
+                    vault_salt = os.urandom(32)  # Fallback
+                
+                debug(f"Generated vault salt: {vault_salt[:10]}...")
+                
+                # Convert the salt to a string for storage
+                salt_str = base64.b64encode(vault_salt).decode('utf-8')
+                
+                # Convert passwords to bytes if they are not already
+                if isinstance(vault_password, str):
+                    vault_password_bytes = vault_password.encode('utf-8')
+                else:
+                    vault_password_bytes = vault_password
+                
+                debug("Computing password hash...")
+                
+                # Derive a key from the vault password 
+                derived_key = c_derive_vault_key(vault_password_bytes, vault_salt)
+                if derived_key is None:
+                    # Fallback to PBKDF2
+                    derived_key = hashlib.pbkdf2_hmac('sha256', vault_password_bytes, vault_salt, 100000, 32)
+                
+                # Hash the derived key again to use as the stored password hash
+                password_hash = hashlib.sha256(derived_key).digest()
+                password_hash_str = base64.b64encode(password_hash).decode('utf-8')
+                
+                # Process master password (if provided)
+                if master_password:
+                    debug("Deriving master key from master password...")
+                    
+                    if isinstance(master_password, str):
+                        master_password_bytes = master_password.encode('utf-8')
+                    else:
+                        master_password_bytes = master_password
+                        
+                    master_key = hashlib.pbkdf2_hmac('sha256', master_password_bytes, vault_salt, 100000, 32)
+                else:
+                    debug("Generating random master key...")
+                    # Generate a random master key if no master password
+                    try:
+                        master_key = c_secure_random_bytes(32)
+                        if not master_key:
+                            master_key = token_bytes(32)
+                    except Exception:
+                        master_key = token_bytes(32)
+                
+                # Now encrypt the master key with the derived vault key
+                master_salt = os.urandom(16)
+                
+                debug("Encrypting master key...")
+                try:
+                    encrypted_master_key = c_encrypt_master_key(master_key, derived_key, master_salt)
+                    encrypted_master_key_str = base64.b64encode(encrypted_master_key).decode('utf-8')
+                    master_salt_str = base64.b64encode(master_salt).decode('utf-8')
+                except Exception:
+                    # Fallback to AES CTR mode
+                    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                    
+                    # Create an encryptor
+                    cipher = Cipher(algorithms.AES(derived_key), modes.CTR(master_salt))
+                    encryptor = cipher.encryptor()
+                    
+                    # Encrypt the master key
+                    encrypted_master_key = encryptor.update(master_key) + encryptor.finalize()
+                    encrypted_master_key_str = base64.b64encode(encrypted_master_key).decode('utf-8')
+                    master_salt_str = base64.b64encode(master_salt).decode('utf-8')
+                
+                # Create the main vault metadata
+                vault_metadata = {
+                    "version": "1.0.0",
                     "created": datetime.now().isoformat(),
-                    "error_states": {
-                        "bad_password_attempts": 0,
-                        "tamper_attempts": 0,
-                        "file_access_errors": 0,
-                        "integrity_violations": 0,
-                        "last_error_time": None
+                    "password_hash": password_hash_str,
+                    "salt": salt_str,
+                    "encrypted_master_key": encrypted_master_key_str,
+                    "master_key_metadata": {
+                        "salt": master_salt_str,
+                        "iterations": 100000,
+                        "algorithm": "AES-256"
                     }
                 }
                 
-                content = json.dumps(state, indent=2)
-                secure_atomic_write(state_path, content)
-                print(f"DEBUG: Created state file at {state_path}")
+                debug(f"Saving vault metadata to {self.vault_path}")
+                
+                # Save the vault metadata
+                content = json.dumps(vault_metadata, indent=2)
+                secure_atomic_write(self.vault_path, content)
+                debug(f"Created vault metadata with keys: {list(vault_metadata.keys())}")
+                debug(f"password_hash format: {type(password_hash_str)}, length: {len(password_hash_str)}")
+                debug(f"vault_salt format: {type(salt_str)}, length: {len(salt_str)}")
+
+                # Mark the vault as unlocked
+                self._unlocked = True
+                
+                # Create state file separately but don't overwrite the main vault file
+                state_path = os.path.join(self.vault_dir, "state.json")
+                try:
+                    # Create the initial state
+                    state = {
+                        "last_access": datetime.now().isoformat(),
+                        "access_count": 1,
+                        "created": datetime.now().isoformat(),
+                        "error_states": {
+                            "bad_password_attempts": 0,
+                            "tamper_attempts": 0,
+                            "file_access_errors": 0,
+                            "integrity_violations": 0,
+                            "last_error_time": None
+                        }
+                    }
+                    
+                    content = json.dumps(state, indent=2)
+                    secure_atomic_write(state_path, content)
+                    debug(f"Created state file at {state_path}")
+                except Exception as e:
+                    debug(f"Error creating state file: {e}")
+                
+                # Do NOT call self.create_vault_metadata() as it would overwrite our vault file
+                # with incomplete metadata
+                
+                debug("Vault creation complete")
+                vault_exists = os.path.exists(self.vault_path)
+                debug(f"Vault file exists: {vault_exists}")
+                
+                # Double-check the vault was created properly
+                try:
+                    with open(self.vault_path, 'r') as f:
+                        check_data = json.load(f)
+                    debug(f"Verified vault data contains keys: {list(check_data.keys())}")
+                except Exception as e:
+                    debug(f"Error verifying vault data: {e}")
+                
+                return True
+                
             except Exception as e:
-                print(f"DEBUG: Error creating state file: {e}")
-            
-            # Do NOT call self.create_vault_metadata() as it would overwrite our vault file
-            # with incomplete metadata
-            
-            print(f"DEBUG: Vault creation complete")
-            vault_exists = os.path.exists(self.vault_path)
-            print(f"DEBUG: Vault file exists: {vault_exists}")
-            
-            # Double-check the vault was created properly
-            try:
-                with open(self.vault_path, 'r') as f:
-                    check_data = json.load(f)
-                print(f"DEBUG: Verified vault data contains keys: {list(check_data.keys())}")
-            except Exception as e:
-                print(f"DEBUG: Error verifying vault data: {e}")
-            
-            return True
+                debug(f"Error creating vault: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
             
         except Exception as e:
-            print(f"DEBUG: Error creating vault: {e}")
+            error(f"Exception in create_vault method: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -453,101 +465,105 @@ class VaultStateManager:
             bool: True if the vault was successfully unlocked, False otherwise.
         """
         try:
-            print(f"DEBUG [vault_state.py]: Attempting to unlock vault with password of length {len(password) if password else 'None'}")
+            debug(f"Attempting to unlock vault with password of length {len(password) if password else 'None'}")
             
             # Check if the vault is already unlocked
             if self.is_unlocked:
-                print("DEBUG [vault_state.py]: Vault already unlocked")
+                debug("Vault already unlocked")
                 return True
             
-            # Load the vault configuration file
+            # Check if the vault file exists and load it
             try:
                 with open(self.vault_path, 'r') as f:
                     try:
                         vault_data = json.load(f)
-                        print(f"DEBUG [vault_state.py]: Loaded vault metadata with keys: {list(vault_data.keys())}")
+                        debug(f"Loaded vault metadata with keys: {list(vault_data.keys())}")
                     except json.JSONDecodeError:
-                        print("DEBUG [vault_state.py]: Failed to decode vault JSON")
+                        debug("Failed to decode vault JSON")
                         return False
             except FileNotFoundError:
-                print(f"DEBUG [vault_state.py]: Vault file not found at {self.vault_path}")
+                debug(f"Vault file not found at {self.vault_path}")
                 return False
             
             # Get the password hash for verification
             stored_password_hash = vault_data.get('password_hash')
             if not stored_password_hash:
-                print("DEBUG [vault_state.py]: No password_hash in vault data")
+                debug("No password_hash in vault data")
                 return False
             
-            print(f"DEBUG [vault_state.py]: Password hash length: {len(stored_password_hash)}")
+            debug(f"Password hash length: {len(stored_password_hash)}")
             
             # Check if password is provided
             if not password:
-                print("DEBUG [vault_state.py]: No password provided for unlock")
+                debug("No password provided for unlock")
                 return False
             
             # Convert password to bytes if it's a string
-            password_bytes = password if isinstance(password, bytes) else password.encode('utf-8')
+            if isinstance(password, str):
+                password_bytes = password.encode('utf-8')
+            else:
+                password_bytes = password
             
-            # Get the vault salt
+            # Get the vault salt from the vault data
             vault_salt = vault_data.get('vault_salt') or vault_data.get('salt')
             if not vault_salt:
-                print("DEBUG [vault_state.py]: No vault salt found in vault data")
+                debug("No vault salt found in vault data")
                 return False
             
-            print(f"DEBUG [vault_state.py]: Vault salt: {vault_salt[:10]}...")
+            debug(f"Vault salt: {vault_salt[:10]}...")
             
             # Verify the password
-            print("DEBUG [vault_state.py]: Computing password hash for verification...")
+            debug("Computing password hash for verification...")
             try:
-                from .. import truefa_crypto
-                derived_key = truefa_crypto.derive_key(password, vault_salt)
-                print(f"DEBUG [vault_state.py]: Derived key length: {len(derived_key) if derived_key else 'None'}")
+                from src.truefa_crypto import derive_key
+                derived_key = derive_key(password, vault_salt)
+                debug(f"Derived key length: {len(derived_key) if derived_key else 'None'}")
             except Exception as e:
-                print(f"DEBUG [vault_state.py]: Error deriving key with truefa_crypto: {e}")
-                print("DEBUG [vault_state.py]: Falling back to PBKDF2...")
+                debug(f"Error deriving key with truefa_crypto: {e}")
+                debug("Falling back to PBKDF2...")
                 import hashlib
                 salt_bytes = base64.b64decode(vault_salt)
                 derived_key = hashlib.pbkdf2_hmac('sha256', password_bytes, salt_bytes, 100000, 32)
                 derived_key = base64.b64encode(derived_key).decode('utf-8')
-                print(f"DEBUG [vault_state.py]: Derived key with PBKDF2 (length: {len(derived_key)})")
+                debug(f"Derived key with PBKDF2 (length: {len(derived_key)})")
             
             # Compare the derived key hash with the stored hash
-            print(f"DEBUG [vault_state.py]: Checking if derived key matches stored hash...")
+            debug(f"Checking if derived key matches stored hash...")
             if not self._verify_password_hash(password_bytes, stored_password_hash):
-                print("DEBUG [vault_state.py]: Password hash verification failed")
+                debug("Current password is incorrect")
                 return False
             
-            print("DEBUG [vault_state.py]: Password hash verified successfully")
+            debug("Password hash verified successfully")
             
             # Decrypt the master key
             encrypted_master_key = vault_data.get('encrypted_master_key')
             if not encrypted_master_key:
-                print("DEBUG [vault_state.py]: No encrypted_master_key in vault data")
+                debug("No encrypted_master_key in vault data")
                 return False
             
             # Try to decrypt the master key
-            print("DEBUG [vault_state.py]: Attempting to decrypt master key...")
+            debug("Attempting to decrypt master key...")
             try:
-                master_key = vault_crypto.decrypt_with_password(encrypted_master_key, password, vault_salt)
-                print(f"DEBUG [vault_state.py]: Master key decryption result: {type(master_key)}")
+                from src.truefa_crypto import decrypt_master_key
+                master_key = decrypt_master_key(encrypted_master_key, password, vault_salt)
+                debug(f"Master key decryption result: {type(master_key)}")
                 
                 if not master_key:
-                    print("DEBUG [vault_state.py]: Failed to decrypt master key")
+                    debug("Failed to decrypt master key")
                     return False
                 
                 # Set the master key and mark as unlocked
                 self._master_key = master_key
                 self._unlocked = True
-                print("DEBUG [vault_state.py]: Vault unlocked successfully")
+                debug("Vault unlocked successfully")
                 return True
             except Exception as e:
-                print(f"DEBUG [vault_state.py]: Exception decrypting master key: {e}")
+                debug(f"Exception decrypting master key: {e}")
                 import traceback
                 traceback.print_exc()
                 return False
         except Exception as e:
-            print(f"ERROR [vault_state.py]: Exception in unlock method: {e}")
+            error(f"Exception in unlock method: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -576,13 +592,12 @@ class VaultStateManager:
             try:
                 vault_crypto.lock_vault()
             except Exception as e:
-                print(f"Warning: Error calling vault_crypto.lock_vault(): {e}")
-                # Continue despite error
+                warning(f"Error calling vault_crypto.lock_vault(): {e}")
             
             return True
             
         except Exception as e:
-            print(f"Error locking vault: {e}")
+            error(f"Error locking vault: {e}")
             return False
     
     def change_vault_password(self, current_password, new_password):
@@ -599,7 +614,7 @@ class VaultStateManager:
         try:
             # First verify the current password by trying to unlock the vault
             if not self.unlock(current_password):
-                print("Current password is incorrect")
+                debug("Current password is incorrect")
                 return False
             
             # Import necessary modules
@@ -623,8 +638,8 @@ class VaultStateManager:
             )
             
             # Re-encrypt the master key with the new password
-            if self._master_key is None:
-                print("Master key not available")
+            if not self._master_key:
+                debug("Master key not available")
                 return False
             
             master_key_value = self._master_key.get_value() if hasattr(self._master_key, 'get_value') else self._master_key.get()
@@ -646,7 +661,7 @@ class VaultStateManager:
             return True
             
         except Exception as e:
-            print(f"Error changing vault password: {e}")
+            error(f"Error changing vault password: {e}")
             return False
     
     def change_master_password(self, vault_password, current_master_password, new_master_password):
@@ -664,7 +679,7 @@ class VaultStateManager:
         try:
             # First verify the vault password
             if not self.unlock(vault_password):
-                print("Vault password is incorrect")
+                debug("Vault password is incorrect")
                 return False
             
             # Import necessary modules
@@ -684,7 +699,7 @@ class VaultStateManager:
             master_key_value = self._master_key.get_value() if hasattr(self._master_key, 'get_value') else self._master_key.get()
             
             if not secrets.compare_digest(current_master_key, master_key_value):
-                print("Current master password is incorrect")
+                debug("Current master password is incorrect")
                 return False
             
             # Generate a new master key from the new master password
@@ -716,5 +731,5 @@ class VaultStateManager:
             return True
             
         except Exception as e:
-            print(f"Error changing master password: {e}")
+            error(f"Error changing master password: {e}")
             return False 

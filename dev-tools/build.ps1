@@ -20,7 +20,13 @@ param (
     [switch]$BuildRust,
     
     [Parameter(Mandatory=$false)]
-    [switch]$Clean
+    [switch]$Clean,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$DisableLogging,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$EnableDebug
 )
 
 # Set the error action preference
@@ -50,6 +56,13 @@ if ($Portable) { $buildCmd += " --portable" }
 if ($Installer) { $buildCmd += " --installer" }
 if ($NoConsole) { $buildCmd += " --no-console" }
 if ($Fallback) { $buildCmd += " --fallback" }
+
+# Add logging configuration
+$loggingConfig = "logging=enabled,debug=disabled"
+if ($DisableLogging) { $loggingConfig = $loggingConfig -replace "logging=enabled", "logging=disabled" }
+if ($EnableDebug) { $loggingConfig = $loggingConfig -replace "debug=disabled", "debug=enabled" }
+
+$buildCmd += " --config-logging=$loggingConfig"
 
 # Run the build command
 Write-Host "Building TrueFA with command: $buildCmd"

@@ -153,12 +153,9 @@ class FileIntegrityVerifier:
                     
             logger.warning(f"Security alert: Integrity violation detected for {filepath}")
             logger.info(f"Forensic backup created at {backup_path}")
-            print(f"Security alert: Integrity violation detected for {filepath}")
-            print(f"Forensic backup created at {backup_path}")
             
         except Exception as e:
             logger.error(f"Error handling integrity violation: {str(e)}")
-            print(f"Error handling integrity violation: {str(e)}")
 
 # Convenience functions for direct use without creating an instance
 def add_hmac_to_file(filepath, data, key=None):

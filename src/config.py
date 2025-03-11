@@ -17,6 +17,13 @@ import sys
 import platform
 from pathlib import Path
 import subprocess
+import socket
+from typing import Dict, Any, Optional, Union, Tuple
+# Import debug module (placed here instead of at the top to avoid circular imports)
+
+from .utils.debug import debug_print, is_debug_enabled
+from .utils.logger import warning, info, error, debug
+from src.utils.colorprint import print_warning, print_info
 
 # Application information
 APP_NAME = "TrueFA-Py"
@@ -66,7 +73,7 @@ def get_repo_root():
 def get_data_directory():
     """
     Create and return platform-appropriate application data directory:
-    - Windows: %APPDATA%\TrueFA
+    - Windows: %APPDATA%\\TrueFA
     - macOS: ~/Library/Application Support/TrueFA
     - Linux: ~/.truefa
     
@@ -110,84 +117,59 @@ def get_data_directory():
 # Get secure directory with restricted permissions for cryptographic materials
 def get_secure_data_directory():
     """
-    Create directory for sensitive cryptographic data with enhanced security:
-    - Windows: %LOCALAPPDATA% with restrictive ACLs
-    - macOS/Linux: ~/.truefa_secure with 0700 permissions
-    
-    Security features:
-    - Owner-only access permissions
-    - Separate from regular data directory
-    - Non-synced location (prevents cloud exposure)
-    - Fallback paths on permission failure
+    Get the secure data directory, which should have stricter permissions.
+    This directory is used for storing sensitive data like encryption keys.
     
     Returns:
-        str: Path to secure directory with enhanced protection
+        str: Path to the secure data directory
     """
-    # Check environment variable override for secure data directory
-    env_secure_dir = os.environ.get('TRUEFA_SECURE_DIR')
-    if env_secure_dir:
-        os.makedirs(env_secure_dir, exist_ok=True)
-        return env_secure_dir
-
-    if platform.system() == "Windows":
-        # On Windows, we'll use %LOCALAPPDATA% with restrictive ACLs
-        # This is better than APPDATA because it's not synced and can have stricter permissions
-        base_dir = os.environ.get('LOCALAPPDATA')
-        if not base_dir:
-            # Fallback if LOCALAPPDATA is not available
-            base_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local')
-        
-        secure_dir = os.path.join(base_dir, APP_NAME, "Secure")
-        
-        # Create the directory if it doesn't exist
-        os.makedirs(secure_dir, exist_ok=True)
-        
-        # Test if we can write to this directory (important for installed apps)
-        test_file = os.path.join(secure_dir, ".test")
-        try:
-            with open(test_file, 'w') as f:
-                f.write('test')
-            os.remove(test_file)
-        except Exception as e:
-            # If we can't write to LocalAppData, fall back to user home directory
-            print(f"Warning: Cannot write to {secure_dir}: {e}")
-            secure_dir = os.path.join(os.path.expanduser('~'), '.truefa', '.secure')
-            os.makedirs(secure_dir, exist_ok=True)
-            print(f"Using fallback secure directory: {secure_dir}")
-        
-        # Apply restrictive ACLs to the secure directory
-        # This will restrict access to only the owner account
-        try:
-            # Use icacls to set permissions (Windows-specific)
-            # This grants access to the owner but still allows administrators to manage files if needed
-            subprocess.run([
-                "icacls", 
-                secure_dir, 
-                "/inheritance:r",  # Remove inherited permissions
-                "/grant:r", f"{os.environ.get('USERNAME')}:(OI)(CI)F",  # Grant full control to owner
-            ], check=False, capture_output=True)
-        except Exception as e:
-            print(f"Warning: Could not set secure permissions: {e}")
+    # Use the platform-specific data directory as the base
+    base_dir = get_data_directory()
     
-    elif platform.system() == "Darwin":
-        # On macOS, we use a protected directory with restricted permissions
-        secure_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', f"{APP_NAME}_Secure")
-        os.makedirs(secure_dir, exist_ok=True)
-        # Set macOS permissions (700 = owner only)
-        try:
-            os.chmod(secure_dir, 0o700)
-        except Exception as e:
-            print(f"Warning: Could not set secure permissions: {e}")
+    secure_dir = os.path.join(base_dir, APP_NAME, "Secure")
     
-    else:
-        # Linux/Unix: Create a hidden directory with restricted permissions
-        secure_dir = os.path.join(os.path.expanduser('~'), f".{APP_NAME.lower()}_secure")
+    try:
+        # Create directory if it doesn't exist
         os.makedirs(secure_dir, exist_ok=True)
-        # Set Linux permissions (700 = owner only)
-        try:
-            os.chmod(secure_dir, 0o700)
-        except Exception as e:
-            print(f"Warning: Could not set secure permissions: {e}")
+        
+        # Test if we can write to it
+        test_file = os.path.join(secure_dir, '.test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+    except Exception as e:
+        # This is a user-facing warning, print it directly to console
+        error_msg = f"Cannot write to {secure_dir}: {e}"
+        print_warning(error_msg)  # Print with color
+        warning(error_msg)  # Also log it
+        
+        # Use a fallback directory in user's home directory
+        secure_dir = os.path.join(os.path.expanduser('~'), '.truefa', '.secure')
+        os.makedirs(secure_dir, exist_ok=True)
+        
+        # This is a user-facing notification, print it directly to console
+        fallback_msg = f"Using fallback secure directory: {secure_dir}"
+        print_warning(fallback_msg)  # Print with color
+        warning(fallback_msg)  # Also log it
+        
+    # Set directory permissions for Windows
+    try:
+        if platform.system() == 'Windows':
+            # Use icacls to set permissions on Windows
+            subprocess.run(
+                ['icacls', secure_dir, '/inheritance:r'],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            # Add current user with full control
+            subprocess.run(
+                ['icacls', secure_dir, '/grant', f'{os.environ.get("USERNAME")}:(OI)(CI)F'],
+                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+    except Exception as e:
+        warning(f"Could not set secure permissions: {e}")
+    
+    # Ensure our secure directory actually exists
+    os.makedirs(secure_dir, exist_ok=True)
     
     return secure_dir
 
@@ -251,3 +233,14 @@ CRYPTO_LIB_PATH = get_dll_path()
 
 # Debug mode (set to False for production)
 DEBUG = False
+
+# Logging configuration
+LOG_TO_FILE = True  # Enable logging to file in production
+
+# Configure debug module
+try:
+    from .utils.debug import set_debug
+    set_debug(DEBUG)
+except ImportError:
+    # If we couldn't import debug.py, silently continue
+    pass

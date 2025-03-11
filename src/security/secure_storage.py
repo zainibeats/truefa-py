@@ -40,6 +40,9 @@ import traceback
 import logging
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
+from src.utils.debug import debug_print
+from src.utils.logger import warning, info, error, debug  # Import logger utilities
+from ..utils.file_utils import safe_delete
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -117,7 +120,7 @@ class SecureStorage:
             self.vault = vault
             self._vault_directory = vault.vault_dir
             self._vault_file = os.path.join(self._vault_directory, "vault.json")
-            print(f"Using provided SecureVault instance")
+            debug_print(f"Using provided SecureVault instance")
         else:
             # Determine default paths if not provided
             if storage_path is None:
@@ -146,9 +149,9 @@ class SecureStorage:
             self.vault = SecureVault(self._vault_directory)
         
         # Check for existing vault
-        print(f"Checking for vault at {self._vault_directory}")
+        debug_print(f"Checking for vault at {self._vault_directory}")
         vault_exists = os.path.exists(self._vault_file)
-        print(f"Vault exists: {vault_exists}")
+        debug_print(f"Vault exists: {vault_exists}")
         
         # Set up storage directories with secure permissions
         self._ensure_secure_directory(self._vault_directory)
@@ -195,30 +198,27 @@ class SecureStorage:
         - Uses secure key derivation
         - Sets up the vault with proper permissions
         """
+        # Start vault creation process
         try:
-            print(f"DEBUG: Creating vault with master password (length: {len(master_password)})")
-            print(f"DEBUG: Vault initialization status before creation: {self.vault.is_initialized}")
+            debug(f"Creating vault with master password (length: {len(master_password)})")
+            debug(f"Vault initialization status before creation: {self.vault.is_initialized}")
             
-            # In our simplified model, vault_password and master_password are the same
-            success = self.vault.create_vault(master_password, master_password)
+            # Create the vault
+            success = self.vault.create_vault(master_password)
             
-            print(f"DEBUG: Vault creation result: {success}")
-            print(f"DEBUG: Vault initialization status after creation: {self.vault.is_initialized}")
+            debug(f"Vault creation result: {success}")
+            debug(f"Vault initialization status after creation: {self.vault.is_initialized}")
             
             if success:
-                self._unlocked = True
-                print("Secure vault created successfully")
-                
-                # Verify the vault was created properly
+                info("Secure vault created successfully")
                 try:
-                    with open(os.path.join(self.vault.vault_dir, "vault.json"), 'r') as f:
-                        vault_data = json.load(f)
-                    print(f"DEBUG: Created vault data keys: {list(vault_data.keys())}")
+                    vault_data = self.vault.get_metadata()
+                    debug(f"Created vault data keys: {list(vault_data.keys())}")
                 except Exception as e:
-                    print(f"DEBUG: Error reading created vault: {e}")
+                    error(f"Error reading created vault: {e}")
             return success
         except Exception as e:
-            print(f"Error creating vault: {str(e)}")
+            error(f"Error creating vault: {str(e)}")
             return False
 
     def unlock(self, password=None):
@@ -231,37 +231,41 @@ class SecureStorage:
         Returns:
             bool: True if unlocked successfully, False otherwise
         """
-        print(f"DEBUG: Attempting to unlock vault with password length: {len(password) if password else 'None'}")
-        
-        # Check if already unlocked
-        if self.is_unlocked:
-            print("DEBUG: Vault already unlocked, no need to unlock again")
-            return True
-        
-        # Check if vault is initialized
-        if not self.vault.is_initialized:
-            print("DEBUG: Vault not initialized, cannot unlock")
-            return False
-            
-        # Validate password
-        if password is None:
-            print("DEBUG: No password provided, cannot unlock vault")
-            return False
-        
-        # Add debug for vault path
-        vault_file = os.path.join(self.vault.vault_dir, "vault.json")
-        print(f"DEBUG: Vault file path: {vault_file}")
-        print(f"DEBUG: Vault file exists: {os.path.exists(vault_file)}")
-        
-        # Try to unlock the vault
+        # Attempt to unlock the vault if needed
         try:
-            print("DEBUG: Attempting to unlock vault...")
-            success = self.vault.unlock(password)
-            print(f"DEBUG: Vault unlock result: {success}")
-            return success
+            debug(f"Attempting to unlock vault with password length: {len(password) if password else 'None'}")
+            
+            # Check if already unlocked
+            if self.vault.is_unlocked:
+                debug("Vault already unlocked, no need to unlock again")
+                return True
+                
+            # Check if vault is initialized
+            if not self.vault.is_initialized:
+                debug("Vault not initialized, cannot unlock")
+                return False
+                
+            # Check if password provided
+            if not password:
+                debug("No password provided, cannot unlock vault")
+                return False
+            
+            # Get the vault file path
+            vault_file = os.path.join(self._vault_directory, 'vault.json')
+            debug(f"Vault file path: {vault_file}")
+            debug(f"Vault file exists: {os.path.exists(vault_file)}")
+            
+            # Unlock the vault
+            try:
+                debug("Attempting to unlock vault...")
+                success = self.vault.unlock(password)
+                debug(f"Vault unlock result: {success}")
+                return success
+            except Exception as e:
+                error(f"Exception unlocking vault: {e}")
+                return False
         except Exception as e:
-            print(f"ERROR: Exception unlocking vault: {e}")
-            traceback.print_exc()
+            error(f"Error unlocking vault: {e}")
             return False
 
     def _lock(self):
@@ -306,7 +310,7 @@ class SecureStorage:
         """
         # Try vault mode first if enabled
         if self.vault.is_initialized and vault_password:
-            if not self.vault.unlock_vault(vault_password):
+            if not self.vault.unlock(vault_password):
                 return False
             self._unlock()
             return True
@@ -612,44 +616,44 @@ class SecureStorage:
         Returns:
             list: List of secret names without extensions
         """
-        print(f"DEBUG [secure_storage.py]: list_secrets called")
-        print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
-        print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
-        print(f"DEBUG [secure_storage.py]: Vault file path: {os.path.join(self._vault_directory, 'vault.json')}")
-        print(f"DEBUG [secure_storage.py]: Vault file exists: {os.path.exists(os.path.join(self._vault_directory, 'vault.json'))}")
+        debug(f"list_secrets called")
+        debug(f"Storage object id: {id(self)}")
+        debug(f"Vault object id: {id(self.vault)}")
+        debug(f"Vault file path: {os.path.join(self._vault_directory, 'vault.json')}")
+        debug(f"Vault file exists: {os.path.exists(os.path.join(self._vault_directory, 'vault.json'))}")
         
         # Check if vault exists
         try:
             with open(os.path.join(self._vault_directory, 'vault.json'), 'r') as f:
                 metadata = json.load(f)
-                print(f"DEBUG [secure_storage.py]: Vault metadata keys: {list(metadata.keys())}")
+                debug(f"Vault metadata keys: {list(metadata.keys())}")
         except Exception as e:
-            print(f"DEBUG [secure_storage.py]: Error reading vault metadata: {e}")
+            error(f"Error reading vault metadata: {e}")
         
         # Check if vault is initialized
-        print(f"DEBUG [secure_storage.py]: self.vault.is_initialized returns: {self.vault.is_initialized}")
+        debug(f"self.vault.is_initialized returns: {self.vault.is_initialized}")
         if not self.vault.is_initialized:
-            print(f"DEBUG [secure_storage.py]: Vault not initialized, no secrets to list")
+            debug(f"Vault not initialized, no secrets to list")
             return []
         
         # List all files in the vault directory
-        print(f"DEBUG [secure_storage.py]: Looking for secrets in directory: {self._vault_directory}")
+        debug(f"Looking for secrets in directory: {self._vault_directory}")
         try:
             # Get all files in the vault directory
             files = os.listdir(self._vault_directory)
-            print(f"DEBUG [secure_storage.py]: All files in vault directory: {files}")
+            debug(f"All files in vault directory: {files}")
             
             # Filter for .enc files
             secret_files = [f for f in files if f.endswith('.enc')]
-            print(f"DEBUG [secure_storage.py]: Encrypted secret files: {secret_files}")
+            debug(f"Encrypted secret files: {secret_files}")
             
             # Strip the .enc extension
             secret_names = [os.path.splitext(f)[0] for f in secret_files]
-            print(f"DEBUG [secure_storage.py]: Found {len(secret_names)} secrets: {secret_names}")
+            debug(f"Found {len(secret_names)} secrets: {secret_names}")
             
             return secret_names
         except Exception as e:
-            print(f"ERROR [secure_storage.py]: Error listing secrets: {e}")
+            error(f"Error listing secrets: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -666,52 +670,52 @@ class SecureStorage:
             dict: The loaded secret data or None if not found
         """
         try:
-            print(f"DEBUG [secure_storage.py]: load_secret called for '{name}'")
-            print(f"DEBUG [secure_storage.py]: Storage object id: {id(self)}")
-            print(f"DEBUG [secure_storage.py]: Vault object id: {id(self.vault)}")
-            print(f"DEBUG [secure_storage.py]: Vault is unlocked: {self.vault.is_unlocked}")
+            debug(f"load_secret called for '{name}'")
+            debug(f"Storage object id: {id(self)}")
+            debug(f"Vault object id: {id(self.vault)}")
+            debug(f"Vault is unlocked: {self.vault.is_unlocked}")
             
             # Check if vault is initialized
             if not self.vault.is_initialized:
-                print(f"DEBUG [secure_storage.py]: Vault not initialized")
+                debug(f"Vault not initialized")
                 return None
             
             # Get the path to the secret file
             secret_path = self._get_secret_path(name)
             if not secret_path or not os.path.exists(secret_path):
-                print(f"DEBUG [secure_storage.py]: Secret file not found: {secret_path}")
+                debug(f"Secret file not found: {secret_path}")
                 return None
             
-            print(f"DEBUG [secure_storage.py]: Looking for secret at: {secret_path}")
+            debug(f"Looking for secret at: {secret_path}")
             
             # Get master key - either from already unlocked vault or by unlocking it
             master_key = None
             
             # Try to get master key from already unlocked vault
             if self.vault.is_unlocked:
-                print(f"DEBUG [secure_storage.py]: Vault is already unlocked, getting master key")
+                debug(f"Vault is already unlocked, getting master key")
                 master_key = self.vault.get_master_key()
             
             # If vault is locked but password was provided, try to unlock it
             if not master_key and password is not None:
-                print(f"DEBUG [secure_storage.py]: Vault is locked, attempting to unlock with provided password")
+                debug(f"Vault is locked, attempting to unlock with provided password")
                 if self.unlock(password):
-                    print(f"DEBUG [secure_storage.py]: Successfully unlocked vault with provided password")
+                    debug(f"Successfully unlocked vault with provided password")
                     master_key = self.vault.get_master_key()
                 else:
-                    print("DEBUG [secure_storage.py]: Failed to unlock vault with provided password")
+                    debug(f"Failed to unlock vault with provided password")
             
             # If we still don't have a master key, we can't decrypt
             if not master_key:
-                print("DEBUG [secure_storage.py]: No master key available for decryption")
+                debug(f"No master key available for decryption")
                 return None
                 
             # Read the encrypted data
             with open(secret_path, 'rb') as f:
                 encrypted_data = f.read()
                 
-            print(f"DEBUG [secure_storage.py]: Read {len(encrypted_data)} bytes of encrypted data")
-            print(f"DEBUG [secure_storage.py]: Using master key for decryption (length: {len(master_key)})")
+            debug(f"Read {len(encrypted_data)} bytes of encrypted data")
+            debug(f"Using master key for decryption (length: {len(master_key)})")
             
             # Try to use a simple AES decryption - we know from our logs that this should work
             try:
@@ -727,14 +731,14 @@ class SecureStorage:
                             encrypted_text = encrypted_data.decode('utf-8', errors='ignore')
                             encrypted_bytes = base64.b64decode(encrypted_text)
                         except Exception:
-                            print("DEBUG [secure_storage.py]: Data is not base64 encoded, trying as raw binary")
+                            debug_print(f"DEBUG [secure_storage.py]: Data is not base64 encoded, trying as raw binary")
                             # Use as-is
                             encrypted_bytes = encrypted_data
                             
                     # If we got here, we have some form of encrypted bytes
-                    print(f"DEBUG [secure_storage.py]: Processed encrypted data length: {len(encrypted_bytes)}")
+                    debug_print(f"DEBUG [secure_storage.py]: Processed encrypted data length: {len(encrypted_bytes)}")
                 except Exception as e:
-                    print(f"DEBUG [secure_storage.py]: Error processing data as base64: {e}")
+                    debug_print(f"DEBUG [secure_storage.py]: Error processing data as base64: {e}")
                     # Use the raw data
                     encrypted_bytes = encrypted_data
                 
@@ -754,7 +758,7 @@ class SecureStorage:
                     key = key.ljust(32, b'\0')
                 key = key[:32]
                 
-                print(f"DEBUG [secure_storage.py]: Final AES key length: {len(key)}")
+                debug_print(f"DEBUG [secure_storage.py]: Final AES key length: {len(key)}")
                 
                 # Attempt different IV and ciphertext combinations since the format might vary
                 decryption_attempts = [
@@ -773,12 +777,12 @@ class SecureStorage:
                 # Try each decryption method
                 for attempt_num, (iv, ciphertext) in enumerate(decryption_attempts):
                     try:
-                        print(f"DEBUG [secure_storage.py]: Attempt {attempt_num+1}: IV length: {len(iv)}, ciphertext length: {len(ciphertext)}")
+                        debug(f"DEBUG [secure_storage.py]: Attempt {attempt_num+1}: IV length: {len(iv)}, ciphertext length: {len(ciphertext)}")
                         
                         # If ciphertext is not a multiple of 16, pad it
                         if len(ciphertext) % 16 != 0:
                             padding_needed = 16 - (len(ciphertext) % 16)
-                            print(f"DEBUG [secure_storage.py]: Padding ciphertext with {padding_needed} bytes")
+                            debug(f"DEBUG [secure_storage.py]: Padding ciphertext with {padding_needed} bytes")
                             ciphertext = ciphertext + (b'\0' * padding_needed)
                         
                         # Create cipher and decrypt
@@ -790,49 +794,49 @@ class SecureStorage:
                         try:
                             from Crypto.Util.Padding import unpad
                             data = unpad(padded_data, AES.block_size)
-                            print(f"DEBUG [secure_storage.py]: Successfully unpadded data in attempt {attempt_num+1}")
+                            debug(f"DEBUG [secure_storage.py]: Successfully unpadded data in attempt {attempt_num+1}")
                         except Exception as e:
-                            print(f"DEBUG [secure_storage.py]: Error unpadding in attempt {attempt_num+1}: {e}")
+                            debug(f"DEBUG [secure_storage.py]: Error unpadding in attempt {attempt_num+1}: {e}")
                             data = padded_data
                         
                         # Try to decode as UTF-8
                         try:
                             decrypted = data.decode('utf-8')
-                            print(f"DEBUG [secure_storage.py]: Successfully decoded UTF-8 data in attempt {attempt_num+1}")
+                            debug(f"DEBUG [secure_storage.py]: Successfully decoded UTF-8 data in attempt {attempt_num+1}")
                             success = True
                             break
                         except UnicodeDecodeError:
                             # Try other encodings
                             try:
                                 decrypted = data.decode('latin-1')
-                                print(f"DEBUG [secure_storage.py]: Successfully decoded latin-1 data in attempt {attempt_num+1}")
+                                debug(f"DEBUG [secure_storage.py]: Successfully decoded latin-1 data in attempt {attempt_num+1}")
                                 success = True
                                 break
                             except Exception:
-                                print(f"DEBUG [secure_storage.py]: Couldn't decode data in attempt {attempt_num+1}")
+                                debug(f"DEBUG [secure_storage.py]: Couldn't decode data in attempt {attempt_num+1}")
                                 continue
                     except Exception as e:
-                        print(f"DEBUG [secure_storage.py]: Error in decryption attempt {attempt_num+1}: {e}")
+                        debug(f"DEBUG [secure_storage.py]: Error in decryption attempt {attempt_num+1}: {e}")
                 
                 if not success or not decrypted:
-                    print("DEBUG [secure_storage.py]: All decryption attempts failed")
+                    debug(f"DEBUG [secure_storage.py]: All decryption attempts failed")
                     return None
                 
                 # Try to parse as JSON
                 try:
                     secret_data = json.loads(decrypted)
-                    print(f"DEBUG [secure_storage.py]: Successfully parsed secret data as JSON with keys: {list(secret_data.keys())}")
+                    debug(f"DEBUG [secure_storage.py]: Successfully parsed secret data as JSON with keys: {list(secret_data.keys())}")
                     return secret_data
                 except json.JSONDecodeError:
                     # Not JSON, treat as plain secret
-                    print(f"DEBUG [secure_storage.py]: Data is not valid JSON, using as raw secret")
+                    debug(f"DEBUG [secure_storage.py]: Data is not valid JSON, using as raw secret")
                     return {"secret": decrypted, "issuer": "", "account": name}
             except Exception as e:
-                print(f"DEBUG [secure_storage.py]: Decryption error: {e}")
+                debug(f"DEBUG [secure_storage.py]: Decryption error: {e}")
                 return None
                 
         except Exception as e:
-            print(f"DEBUG [secure_storage.py]: Error loading secret: {e}")
+            debug(f"DEBUG [secure_storage.py]: Error loading secret: {e}")
             return None
 
     def get_secret(self, name):
@@ -848,7 +852,7 @@ class SecureStorage:
         # Attempt to load the secret
         secret_data = self.load_secret(name)
         if not secret_data:
-            print(f"DEBUG [secure_storage.py]: No secret found for '{name}'")
+            debug(f"DEBUG [secure_storage.py]: No secret found for '{name}'")
             return None
         
         return secret_data
@@ -894,21 +898,21 @@ class SecureStorage:
             bool: True if saved successfully, False otherwise
         """
         try:
-            print(f"DEBUG [secure_storage.py]: save_secret called for '{name}'")
+            debug(f"save_secret called for '{name}'")
             
             # Check if vault is initialized
             if not self.vault.is_initialized:
-                print(f"DEBUG [secure_storage.py]: Vault not initialized")
+                warning(f"Vault not initialized")
                 return False
                 
             # Check if vault is unlocked
             if not self.vault.is_unlocked:
-                print(f"DEBUG [secure_storage.py]: Vault is locked")
+                warning(f"Vault is locked")
                 return False
                 
             # Validate secret data
             if not isinstance(secret_data, dict) or 'secret' not in secret_data:
-                print(f"DEBUG [secure_storage.py]: Invalid secret data format - must be dict with 'secret' key")
+                error(f"Invalid secret data format - must be dict with 'secret' key")
                 return False
                 
             # Convert the data to JSON
@@ -927,18 +931,18 @@ class SecureStorage:
                         processed_data[key] = value
                 
                 json_data = json.dumps(processed_data)
-                print(f"DEBUG [secure_storage.py]: Secret data JSON length: {len(json_data)}")
+                debug(f"DEBUG [secure_storage.py]: Secret data JSON length: {len(json_data)}")
             except Exception as e:
-                print(f"DEBUG [secure_storage.py]: Error serializing secret data to JSON: {e}")
+                debug(f"DEBUG [secure_storage.py]: Error serializing secret data to JSON: {e}")
                 return False
                 
             # Get the encryption key (master key)
             master_key = self.vault.get_master_key()
             if not master_key:
-                print("DEBUG [secure_storage.py]: No master key available for encryption")
+                debug(f"DEBUG [secure_storage.py]: No master key available for encryption")
                 return False
                 
-            print(f"DEBUG [secure_storage.py]: Using master key for encryption (length: {len(master_key)})")
+            debug(f"DEBUG [secure_storage.py]: Using master key for encryption (length: {len(master_key)})")
             
             # AES encryption (our most reliable method)
             from Crypto.Cipher import AES
@@ -953,30 +957,30 @@ class SecureStorage:
             data_bytes = json_data.encode('utf-8') if isinstance(json_data, str) else json_data
             
             # Pad the data
-            print(f"DEBUG [secure_storage.py]: Data length before padding: {len(data_bytes)}")
+            debug(f"DEBUG [secure_storage.py]: Data length before padding: {len(data_bytes)}")
             padded_data = pad(data_bytes, AES.block_size)
-            print(f"DEBUG [secure_storage.py]: Data length after padding: {len(padded_data)}")
+            debug(f"DEBUG [secure_storage.py]: Data length after padding: {len(padded_data)}")
             
             # Generate random IV
             iv = get_random_bytes(16)
-            print(f"DEBUG [secure_storage.py]: IV length: {len(iv)}")
+            debug(f"DEBUG [secure_storage.py]: IV length: {len(iv)}")
             
             # Create cipher and encrypt
             cipher = AES.new(key, AES.MODE_CBC, iv)
             ciphertext = cipher.encrypt(padded_data)
-            print(f"DEBUG [secure_storage.py]: Ciphertext length: {len(ciphertext)}")
+            debug(f"DEBUG [secure_storage.py]: Ciphertext length: {len(ciphertext)}")
             
             # Combine IV and ciphertext
             encrypted_data = iv + ciphertext
-            print(f"DEBUG [secure_storage.py]: Total encrypted data length: {len(encrypted_data)}")
+            debug(f"DEBUG [secure_storage.py]: Total encrypted data length: {len(encrypted_data)}")
             
             # Get the path to save the secret file
             secret_path = self._get_secret_path(name)
             if not secret_path:
-                print(f"DEBUG [secure_storage.py]: Cannot determine path for saving secret")
+                debug(f"DEBUG [secure_storage.py]: Cannot determine path for saving secret")
                 return False
                 
-            print(f"DEBUG [secure_storage.py]: Saving secret to: {secret_path}")
+            debug(f"DEBUG [secure_storage.py]: Saving secret to: {secret_path}")
             
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(secret_path), exist_ok=True)
@@ -985,11 +989,11 @@ class SecureStorage:
             with open(secret_path, 'wb') as f:
                 f.write(encrypted_data)
                 
-            print(f"DEBUG [secure_storage.py]: Successfully saved secret")
+            debug(f"DEBUG [secure_storage.py]: Successfully saved secret")
             return True
                 
         except Exception as e:
-            print(f"DEBUG [secure_storage.py]: Error saving secret: {e}")
+            debug(f"DEBUG [secure_storage.py]: Error saving secret: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -999,7 +1003,7 @@ class SecureStorage:
         # Sanitize the name to prevent traversal issues
         sanitized_name = self._sanitize_filename(name)
         if sanitized_name != name:
-            print(f"DEBUG [secure_storage.py]: Name sanitized from '{name}' to '{sanitized_name}'")
+            debug(f"DEBUG [secure_storage.py]: Name sanitized from '{name}' to '{sanitized_name}'")
             return None
             
         # Compute the file path for the secret
@@ -1023,11 +1027,11 @@ class SecureStorage:
         - Uses secure file operations
         """
         if not self.is_unlocked:
-            print("Storage must be unlocked to export secrets")
+            debug(f"DEBUG [secure_storage.py]: Storage must be unlocked to export secrets")
             return False
         
         if not export_path:
-            print("Export cancelled.")
+            debug(f"DEBUG [secure_storage.py]: Export cancelled.")
             return False
         
         # Clean up the export path
@@ -1093,14 +1097,14 @@ class SecureStorage:
                     os.remove(temp_export)
                 
                 if result.returncode == 0:
-                    print(f"\nSecrets have been exported to your downloads folder")
+                    debug(f"DEBUG [secure_storage.py]: \nSecrets have been exported to your downloads folder")
                     return True
                 else:
-                    print(f"GPG encryption failed: {result.stderr.decode()}")
+                    debug(f"DEBUG [secure_storage.py]: GPG encryption failed: {result.stderr.decode()}")
                     return False
                 
             except subprocess.CalledProcessError as e:
-                print(f"GPG encryption failed: {str(e)}")
+                debug(f"DEBUG [secure_storage.py]: GPG encryption failed: {str(e)}")
                 return False
                 
         except Exception as e:
@@ -1167,7 +1171,7 @@ class SecureStorage:
             
             return True
         except Exception as e:
-            print(f"Error saving encrypted data: {e}")
+            error(f"Error saving encrypted data: {e}")
             return False
     
     def load_encrypted(self, path):
@@ -1223,7 +1227,7 @@ class SecureStorage:
             
             return plaintext.decode('utf-8')
         except Exception as e:
-            print(f"Error loading encrypted data: {e}")
+            error(f"Error loading encrypted data: {e}")
             return None
 
     def unlock_vault(self, master_password):
@@ -1245,15 +1249,15 @@ class SecureStorage:
         self._unlocked = False
         
         if not self.vault.is_initialized:
-            print("No vault exists yet. You'll be prompted to create one when saving a secret.")
+            info("No vault exists yet. You'll be prompted to create one when saving a secret.")
             return False
             
         if self.vault.unlock(master_password):
             self._unlocked = True
-            print("Vault unlocked successfully")
+            info("Vault unlocked successfully")
             return True
             
-        print("Failed to unlock vault - incorrect password")
+        debug("Failed to unlock vault - incorrect password")
         return False
 
     def _ensure_secure_directory(self, directory_path):
@@ -1576,7 +1580,7 @@ class SecureStorage:
                 # Simple byte comparison if no key
                 return secret_data == backup_content
         except Exception as e:
-            print(f"Error verifying integrity: {e}")
+            error(f"Error verifying integrity: {e}")
             return False
 
     def delete_secret(self, name):
@@ -1608,10 +1612,15 @@ class SecureStorage:
             if os.path.exists(backup_path):
                 os.remove(backup_path)
                 
+            info(f"Secret '{name}' deleted successfully")
             return True
         except Exception as e:
-            print(f"Error deleting secret: {e}")
+            error(f"Error deleting secret: {e}")
             return False
+
+    # Note: Complete vault deletion functionality has been moved to file_utils.py
+    # in the delete_truefa_vault function to provide a centralized utility
+    # that handles both primary and fallback vault locations.
 
     def _sanitize_filename(self, filename):
         """

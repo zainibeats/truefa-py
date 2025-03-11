@@ -23,9 +23,38 @@ import os
 import ctypes
 from ctypes import c_void_p, c_size_t, c_char_p, c_int
 from pathlib import Path
+from typing import Optional, Dict, Any
+import secrets
+
+# Import debug utilities
+from ..utils.debug import debug_print
+from src.utils.logger import warning, info, error
+
+# Add the colorprint import
+from src.utils.colorprint import print_warning
 
 # Add the project root to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+def log_fallback_warning(message, details=None):
+    """
+    Log a warning about using fallback implementations consistently.
+    
+    This ensures that warnings about fallbacks are formatted consistently
+    across the codebase and appear in both user-visible output and logs.
+    
+    Args:
+        message: The main warning message for the user
+        details: Optional additional details for the log
+    """
+    # Print to console for immediate user visibility
+    print(f"WARNING: {message}")
+    
+    # Log to file with more details if provided
+    if details:
+        warning(f"{message} - {details}")
+    else:
+        warning(message)
 
 # Try to load the DLL directly
 def _load_dll():
@@ -53,8 +82,8 @@ def _load_dll():
     is_pyinstaller = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
     base_dir = sys._MEIPASS if is_pyinstaller else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    print(f"Running from {'PyInstaller bundle' if is_pyinstaller else 'regular Python'}. Searching in: {base_dir}")
-    print(f"Current working directory: {os.getcwd()}")
+    debug_print(f"Running from {'PyInstaller bundle' if is_pyinstaller else 'regular Python'}. Searching in: {base_dir}")
+    debug_print(f"Current working directory: {os.getcwd()}")
     
     # DLL name
     dll_name = "truefa_crypto.dll" if sys.platform == "win32" else "libtruefa_crypto.so"
@@ -88,10 +117,10 @@ def _load_dll():
     # Try each location in order
     for location in possible_locations:
         if os.path.exists(location):
-            print(f"DLL found at: {location}")
+            debug_print(f"DLL found at: {location}")
             try:
                 _dll = ctypes.CDLL(location)
-                print("Successfully loaded DLL using ctypes")
+                debug_print("Successfully loaded DLL using ctypes")
                 
                 # Define function signatures if loaded successfully
                 try:
@@ -110,21 +139,21 @@ def _load_dll():
                     # Return successful load
                     return _dll
                 except AttributeError as e:
-                    print(f"Error setting function signatures: {str(e)}")
+                    debug_print(f"Error setting function signatures: {str(e)}")
                     _dll = None  # Reset to try the next location
             except Exception as e:
-                print(f"Error loading DLL from {location}: {str(e)}")
+                debug_print(f"Error loading DLL from {location}: {str(e)}")
         else:
-            print(f"DLL not found at: {location}")
+            debug_print(f"DLL not found at: {location}")
     
     # Return a fallback implementation for testing
     if _dll is None:
-        print("WARNING: Using fallback implementation for secure memory!")
+        print_warning("Using fallback implementation for secure memory")
         
         class DummyDLL:
             def __getattr__(self, name):
                 def dummy_func(*args, **kwargs):
-                    print(f"DUMMY CALL: {name}({args}, {kwargs})")
+                    debug_print(f"DUMMY CALL: {name}({args}, {kwargs})")
                     if name == "create_secure_string":
                         return 12345  # Dummy pointer
                     elif name == "secure_string_to_string":
@@ -142,7 +171,8 @@ _lib = _load_dll()
 if _lib is None:
     # If DLL loading failed, try to import from the Python package
     try:
-        print("DLL loading failed, trying to import from Python package...")
+        debug_print("DLL loading failed, trying to import from Python package...")
+        log_fallback_warning("Native cryptographic module not found, attempting to use Python package")
         from src.truefa_crypto import (
             SecureString as RustSecureString,
             create_secure_string,
@@ -169,12 +199,13 @@ if _lib is None:
             # Simple stub for compatibility
             return True
             
-        print("Successfully imported from truefa_crypto package")
+        debug_print("Successfully imported from truefa_crypto package")
     except ImportError as e:
-        print(f"Error importing from truefa_crypto package: {e}")
+        debug_print(f"Error importing from truefa_crypto package: {e}")
+        log_fallback_warning("Failed to import truefa_crypto module", f"Using fallback with reduced security: {e}")
         raise ImportError("Failed to load truefa_crypto module")
 else:
-    print("Successfully loaded DLL using ctypes")
+    debug_print("Successfully loaded DLL using ctypes")
     # Define the functions using the loaded DLL
     class RustSecureString:
         """

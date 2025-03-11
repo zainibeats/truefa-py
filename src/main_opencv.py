@@ -18,6 +18,12 @@ Architecture:
 - Cross-platform compatibility via intelligent fallback mechanism
 """
 
+# Configure logging before imports
+import logging
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger('truefa_crypto').setLevel(logging.ERROR)
+logging.getLogger('truefa_crypto.loader').setLevel(logging.ERROR)
+
 import sys
 import time
 import os
@@ -26,20 +32,56 @@ import urllib.parse
 import traceback
 import getpass  # Add getpass module for secure password input
 import argparse
+import signal
+import shutil
+import platform
 
 # Import our configuration
 try:
-    from config import DATA_DIR, VAULT_FILE
+    from config import DATA_DIR, VAULT_FILE, TEMP_DIR, IS_PYINSTALLER, LOG_TO_FILE, LOG_DIRECTORY
 except ImportError:
     # Create a minimal config if the module isn't found
     DATA_DIR = os.path.join(os.path.expanduser("~"), ".truefa")
     VAULT_FILE = os.path.join(DATA_DIR, "vault.json")
+    TEMP_DIR = os.path.join(DATA_DIR, "temp")
+    IS_PYINSTALLER = False
+    LOG_TO_FILE = True
+    LOG_DIRECTORY = os.path.join(DATA_DIR, "logs")
 
 # Use absolute imports instead of relative imports
 from src.security.secure_storage import SecureStorage
 from src.security.secure_string import SecureString
 from src.totp.auth_opencv import TwoFactorAuth
 from src.utils.screen import clear_screen
+from src.utils.debug import debug_print, set_debug, close_logging
+from src.security.vault_interfaces import SecureVault  # Add this import for SecureVault
+
+# Initialize debug from environment variable (will be overridden by command-line args if provided)
+if os.environ.get('TRUEFA_DEBUG', '').lower() in ('1', 'true', 'yes'):
+    set_debug(True)
+
+def debug_vault_status(storage):
+    """Print debug information about vault status."""
+    debug_print("Vault status:")
+    debug_print(f"  Initialized: {storage.is_initialized}")
+    debug_print(f"  Unlocked: {storage.is_unlocked}")
+
+# Set up signal handlers for clean exits
+def signal_handler(sig, frame):
+    """Handle signals for proper shutdown."""
+    debug_print("\nExiting due to signal...")
+    # Call the exit function to clean up sensitive material
+    sys.exit(0)
+
+# Register signal handlers
+try:
+    signal.signal(signal.SIGINT, signal_handler)
+    if platform.system() != "Windows":
+        signal.signal(signal.SIGHUP, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+except (AttributeError, ValueError):
+    # Some signals may not be available on all platforms
+    pass
 
 def main():
     """
@@ -49,65 +91,126 @@ def main():
         int: 0 for successful execution, non-zero for errors
     """
     try:
-        print("Importing modules...")
+        # Parse command-line arguments for debug mode
+        parser = argparse.ArgumentParser(description="TrueFA-Py: TOTP Authenticator with OpenCV")
+        parser.add_argument("--use-fallback", action="store_true", help="Force use of Python fallback for crypto operations")
+        parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+        parser.add_argument("--create-vault", action="store_true", help="Create a new vault")
+        parser.add_argument("--vault-dir", type=str, help="Directory to store the vault in")
+        parser.add_argument("--version", action="store_true", help="Show version information and exit")
+        args = parser.parse_args()
+        
+        # Force Python fallback if requested
+        if args.use_fallback:
+            # Set environment variable before imports to force fallback
+            os.environ["TRUEFA_USE_FALLBACK"] = "true"
+            debug_print("Forcing use of Python fallback for crypto operations")
+        
+        # Set debug mode based on args
+        if args.debug:
+            set_debug(True)
+            debug_print("Debug logging enabled")
+            debug_print("Debug system initialized and working")
+            debug_print("Importing modules...")
+            # Configure logging for debug mode - show INFO and above
+            logging.basicConfig(level=logging.INFO)
+            # Allow truefa_crypto logs in debug mode
+            logging.getLogger('truefa_crypto').setLevel(logging.INFO)
+            logging.getLogger('truefa_crypto.loader').setLevel(logging.INFO)
+        else:
+            # Already configured at ERROR level at the beginning of the file
+            pass
+
+        # Initialize debug output based on command line args
+        debug_print(f"Running from regular Python. Searching in: {os.getcwd()}")
+        debug_print(f"Current working directory: {os.getcwd()}")
+        
+        # Import our debug utilities but don't enable debug yet
+        # (we'll do that below based on command-line args)
+        debug_print("Importing modules...")
         
         # Check if we're running in a compiled binary or as a regular Python script
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             bundle_dir = getattr(sys, '_MEIPASS')
             app_dir = os.path.dirname(sys.executable)
-            print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
+            debug_print(f"Running from PyInstaller bundle. App dir: {app_dir}, Bundle dir: {bundle_dir}")
         else:
-            print(f"Running from regular Python. Searching in: {os.getcwd()}")
-            print(f"Current working directory: {os.getcwd()}")
+            debug_print(f"Running from regular Python. Searching in: {os.getcwd()}")
+            debug_print(f"Current working directory: {os.getcwd()}")
         
-        # Import required modules
+        # Try to import OpenCV
         try:
             import cv2
-            print("OpenCV imported successfully")
+            debug_print("OpenCV imported successfully")
         except ImportError:
             print("Warning: OpenCV not found. QR code scanning will be disabled.")
         
-        print("Creating SecureVault...")
-        # Create the vault and secure storage
-        vault = SecureVault()
-        print(f"SecureVault created successfully")
+        # Create the secure vault
+        debug_print("Creating SecureVault...")
+        secure_vault = SecureVault(args.vault_dir)
+        debug_print("SecureVault created successfully")
         
-        print("Creating SecureStorage...")
-        # Create a shared storage instance that will be used by both the main app and TwoFactorAuth
-        secure_storage = SecureStorage(vault)
-        print(f"SecureStorage created successfully")
+        # Create secure storage
+        debug_print("Creating SecureStorage...")
+        secure_storage = SecureStorage(secure_vault)
+        debug_print("SecureStorage created successfully")
         
-        print("Creating TwoFactorAuth...")
-        # Pass the shared storage instance to TwoFactorAuth
-        auth = TwoFactorAuth(storage=secure_storage)
-        print(f"TwoFactorAuth created successfully")
+        # Create authentication handler
+        debug_print("Creating TwoFactorAuth...")
+        auth = TwoFactorAuth(secure_storage)
+        debug_print("TwoFactorAuth created successfully")
         
         # Add object ID debugging
-        print(f"DEBUG: Main app storage object id: {id(secure_storage)}")
-        print(f"DEBUG: Main app vault object id: {id(secure_storage.vault)}")
+        debug_print(f"Main app storage object id: {id(secure_storage)}")
+        debug_print(f"Main app vault object id: {id(secure_storage.vault)}")
         
         # Debug the auth storage
-        print(f"DEBUG: Auth storage object id: {id(auth.storage)}")
-        print(f"DEBUG: Auth vault object id: {id(auth.storage.vault)}")
+        debug_print(f"Auth storage object id: {id(auth.storage)}")
+        debug_print(f"Auth vault object id: {id(auth.storage.vault)}")
         
         # Check if these are the same objects
-        print(f"DEBUG: Storage objects are the same: {id(secure_storage) == id(auth.storage)}")
-        print(f"DEBUG: Vault objects are the same: {id(secure_storage.vault) == id(auth.storage.vault)}")
+        debug_print(f"Storage objects are the same: {id(secure_storage) == id(auth.storage)}")
+        debug_print(f"Vault objects are the same: {id(secure_storage.vault) == id(auth.storage.vault)}")
 
         # Check if vault exists
         debug_vault_status(secure_storage)
         
-        # Process command-line arguments for non-interactive operations
-        if len(sys.argv) > 1:
-            # ... existing command-line handling code ...
-            pass
+        # Check for version flag
+        if args.version:
+            print("TrueFA-Py OpenCV Edition")
+            print("Version: 1.0.0")
+            print(f"Platform: {sys.platform}")
+            if hasattr(sys, 'frozen'):
+                print("Running from frozen executable")
+            else:
+                print("Using Python fallback implementations for crypto functions")
+            print("Exiting securely...")
+            return 0
 
         # Main interactive loop
         while True:
             try:
                 # Display menu
-                # ... existing menu code ...
-                pass
+                print("\n=== TrueFA ===")
+                print("1. Load QR code from image")
+                print("2. Enter secret key manually")
+                print("3. Save current secret")
+                print("4. View saved secrets")
+                print("5. Export secrets")
+                print("6. Clear screen")
+                print("7. Exit")
+                print("\n")
+                
+                choice = input("Enter your choice (1-7): ")
+                
+                if choice == '7':
+                    print("Exiting application...")
+                    break
+                elif choice == '6':
+                    clear_screen()
+                else:
+                    print(f"Selected option {choice}. This feature is not fully implemented yet.")
+                    time.sleep(1)
             except KeyboardInterrupt:
                 print("\nExiting TrueFA. Goodbye!")
                 break
@@ -118,12 +221,9 @@ def main():
         print("Exiting securely...")
         # Clean up any temporary files that might have been created
         try:
-            from config import TEMP_DIR
-            import shutil
-            
-            # Clean up the temp directory but don't delete the directory itself
-            if os.path.exists(TEMP_DIR):
-                print(f"Cleaning up temporary files in {TEMP_DIR}")
+            if os.path.exists(TEMP_DIR) and os.path.isdir(TEMP_DIR):
+                debug_print(f"Cleaning up temporary files in {TEMP_DIR}")
+                
                 for item in os.listdir(TEMP_DIR):
                     item_path = os.path.join(TEMP_DIR, item)
                     try:
@@ -132,10 +232,13 @@ def main():
                         elif os.path.isdir(item_path):
                             shutil.rmtree(item_path)
                     except Exception as e:
-                        print(f"Error cleaning up {item_path}: {e}")
+                        debug_print(f"Error cleaning up {item_path}: {e}")
         except Exception as e:
-            print(f"Error during cleanup: {e}")
+            debug_print(f"Error during cleanup: {e}")
             
+        # Close logging
+        close_logging()
+        
         return 0
         
     except Exception as e:
@@ -144,23 +247,35 @@ def main():
         return 1
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TrueFA-Py OpenCV Edition")
-    parser.add_argument("--use-fallback", action="store_true", help="Force use of Python fallback for crypto operations")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--create-vault", action="store_true", help="Create a new vault")
-    parser.add_argument("--vault-dir", type=str, help="Directory to store the vault in")
-    parser.add_argument("--version", action="store_true", help="Show version information and exit")
-    args = parser.parse_args()
-    
-    if args.use_fallback:
-        print("Forcing use of Python fallback for crypto operations")
-        # Set environment variable before imports
-        import os
-        os.environ["TRUEFA_USE_FALLBACK"] = "true"
-    
-    if args.debug:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-        print("Debug logging enabled")
-    
     sys.exit(main())
+
+# Module-level initialization (for programmable API use)
+def force_python_crypto():
+    """Force the use of Python fallback crypto implementation."""
+    from src.truefa_crypto import force_python_fallback
+    force_python_fallback()
+    
+    # Only call debug_print if debug is enabled, to avoid circular imports
+    try:
+        from src.utils.debug import debug_print, is_debug_enabled
+        if is_debug_enabled():
+            debug_print("Forcing use of Python fallback for crypto operations")
+    except ImportError:
+        # Fall back to regular print if debug module can't be imported
+        print("Forcing use of Python fallback for crypto operations")
+
+def set_debug_output(enabled=True):
+    """Enable or disable debug output."""
+    try:
+        from src.utils.debug import set_debug, debug_print
+        set_debug(enabled)
+        if enabled:
+            debug_print("Debug logging enabled")
+    except ImportError:
+        # Fall back to regular print if debug module can't be imported
+        print(f"Debug logging {'enabled' if enabled else 'disabled'}")
+
+# For user-facing prints like these, keep them as prints:
+print("TrueFA-Py TOTP Generator")
+print("Vault unlocked successfully.")
+print("Generated TOTP code: {code}")

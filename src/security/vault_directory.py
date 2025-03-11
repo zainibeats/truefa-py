@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 import logging
 
+from src.utils.colorprint import print_warning, print_info
+
 logger = logging.getLogger(__name__)
 
 def is_running_in_docker():
@@ -82,7 +84,10 @@ def create_secure_directory(path, fallback_path=None):
             logger.info(f"Successfully created secure directory: {path}")
             return path
         except (PermissionError, OSError) as e:
-            logger.warning(f"Cannot write to {path}: {str(e)}")
+            # This is a user-facing warning, print it directly to console
+            error_msg = f"Cannot write to {path}: {str(e)}"
+            print_warning(error_msg)  # Print with color
+            logger.warning(error_msg)  # Also log it
             # Fall through to fallback logic
     except Exception as e:
         logger.warning(f"Failed to create primary secure directory {path}: {str(e)}")
@@ -126,13 +131,22 @@ def create_secure_directory(path, fallback_path=None):
             with open(test_file, 'w') as f:
                 f.write('test')
             os.remove(test_file)
-            logger.info(f"Using fallback secure directory: {fallback_path}")
+            
+            # This is a user-facing warning, print it directly to console
+            fallback_msg = f"Using fallback secure directory: {fallback_path}"
+            print_warning(fallback_msg)  # Print with color
+            logger.info(fallback_msg)  # Also log it
+            
             return fallback_path
         except (PermissionError, OSError) as e:
-            logger.error(f"Cannot write to fallback path {fallback_path}: {str(e)}")
+            error_msg = f"Cannot write to fallback path {fallback_path}: {str(e)}"
+            print_warning(error_msg)  # Print error message in yellow
+            logger.error(error_msg)  # Also log it
             raise OSError(f"Cannot create a secure directory: {str(e)}")
     except Exception as e:
-        logger.error(f"Failed to create fallback secure directory {fallback_path}: {str(e)}")
+        error_msg = f"Failed to create fallback secure directory {fallback_path}: {str(e)}"
+        print_warning(error_msg)  # Print error message in yellow
+        logger.error(error_msg)  # Also log it
         raise OSError(f"Cannot create a secure directory: {str(e)}")
 
 def secure_file_permissions(file_path):
@@ -152,13 +166,15 @@ def secure_file_permissions(file_path):
                 os.chmod(file_path, 0o600)
             except PermissionError:
                 if is_running_in_docker():
-                    print(f"Warning: Could not set permissions on {file_path} - this is expected when mounting from Windows to Docker")
+                    logger.warning(f"Could not set permissions on {file_path} - this is expected when mounting from Windows to Docker")
                     return True
                 else:
                     raise
         return True
     except Exception as e:
-        print(f"Error setting secure permissions on {file_path}: {e}")
+        error_msg = f"Error setting secure permissions on {file_path}: {e}"
+        print_warning(error_msg)  # Print with color
+        logger.error(error_msg)  # Also log it
         return False
 
 def secure_directory_permissions(dir_path):
@@ -178,7 +194,7 @@ def secure_directory_permissions(dir_path):
                 os.chmod(dir_path, 0o700)
             except PermissionError:
                 if is_running_in_docker():
-                    print(f"Warning: Could not set permissions on directory {dir_path} - this is expected when mounting from Windows to Docker")
+                    logger.warning(f"Could not set permissions on directory {dir_path} - this is expected when mounting from Windows to Docker")
                     return True
                 else:
                     raise
@@ -247,7 +263,7 @@ def secure_atomic_write(file_path, content, mode="w"):
                 os.makedirs(dir_path, mode=0o700, exist_ok=True)
             except PermissionError:
                 if is_running_in_docker() and platform.system() != "Windows":
-                    print(f"Warning: Could not set permissions on directory {dir_path} when creating - this is expected when mounting from Windows to Docker")
+                    logger.warning(f"Could not set permissions on directory {dir_path} when creating - this is expected when mounting from Windows to Docker")
                     os.makedirs(dir_path, exist_ok=True)
                 else:
                     raise
