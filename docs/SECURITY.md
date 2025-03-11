@@ -89,6 +89,21 @@ The secure vault implements several security features:
 - Vault metadata contains only verification data, not actual secrets
 - Encrypted files include integrity protection
 
+### Secure Exports
+
+TrueFA-Py provides secure export functionality for vault secrets:
+
+- **Direct AES-256 Encryption**: Exports use AES-256 in CBC mode with PKCS#7 padding
+- **Password-Derived Keys**: Export files are encrypted with keys derived from user-provided passwords using SHA-256
+- **Unique Initialization Vectors**: Each export uses a randomly generated IV for enhanced security
+- **Custom File Format**: Export files have a recognizable header ("TRUEFA01") for identification
+- **Structured Format**: Exports contain both the encrypted data and necessary cryptographic metadata
+- **Non-Dependency on External Tools**: Implementation uses built-in cryptography to avoid external dependencies
+- **Serialization Security**: Special handling for sensitive data types during serialization
+- **Path Security**: Verification of export paths with proper error handling for permissions
+
+Implementation: [src/security/exporters.py](../src/security/exporters.py) handles all export operations with a modular design.
+
 ### Vault State Verification
 
 - **Deep Verification**: Vault unlock state is verified by testing actual cryptographic operations
@@ -154,7 +169,9 @@ Implementation: [src/security/secure_string.py](../src/security/secure_string.py
 
 - No network transmission of secrets
 - QR codes can be loaded from files rather than camera for air-gapped systems
-- Export functionality includes encrypted options
+- Export functionality includes AES-256 encrypted exports with password protection
+- Multiple export formats supported (encrypted file, OTPAuth URI)
+- User-friendly error handling with specific security-related messages
 - Clear memory option for panic situations
 
 ## Audit Guidelines
@@ -179,7 +196,13 @@ For security auditing, focus on these critical components:
    - File encryption/decryption operations
    - Vault state verification and integrity checks
 
-4. **TOTP Secret Handling**
+4. **Export Implementation**
+   - Located in `src/security/exporters.py`
+   - Password-based AES encryption
+   - Secure key derivation and IV handling
+   - File format security and data serialization
+
+5. **TOTP Secret Handling**
    - Located in `src/totp/auth_opencv.py`
    - QR code processing security
    - Secret extraction and validation
