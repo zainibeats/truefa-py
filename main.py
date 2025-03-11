@@ -39,6 +39,8 @@ from src.truefa_crypto import is_using_fallback
 from src.utils.colorprint import print_warning, print_success, print_info
 from src.utils.screen import clear_screen
 from src.utils.file_utils import delete_truefa_vault
+import subprocess
+import platform
 
 # Make sure the src directory is in the path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -554,7 +556,7 @@ try:
                         # Export secrets
                         print("Export options:")
                         print("1. Export as OTPAuth URI")
-                        print("2. Export to encrypted GPG file")
+                        print("2. Export to encrypted file")
                         export_choice = input("Enter your choice (or 'c' to cancel): ")
                         
                         if export_choice.lower() == 'c':
@@ -589,7 +591,7 @@ try:
                             else:
                                 print("No secret loaded. Please load a QR code or enter a secret first.")
                         elif export_choice == "2":
-                            # Export to encrypted GPG file
+                            # Export to encrypted file
                             export_password = getpass.getpass("Enter password for encryption: ")
                             confirm_password = getpass.getpass("Confirm password: ")
                             
@@ -601,12 +603,25 @@ try:
                                 print("Password cannot be empty. Export cancelled.")
                                 continue
                                 
-                            # Export to GPG file
+                            # Export to encrypted file
+                            print("Exporting secrets to encrypted file...")
                             success = storage.export_secrets(export_path, export_password)
                             if success:
-                                print(f"Secrets successfully exported to encrypted GPG file.")
+                                print(f"Secrets successfully exported to encrypted file.")
+                                # Show full path if it's not an absolute path
+                                if not os.path.isabs(export_path):
+                                    if platform.system() == 'Windows':
+                                        downloads_dir = os.path.expanduser('~\\Downloads')
+                                    else:
+                                        downloads_dir = os.path.expanduser('~/Downloads')
+                                    full_path = os.path.join(downloads_dir, export_path)
+                                    if not full_path.endswith('.enc'):
+                                        full_path += '.enc'
+                                    print(f"Export location: {full_path}")
                             else:
                                 print("Export failed. Please check the logs for more information.")
+                                if args.debug:
+                                    print("Tip: Try using a simple export path without special characters.")
                         else:
                             print("Invalid choice.")
                 except KeyboardInterrupt:

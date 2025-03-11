@@ -1075,87 +1075,55 @@ class SecureStorage:
             debug(f"DEBUG [secure_storage.py]: Storage must be unlocked to export secrets")
             return False
         
-        if not export_path:
-            debug(f"DEBUG [secure_storage.py]: Export cancelled.")
-            return False
-        
-        # Clean up the export path
-        export_path = export_path.strip('"').strip("'")
-        
-        # Use Downloads folder for relative paths
-        if not os.path.isabs(export_path):
-            if platform.system() == 'Windows':
-                downloads_dir = os.path.expanduser('~\\Downloads')
-            else:
-                downloads_dir = os.path.expanduser('~/Downloads')
-            export_path = os.path.join(downloads_dir, export_path)
-        
-        # Ensure .gpg extension
-        if not export_path.endswith('.gpg'):
-            export_path += '.gpg'
+        # Import here to avoid circular imports
+        from .exporters import SecretExporter
         
         try:
-            # Create exports directory only when needed
+            # Make sure exports directory exists
             self._ensure_secure_directory(self.exports_path)
             
-            # Create temporary export file
-            temp_export = os.path.join(self.exports_path, '.temp_export')
-            
-            # Clean up any existing temp files
-            if os.path.exists(temp_export):
-                os.remove(temp_export)
-            
-            # Write secrets to temp file
+            # Create a dictionary of secrets to export
+            secrets = {}
             secrets_count = 0
-            with open(temp_export, 'w') as f:
-                secrets = {}
-                for filename in os.listdir(self._vault_directory):
-                    if filename.endswith('.enc'):
-                        name = filename[:-4]
-                        with open(os.path.join(self._vault_directory, filename), 'r') as sf:
-                            encrypted = sf.read()
-                            decrypted = self.decrypt_secret(encrypted, name)
-                            if decrypted:
-                                secrets[name] = decrypted
-                                secrets_count += 1
-                json.dump(secrets, f, indent=4)
             
-            try:
-                # Set up GPG environment
-                gpg_env = os.environ.copy()
-                gpg_env['GNUPGHOME'] = self.exports_path
-                
-                # Encrypt with GPG
-                result = subprocess.run([
-                    'gpg',
-                    '--batch',
-                    '--yes',
-                    '--passphrase-fd', '0',
-                    '--symmetric',
-                    '--cipher-algo', 'AES256',
-                    '--output', export_path,
-                    temp_export
-                ], input=export_password.encode(), env=gpg_env, capture_output=True)
-                
-                # Clean up
-                if os.path.exists(temp_export):
-                    os.remove(temp_export)
-                
-                if result.returncode == 0:
-                    debug(f"DEBUG [secure_storage.py]: \nSecrets have been exported to your downloads folder")
-                    return True
-                else:
-                    debug(f"DEBUG [secure_storage.py]: GPG encryption failed: {result.stderr.decode()}")
-                    return False
-                
-            except subprocess.CalledProcessError as e:
-                debug(f"DEBUG [secure_storage.py]: GPG encryption failed: {str(e)}")
+            for filename in os.listdir(self._vault_directory):
+                if filename.endswith('.enc'):
+                    name = filename[:-4]
+                    # Use the existing load_secret method that already has proper decryption logic
+                    secret_data = self.load_secret(name)
+                    if secret_data:
+                        secrets[name] = secret_data
+                        secrets_count += 1
+                        debug(f"DEBUG [secure_storage.py]: Successfully loaded secret '{name}' for export")
+                    else:
+                        debug(f"DEBUG [secure_storage.py]: Failed to load secret '{name}' for export")
+            
+            if secrets_count == 0:
+                debug(f"DEBUG [secure_storage.py]: No secrets found to export")
                 return False
                 
+            # Use the new SecretExporter class to handle the export
+            exporter = SecretExporter(self.exports_path)
+            success, error_message = exporter.export_to_gpg(secrets, export_path, export_password)
+            
+            if not success and error_message:
+                print(f"Export failed: {error_message}")
+                
+            return success
+                
         except Exception as e:
-            print(f"Export failed: {str(e)}")
-            if os.path.exists(temp_export):
-                os.remove(temp_export)
+            # Provide more detailed error information and handle encoding errors
+            error_detail = str(e)
+            error_type = type(e).__name__
+            
+            debug(f"DEBUG [secure_storage.py]: Export failed ({error_type}): {error_detail}")
+            
+            # Ensure error message doesn't have encoding issues
+            if isinstance(e, UnicodeError):
+                print(f"Export failed: Error processing text encoding (UnicodeError)")
+            else:
+                print(f"Export failed: {str(e)}")
+                
             return False
 
     def save_encrypted(self, data, path):
