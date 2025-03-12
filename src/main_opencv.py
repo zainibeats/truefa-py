@@ -197,17 +197,81 @@ def main():
                 print("3. Save current secret")
                 print("4. View saved secrets")
                 print("5. Export secrets")
-                print("6. Clear screen")
-                print("7. Exit")
+                print("6. Import secrets")
+                print("7. Clear screen")
+                print("8. Exit")
                 print("\n")
                 
-                choice = input("Enter your choice (1-7): ")
+                choice = input("Enter your choice (1-8): ")
                 
-                if choice == '7':
+                if choice == '8':
                     print("Exiting application...")
                     break
-                elif choice == '6':
+                elif choice == '7':
                     clear_screen()
+                elif choice == '5':
+                    # Export secrets
+                    if not secure_storage.is_unlocked:
+                        master_password = getpass.getpass("Enter your vault password: ")
+                        if not secure_storage.unlock_vault(master_password):
+                            print("Failed to unlock vault. Incorrect password.")
+                            continue
+                        print("Vault unlocked successfully.")
+                    
+                    # Get export path
+                    export_path = input("Enter path for export file (or press Enter for default): ")
+                    if not export_path:
+                        export_path = os.path.expanduser("~/TrueFA_export.json")
+                    
+                    # Get export password
+                    export_password = getpass.getpass("Enter password to encrypt export: ")
+                    confirm_password = getpass.getpass("Confirm password: ")
+                    
+                    if export_password != confirm_password:
+                        print("Passwords do not match. Export cancelled.")
+                        continue
+                        
+                    # Perform the export
+                    success, message = secure_storage.export_secrets(export_path, export_password)
+                    
+                    if success:
+                        print(f"Secrets exported successfully to {export_path}")
+                        print("Note: This file is encrypted with your password and compatible with other authenticator apps.")
+                    else:
+                        print(f"Export failed: {message}")
+                elif choice == '6':
+                    # Import secrets
+                    if not secure_storage.is_unlocked:
+                        master_password = getpass.getpass("Enter your vault password: ")
+                        if not secure_storage.unlock_vault(master_password):
+                            print("Failed to unlock vault. Incorrect password.")
+                            continue
+                        print("Vault unlocked successfully.")
+                    
+                    # Get import path
+                    import_path = input("Enter path to import file: ")
+                    if not import_path:
+                        print("No import file specified. Import cancelled.")
+                        continue
+                    
+                    # Expand user paths
+                    import_path = os.path.expanduser(import_path)
+                    
+                    # Check if file exists
+                    if not os.path.exists(import_path):
+                        print(f"File not found: {import_path}")
+                        continue
+                    
+                    # Get import password
+                    import_password = getpass.getpass("Enter password to decrypt import: ")
+                    
+                    # Perform the import
+                    success, message = secure_storage.import_secrets(import_path, import_password)
+                    
+                    if success:
+                        print(f"Import successful: {message}")
+                    else:
+                        print(f"Import failed: {message}")
                 else:
                     print(f"Selected option {choice}. This feature is not fully implemented yet.")
                     time.sleep(1)

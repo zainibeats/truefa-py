@@ -1056,24 +1056,25 @@ class SecureStorage:
 
     def export_secrets(self, export_path, export_password):
         """
-        Export secrets as a GPG-encrypted file.
+        Export secrets as an encrypted JSON file.
         
         Args:
             export_path: Path to save the exported file
             export_password: Password to encrypt the export
             
         Returns:
-            bool: True if export successful
+            tuple: (success, error_message)
             
         Security:
-        - Uses GPG symmetric encryption
-        - Cleans up temporary files
-        - Validates paths and permissions
-        - Uses secure file operations
+        - Uses AES-256 encryption in CBC mode
+        - Password-based key derivation with PBKDF2
+        - Standard, interoperable JSON format
+        - Secure file operations
+        - Proper cleanup
         """
         if not self.is_unlocked:
-            debug(f"DEBUG [secure_storage.py]: Storage must be unlocked to export secrets")
-            return False
+            debug("Storage must be unlocked to export secrets")
+            return False, "Vault is locked. Please unlock it first."
         
         # Import here to avoid circular imports
         from .exporters import SecretExporter
@@ -1086,6 +1087,7 @@ class SecureStorage:
             secrets = {}
             secrets_count = 0
             
+            debug(f"Loading secrets from {self._vault_directory} for export")
             for filename in os.listdir(self._vault_directory):
                 if filename.endswith('.enc'):
                     name = filename[:-4]
@@ -1094,37 +1096,108 @@ class SecureStorage:
                     if secret_data:
                         secrets[name] = secret_data
                         secrets_count += 1
-                        debug(f"DEBUG [secure_storage.py]: Successfully loaded secret '{name}' for export")
+                        debug(f"Successfully loaded secret '{name}' for export")
                     else:
-                        debug(f"DEBUG [secure_storage.py]: Failed to load secret '{name}' for export")
+                        warning(f"Failed to load secret '{name}' for export")
             
             if secrets_count == 0:
-                debug(f"DEBUG [secure_storage.py]: No secrets found to export")
-                return False
+                warning(f"No secrets found to export")
+                return False, "No secrets found to export"
                 
-            # Use the new SecretExporter class to handle the export
+            # Use the SecretExporter class to handle the export
             exporter = SecretExporter(self.exports_path)
-            success, error_message = exporter.export_to_gpg(secrets, export_path, export_password)
+            success, error_message = exporter.export_to_encrypted_json(secrets, export_path, export_password)
             
             if not success and error_message:
-                print(f"Export failed: {error_message}")
+                error(f"Export failed: {error_message}")
                 
-            return success
+            return success, error_message
                 
         except Exception as e:
             # Provide more detailed error information and handle encoding errors
             error_detail = str(e)
             error_type = type(e).__name__
             
-            debug(f"DEBUG [secure_storage.py]: Export failed ({error_type}): {error_detail}")
+            error(f"Export failed ({error_type}): {error_detail}")
             
             # Ensure error message doesn't have encoding issues
             if isinstance(e, UnicodeError):
-                print(f"Export failed: Error processing text encoding (UnicodeError)")
+                return False, "Error processing text encoding (UnicodeError)"
             else:
-                print(f"Export failed: {str(e)}")
+                return False, f"Export error: {error_detail}"
+
+    def import_secrets(self, import_path, import_password):
+        """
+        Import secrets from an encrypted file.
+        
+        Args:
+            import_path: Path to the encrypted file to import
+            import_password: Password to decrypt the file
+            
+        Returns:
+            tuple: (success, message)
+                - success: True if import was successful
+                - message: Success message or error message
+        """
+        if not self.is_unlocked:
+            debug("Storage must be unlocked to import secrets")
+            return False, "Vault is locked. Please unlock it first."
+        
+        # Import here to avoid circular imports
+        from .importers import SecretImporter
+        
+        try:
+            # Check if the import file exists
+            if not import_path or not os.path.exists(import_path):
+                error(f"Import file not found: {import_path}")
+                return False, f"File not found: {import_path}"
+            
+            debug(f"Attempting to import secrets from: {import_path}")
+            
+            # Use the SecretImporter to handle the import
+            importer = SecretImporter()
+            secrets_dict, error_message = importer.import_from_file(import_path, import_password)
+            
+            if not secrets_dict:
+                error(f"Import failed: {error_message}")
+                return False, error_message
+            
+            # Import the secrets into the vault
+            import_count = 0
+            for name, secret_data in secrets_dict.items():
+                debug(f"Importing secret: {name}")
                 
-            return False
+                # Check if the secret already exists
+                secret_path = self._get_secret_path(name)
+                exists = os.path.exists(secret_path) if secret_path else False
+                
+                if exists:
+                    # Modify the name to avoid overwriting
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    name = f"{name}_imported_{timestamp}"
+                    debug(f"Secret already exists, renamed to: {name}")
+                
+                # Save the secret
+                if self.save_secret(name, secret_data):
+                    import_count += 1
+                    debug(f"Successfully imported secret: {name}")
+                else:
+                    warning(f"Failed to import secret: {name}")
+            
+            # Return the result
+            if import_count > 0:
+                info(f"Successfully imported {import_count} secrets")
+                return True, f"Successfully imported {import_count} secrets"
+            else:
+                warning("No secrets were imported")
+                return False, "No secrets were imported"
+            
+        except Exception as e:
+            error_detail = str(e)
+            error_type = type(e).__name__
+            
+            error(f"Import failed ({error_type}): {error_detail}")
+            return False, f"Import error: {error_detail}"
 
     def save_encrypted(self, data, path):
         """

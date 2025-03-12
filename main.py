@@ -259,27 +259,28 @@ try:
                     print("3. Save current secret")
                     print("4. View saved secrets")
                     print("5. Export secrets")
-                    print("6. Clear screen")
-                    print("7. Delete vault")
-                    print("8. Exit")
+                    print("6. Import secrets")
+                    print("7. Clear screen")
+                    print("8. Delete vault")
+                    print("9. Exit")
                     print()
                     
-                    choice = input("Enter your choice (1-8): ")
+                    choice = input("Enter your choice (1-9): ")
                     
                     # Get diagnostics for debugging
                     debug_print(f"Before processing choice {choice}:")
                     debug_print(f"  - session_state: {session_state}")
                     debug_print(f"  - storage.is_unlocked: {storage.is_unlocked}")
                     
-                    if choice == "8" or choice == "exit":
+                    if choice == "9" or choice == "exit":
                         print("Exiting TrueFA. Goodbye!")
                         break
 
-                    elif choice == "6":
+                    elif choice == "7":
                         # Clear the screen
                         clear_screen()
                         
-                    elif choice == "7":
+                    elif choice == "8":
                         # Delete vault
                         print("\nWARNING: This will permanently delete all your secrets and vault data.")
                         print("All your authentication codes will be lost and cannot be recovered.")
@@ -543,87 +544,148 @@ try:
                             continue
                     
                     elif choice == "5":
-                        # Handle exporting all secrets
-                        export_path = input("Enter the export path (leave blank for current directory): ").strip()
-                        if not export_path:
-                            export_path = os.getcwd()
-                        
-                        # Check if we have a vault first
-                        if not hasattr(storage, 'vault') or not storage.vault.is_initialized:
-                            print("No vault found. Please create a vault first.")
-                            continue
-                        
-                        # Export secrets
-                        print("Export options:")
-                        print("1. Export as OTPAuth URI")
-                        print("2. Export to encrypted file")
-                        export_choice = input("Enter your choice (or 'c' to cancel): ")
-                        
-                        if export_choice.lower() == 'c':
-                            continue
+                        try:
+                            # Check if vault is unlocked
+                            if not storage.is_unlocked:
+                                print("Vault is locked. Please enter your master password to export secrets.")
+                                vault_password = SecureString(getpass.getpass("Enter your vault master password: "))
+                                if not storage.unlock_vault(vault_password.get_raw_value()):
+                                    print("Invalid password. Unable to unlock the vault.")
+                                    continue
+                                print("Vault unlocked successfully.")
                             
-                        if export_choice == "1":
-                            # Export as OTPAuth URI
-                            if hasattr(auth, 'secret') and auth.secret:
-                                import urllib.parse
+                            # Check if we have a vault first
+                            if not hasattr(storage, 'vault') or not storage.vault.is_initialized:
+                                print("No vault found. Please create a vault first.")
+                                continue
+                            
+                            # Export secrets
+                            print("Export options:")
+                            print("1. Export as OTPAuth URI")
+                            print("2. Export to encrypted file")
+                            export_choice = input("Enter your choice (or 'c' to cancel): ")
+                            
+                            if export_choice.lower() == 'c':
+                                continue
                                 
-                                # Get current secret data
-                                if not hasattr(auth, 'current_secret') or not auth.current_secret:
-                                    auth.current_secret = {
-                                        'secret': auth.secret.get_raw_value() if hasattr(auth.secret, 'get_raw_value') else str(auth.secret),
-                                        'issuer': auth.issuer if hasattr(auth, 'issuer') else "",
-                                        'account': auth.account if hasattr(auth, 'account') else ""
-                                    }
+                            if export_choice == "1":
+                                # Export as OTPAuth URI
+                                if hasattr(auth, 'secret') and auth.secret:
+                                    import urllib.parse
+                                    
+                                    # Get current secret data
+                                    if not hasattr(auth, 'current_secret') or not auth.current_secret:
+                                        auth.current_secret = {
+                                            'secret': auth.secret.get_raw_value() if hasattr(auth.secret, 'get_raw_value') else str(auth.secret),
+                                            'issuer': auth.issuer if hasattr(auth, 'issuer') else "",
+                                            'account': auth.account if hasattr(auth, 'account') else ""
+                                        }
+                                    
+                                    export_data = auth.current_secret
+                                    
+                                    # Construct label
+                                    label = export_data.get('account', '')
+                                    if export_data.get('issuer'):
+                                        label = f"{export_data['issuer']}:{label}"
+                                    
+                                    uri = f"otpauth://totp/{urllib.parse.quote(label)}?secret={export_data.get('secret', '')}"
+                                    if export_data.get('issuer'):
+                                        uri += f"&issuer={urllib.parse.quote(export_data['issuer'])}"
+                                    
+                                    print("\nOTPAuth URI:")
+                                    print(uri)
+                                else:
+                                    print("No secret loaded. Please load a QR code or enter a secret first.")
+                            elif export_choice == "2":
+                                # Get export path
+                                export_path = input("Enter path for export file (or press Enter for default): ")
+                                if not export_path:
+                                    export_path = os.path.expanduser("~/TrueFA_export.json")
+                        
+                                # Export to encrypted file
+                                export_password = getpass.getpass("Enter password for encryption: ")
+                                confirm_password = getpass.getpass("Confirm password: ")
                                 
-                                export_data = auth.current_secret
+                                if export_password != confirm_password:
+                                    print("Passwords do not match. Export cancelled.")
+                                    continue
+                                    
+                                if not export_password:
+                                    print("Password cannot be empty. Export cancelled.")
+                                    continue
                                 
-                                # Construct label
-                                label = export_data.get('account', '')
-                                if export_data.get('issuer'):
-                                    label = f"{export_data['issuer']}:{label}"
-                                
-                                uri = f"otpauth://totp/{urllib.parse.quote(label)}?secret={export_data.get('secret', '')}"
-                                if export_data.get('issuer'):
-                                    uri += f"&issuer={urllib.parse.quote(export_data['issuer'])}"
-                                
-                                print("\nOTPAuth URI:")
-                                print(uri)
+                                # Export to encrypted file
+                                print("Exporting secrets to encrypted file...")
+                                success, message = storage.export_secrets(export_path, export_password)
+                                if success:
+                                    print(f"Secrets successfully exported to encrypted file.")
+                                    # Show full path if it's not an absolute path
+                                    if not os.path.isabs(export_path):
+                                        if platform.system() == 'Windows':
+                                            downloads_dir = os.path.expanduser('~\\Downloads')
+                                        else:
+                                            downloads_dir = os.path.expanduser('~/Downloads')
+                                        full_path = os.path.join(downloads_dir, export_path)
+                                        if not full_path.endswith('.json'):
+                                            full_path += '.json'
+                                        print(f"Export location: {full_path}")
+                                else:
+                                    print(f"Export failed: {message}")
+                                    if args.debug:
+                                        print("Tip: Try using a simple export path without special characters.")
                             else:
-                                print("No secret loaded. Please load a QR code or enter a secret first.")
-                        elif export_choice == "2":
-                            # Export to encrypted file
-                            export_password = getpass.getpass("Enter password for encryption: ")
-                            confirm_password = getpass.getpass("Confirm password: ")
+                                print("Invalid choice.")
+                        except KeyboardInterrupt:
+                            print("\nOperation cancelled.")
+                            continue
+                        except Exception as e:
+                            print(f"An error occurred: {str(e)}")
+                            if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
+                                traceback.print_exc()
+                    
+                    elif choice == "6":
+                        try:
+                            # Check if vault is unlocked
+                            if not storage.is_unlocked:
+                                print("Vault is locked. Please enter your master password to import secrets.")
+                                vault_password = SecureString(getpass.getpass("Enter your vault master password: "))
+                                if not storage.unlock_vault(vault_password.get_raw_value()):
+                                    print("Invalid password. Unable to unlock the vault.")
+                                    continue
+                                print("Vault unlocked successfully.")
                             
-                            if export_password != confirm_password:
-                                print("Passwords do not match. Export cancelled.")
+                            # Get import path
+                            import_path = input("Enter path to import file: ")
+                            if not import_path:
+                                print("No import file specified. Import cancelled.")
                                 continue
-                                
-                            if not export_password:
-                                print("Password cannot be empty. Export cancelled.")
+                            
+                            # Expand user paths
+                            import_path = os.path.expanduser(import_path)
+                            
+                            # Check if file exists
+                            if not os.path.exists(import_path):
+                                print(f"File not found: {import_path}")
                                 continue
-                                
-                            # Export to encrypted file
-                            print("Exporting secrets to encrypted file...")
-                            success = storage.export_secrets(export_path, export_password)
+                            
+                            # Get import password
+                            import_password = getpass.getpass("Enter password to decrypt import: ")
+                            
+                            # Perform the import
+                            print("Importing secrets...")
+                            success, message = storage.import_secrets(import_path, import_password)
+                            
                             if success:
-                                print(f"Secrets successfully exported to encrypted file.")
-                                # Show full path if it's not an absolute path
-                                if not os.path.isabs(export_path):
-                                    if platform.system() == 'Windows':
-                                        downloads_dir = os.path.expanduser('~\\Downloads')
-                                    else:
-                                        downloads_dir = os.path.expanduser('~/Downloads')
-                                    full_path = os.path.join(downloads_dir, export_path)
-                                    if not full_path.endswith('.enc'):
-                                        full_path += '.enc'
-                                    print(f"Export location: {full_path}")
+                                print(f"Import successful: {message}")
                             else:
-                                print("Export failed. Please check the logs for more information.")
-                                if args.debug:
-                                    print("Tip: Try using a simple export path without special characters.")
-                        else:
-                            print("Invalid choice.")
+                                print(f"Import failed: {message}")
+                        except KeyboardInterrupt:
+                            print("\nOperation cancelled.")
+                            continue
+                        except Exception as e:
+                            print(f"An error occurred: {str(e)}")
+                            if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
+                                traceback.print_exc()
                 except KeyboardInterrupt:
                     print("\nOperation cancelled.")
                     break
