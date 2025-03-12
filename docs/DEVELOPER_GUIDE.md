@@ -8,11 +8,12 @@ This guide provides information for developing, building, testing, and securing 
 2. [Building TrueFA-Py](#building-truefa-py)
 3. [Rust Cryptography Integration](#rust-cryptography-integration)
 4. [Logging System](#logging-system)
-5. [Testing](#testing)
-6. [Security Considerations](#security-considerations)
-7. [Distribution](#distribution)
-8. [Troubleshooting](#troubleshooting)
-9. [Related Documentation](#related-documentation)
+5. [Import/Export System](#import-export-system)
+6. [Testing](#testing)
+7. [Security Considerations](#security-considerations)
+8. [Distribution](#distribution)
+9. [Troubleshooting](#troubleshooting)
+10. [Related Documentation](#related-documentation)
 
 ## Development Environment Setup
 
@@ -38,7 +39,8 @@ python dev-tools\setup.py
 1. **Cryptography Module** (`src/truefa_crypto/`): Rust bindings with Python fallbacks
 2. **TOTP Implementation** (`src/totp/`): TOTP generation and QR code processing
 3. **Vault Management** (`src/security/`): Encrypted storage and authentication
-4. **Configuration System** (`src/config.py`): Settings and path management
+4. **Import/Export Module** (`src/security/importers.py`, `src/security/exporters.py`): Secure import and export functionality
+5. **Configuration System** (`src/config.py`): Settings and path management
 
 ### Environment Variables
 
@@ -201,6 +203,67 @@ critical("System cannot continue: {}", error_msg)
 ```
 
 Each entry includes timestamp, level, source location, and the actual message.
+
+## Import/Export System
+
+TrueFA-Py implements a comprehensive import/export system for TOTP secrets, enabling interoperability with other authenticator applications.
+
+### Import/Export Architecture
+
+The system consists of two main components:
+
+1. **Exporters** (`src/security/exporters.py`):
+   - Encrypted JSON export with AES-256 and PBKDF2
+   - OTPAuth URI display for copying to clipboard
+   - Secure path handling and error management
+
+2. **Importers** (`src/security/importers.py`):
+   - Auto-detection of different file formats
+   - Support for multiple import formats
+   - Secure validation and decryption
+
+### File Formats
+
+TrueFA-Py supports these formats:
+
+1. **Encrypted JSON** (File export):
+   ```json
+   {
+     "version": "1.0",
+     "application": "TrueFA-Py",
+     "encrypted": true,
+     "created": "2023-09-15T12:34:56Z",
+     "iv": "base64_encoded_iv",
+     "salt": "base64_encoded_salt",
+     "iterations": 100000,
+     "data": "base64_encoded_encrypted_data"
+   }
+   ```
+
+2. **OTPAuth URI** (On-screen display only):
+   ```
+   otpauth://totp/Example:user@example.com?secret=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567&issuer=Example
+   ```
+   This format is displayed on screen for copying to another application rather than being exported to a file.
+
+### Security Considerations
+
+- Password-based encryption with 100,000 PBKDF2 iterations
+- Unique IV generation for each export
+- Comprehensive validation before import
+- Memory protection for sensitive data
+
+### Usage Example
+
+```python
+# Export to encrypted file
+exporter.export_to_encrypted_json(secrets, "export.json", "password123")
+
+# Import from any supported format
+imported_secrets = importer.import_secrets("import.json", "password123")
+```
+
+The functionality is accessible through menu options 5 (Export) and 6 (Import).
 
 ## Testing
 

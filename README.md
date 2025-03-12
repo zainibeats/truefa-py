@@ -12,6 +12,8 @@ TrueFA-Py is a secure, offline Two-Factor Authentication (2FA) application built
 - 🛡️ High-performance Rust crypto with memory protection and automatic fallback
 - 🔄 Session persistence with password caching for convenience
 - 📥 Save and retrieve TOTP secrets with robust encryption
+- 📤 Import and export functionality with encrypted JSON format
+- 🔄 Interoperability with other authenticator applications
 - 🔍 Intelligent vault location detection with permission handling
 - 📊 Flexible logging system with independent console and file logging control
 - 🐳 Docker compatibility for containerized environments
@@ -127,8 +129,10 @@ This will start the command-line interface with the following options:
 3. Save current secret
 4. View saved secrets
 5. Export secrets
-6. Clear screen
-7. Exit
+6. Import secrets
+7. Clear screen
+8. Delete vault
+9. Exit
 
 For details on all command-line options, logging configuration, and development information, please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md).
 

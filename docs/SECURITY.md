@@ -91,18 +91,25 @@ The secure vault implements several security features:
 
 ### Secure Exports
 
-TrueFA-Py provides secure export functionality for vault secrets:
+TrueFA-Py provides secure export and import functionality for vault secrets:
 
+- **Standardized Encrypted JSON Format**: Exports use a standardized format for interoperability with other authenticator applications
 - **Direct AES-256 Encryption**: Exports use AES-256 in CBC mode with PKCS#7 padding
-- **Password-Derived Keys**: Export files are encrypted with keys derived from user-provided passwords using SHA-256
+- **Password-Derived Keys**: Export files are encrypted with keys derived from user-provided passwords using PBKDF2
 - **Unique Initialization Vectors**: Each export uses a randomly generated IV for enhanced security
-- **Custom File Format**: Export files have a recognizable header ("TRUEFA01") for identification
+- **Custom File Format**: Export files include versioning, application metadata, and secure structure
 - **Structured Format**: Exports contain both the encrypted data and necessary cryptographic metadata
 - **Non-Dependency on External Tools**: Implementation uses built-in cryptography to avoid external dependencies
 - **Serialization Security**: Special handling for sensitive data types during serialization
 - **Path Security**: Verification of export paths with proper error handling for permissions
+- **Format Detection**: Auto-detection of import file formats for better user experience
+- **Secure Import Validation**: Rigorous validation of imported data before adding to vault
+- **Conflict Resolution**: Safe handling of naming conflicts during import
+- **Multi-Format Support**: Support for encrypted JSON, plaintext JSON, and OTPAuth URI formats
 
-Implementation: [src/security/exporters.py](../src/security/exporters.py) handles all export operations with a modular design.
+Implementation: 
+- [src/security/exporters.py](../src/security/exporters.py) handles all export operations with a modular design.
+- [src/security/importers.py](../src/security/importers.py) handles all import operations with comprehensive format support.
 
 ### Vault State Verification
 

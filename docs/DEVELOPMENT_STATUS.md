@@ -4,79 +4,51 @@ This document tracks the current state of the TrueFA-Py project and remaining is
 
 ## Current State
 
-The application is now fully functional with a complete Rust cryptography integration. Core functionality is stable and the command-line interface provides a complete TOTP authentication solution.
+TrueFA-Py is now a fully functional TOTP authenticator with complete Rust cryptography integration and standardized encrypted import/export functionality. The application provides a comprehensive CLI interface for managing 2FA secrets with robust security measures.
 
-The project has reached a significant milestone with both portable executable and installer packages successfully built and verified. Docker container testing confirms cross-environment compatibility with the application functioning correctly in clean Windows environments.
+Key components include:
+- Secure vault with two-layer encryption
+- QR code scanning for TOTP secret import
+- Import/export system with multiple format support
+- Cross-platform compatibility with fallback mechanisms
 
 ## Outstanding Issues
 
-1. **OpenCV in Portable Version**: QR code scanning functionality requires OpenCV dependencies. The portable executable itself doesn't bundle OpenCV, and we currently have challenges with OpenCV support in the Windows Docker container. This remains a limitation for testing the QR code functionality in containerized environments.
+1. **OpenCV in Portable Version**: QR code scanning functionality requires OpenCV dependencies, which aren't bundled with the portable executable. This remains a limitation for testing QR functionality in containerized environments.
 
-2. **Windows Container OpenCV Support**: The Windows Docker container currently cannot support OpenCV installation, which limits the ability to test QR code scanning functionality in containerized Windows environments. Users testing in Windows containers will not be able to use QR code scanning features.
+2. **Windows Container OpenCV Support**: Windows Docker containers cannot properly support OpenCV installation, limiting QR code testing in these environments.
 
-## Completed Milestones
+## Recently Completed Milestones
 
-### 1. Rust Cryptography Integration
-- Successfully fixed `c_create_secure_string` function and properly exported it in the DLL
-- Implemented intelligent fallback mechanism for cryptography operations
-- Added comprehensive verification tools for testing cryptography functions
-- Added [state verification system](SECURITY.md#vault-state-verification) for vault security
+### Import/Export System
+- Implemented secure export of TOTP secrets with AES-256 encryption
+- Created standard encrypted JSON format for interoperability with other authenticator apps
+- Added OTPAuth URI display for easy copying to other applications
+- Implemented format auto-detection for seamless import experience
+- Enhanced security with PBKDF2 key derivation and proper error handling
 
-### 2. Build System
-- Created and validated both portable executable and installer packages
-- Implemented flexible build options with PowerShell scripts
-- Added Docker-based testing environment for cross-environment validation
-
-### 3. Docker Container Testing
-- Successfully tested both portable executable and installer in Windows Docker containers
-- Verified vault persistence across application restarts
-- Confirmed correct behavior with protected storage locations
-
-### 4. Standardized Logging System
-- Implemented Python's built-in logging module with flexible configuration
-- Added independent control of console and file logging levels
-- Created support for four distinct logging modes (normal, debug, no-log, debug+no-log)
-- Added detailed log formatting with timestamps, source files, and line numbers
-- Ensured backward compatibility with existing debug print statements
+### Standardized Logging System
+- Unified logging with flexible configuration and multiple output channels
+- Added support for four logging modes with independent console/file controls
+- Implemented structured logging with context-rich output format
 
 ## Technical Details
 
-### Rust Cryptography Integration
-- Fixed the `create_secure_string` function export in the Rust DLL to properly handle input data
-- Added proper function signatures for all Rust functions in the Python loader
-- Implemented automatic DLL rebuilding if loading fails
-- Added comprehensive error handling and debugging for DLL loading issues
-- Created a verification tool to test all Rust crypto functions
-- Fixed key derivation to properly handle byte-based salt values
-
-### Logging System
-- Replaced custom debug print implementation with standard Python logging
-- Added command-line flags for independent control of console and file logging
-- Implemented four logging modes to suit different usage scenarios:
-  - Regular mode: Warnings in console, all levels in file log
-  - Debug mode: All debug messages in console and file log
-  - No-log mode: Only warnings in console with no file logging
-  - Debug without logging: Debug messages in console without file logging
-- Added detailed log formatting with timestamps, source files, and line numbers
-- Ensured backward compatibility through a debug_print wrapper function
-- Created centralized logger configuration system for consistent logging across modules
-- Log files are stored in `~/.truefa/logs/` with timestamp-based naming
+### Import/Export Implementation
+- Uses AES-256 encryption in CBC mode for secure file exports
+- Provides OTPAuth URI display for direct copying to other authenticator apps
+- Implements PBKDF2 key derivation with strong iteration count
+- Features intelligent path handling and format detection
+- Includes comprehensive validation for security and reliability
 
 ### Vault Security
-- Enhanced vault unlocking mechanism to require master password before viewing secret names
-- Implemented password caching to minimize repeated password prompts
-- Fixed issues with vault state management to maintain unlock state
-- Added [deep verification](SECURITY.md#vault-state-verification) of vault unlock state
-- Implemented fail-secure approach defaulting to locked state on verification failures
-
-### Installation and Distribution
-- Successfully packaged both portable executable and installer versions
-- Confirmed correct operation of the installer with proper file placement
-- Validated that the Rust DLL is correctly loaded in both portable and installed versions
-- Verified that vault persistence works correctly across application sessions
+- Requires master password verification before accessing secrets
+- Implements password caching to minimize repeated password prompts
+- Features deep verification of vault unlock state with fail-secure defaults
+- Provides envelope encryption to protect master keys and individual secrets
 
 ## Related Documentation
 
-- [Developer Guide](DEVELOPER_GUIDE.md) - Detailed setup and testing instructions
+- [Developer Guide](DEVELOPER_GUIDE.md) - Detailed setup and technical information
 - [Security Documentation](SECURITY.md) - Security architecture and implementation details
-- [Documentation Index](README.md) - Overview of all available documentation
+- [Main README](../README.md) - Project overview and general information
