@@ -222,7 +222,7 @@ class SecureStorage:
             # If there's an error, assume locked for security
             self._unlocked = False
             return False
-
+        
     def create_vault(self, master_password):
         """
         Create a new secure vault for storing TOTP secrets.
@@ -1084,18 +1084,18 @@ class SecureStorage:
             self._ensure_secure_directory(self.exports_path)
             
             # Create a dictionary of secrets to export
-            secrets = {}
+                secrets = {}
             secrets_count = 0
             
             debug(f"Loading secrets from {self._vault_directory} for export")
-            for filename in os.listdir(self._vault_directory):
-                if filename.endswith('.enc'):
-                    name = filename[:-4]
+                for filename in os.listdir(self._vault_directory):
+                    if filename.endswith('.enc'):
+                        name = filename[:-4]
                     # Use the existing load_secret method that already has proper decryption logic
                     secret_data = self.load_secret(name)
                     if secret_data:
                         secrets[name] = secret_data
-                        secrets_count += 1
+                                secrets_count += 1
                         debug(f"Successfully loaded secret '{name}' for export")
                     else:
                         warning(f"Failed to load secret '{name}' for export")
@@ -1191,7 +1191,7 @@ class SecureStorage:
             else:
                 warning("No secrets were imported")
                 return False, "No secrets were imported"
-            
+                
         except Exception as e:
             error_detail = str(e)
             error_type = type(e).__name__
