@@ -1,66 +1,108 @@
-# PowerShell script to run the truefa-py Docker container with named volumes
-# This ensures better persistence across container runs
+# TrueFA-Py Docker Runner (Persistent Mode)
+# This script builds and runs the TrueFA-Py Docker container with persistent storage
 
-# Check if Docker is installed and running
-try {
-    docker info | Out-Null
-} catch {
-    Write-Host "Error: Docker doesn't seem to be running. Please start Docker Desktop and try again." -ForegroundColor Red
+# Display header
+Write-Host "TrueFA-Py Docker Runner (Persistent Mode)" -ForegroundColor Cyan
+Write-Host "=============================================" -ForegroundColor Cyan
+Write-Host ""
+
+# Ensure we're in the correct directory (repository root)
+$repoRoot = $PSScriptRoot | Split-Path -Parent
+Set-Location $repoRoot
+
+# Create local directories if they don't exist
+$imagesDir = Join-Path $repoRoot "images"
+$vaultDir = Join-Path $repoRoot "vault_data"
+
+if (-not (Test-Path $imagesDir)) {
+    Write-Host "Creating images directory: $imagesDir" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $imagesDir | Out-Null
+}
+
+if (-not (Test-Path $vaultDir)) {
+    Write-Host "Creating vault data directory: $vaultDir" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $vaultDir | Out-Null
+}
+
+# Check required files for Docker build
+$entrypointScript = Join-Path $repoRoot "docker\docker-entrypoint.sh"
+if (-not (Test-Path $entrypointScript)) {
+    Write-Host "ERROR: Docker entrypoint script not found at: $entrypointScript" -ForegroundColor Red
+    Write-Host "Please ensure the docker-entrypoint.sh file exists in the docker directory" -ForegroundColor Red
     exit 1
 }
 
-# Check for and create Docker volumes if they don't exist
-$vaultVolumeExists = docker volume ls -q -f "name=truefa-vault" 2>$null
-if (-not $vaultVolumeExists) {
-    Write-Host "Creating Docker volume for vault data..." -ForegroundColor Yellow
-    docker volume create truefa-vault
-} else {
-    Write-Host "Using existing Docker volume 'truefa-vault'" -ForegroundColor Cyan
-}
+# Build the Docker image with retry logic
+Write-Host "Building Docker image..." -ForegroundColor Green
+$buildSuccess = $false
+$maxRetries = 2
+$retryCount = 0
 
-# Initialize the volume with proper permissions
-Write-Host "Initializing volume with proper permissions..." -ForegroundColor Yellow
-docker run --rm `
-    -v "truefa-vault:/data" `
-    alpine sh -c "mkdir -p /data/.truefa /data/.truefa/exports /data/.truefa/crypto && chmod -R 777 /data"
-
-# Create a local images directory if it doesn't exist
-$imagesDir = "$PSScriptRoot\images"
-if (-not (Test-Path $imagesDir)) {
-    Write-Host "Creating local images directory: $imagesDir" -ForegroundColor Yellow
-    New-Item -ItemType Directory -Path $imagesDir -Force | Out-Null
-} else {
-    Write-Host "Using existing local images directory: $imagesDir" -ForegroundColor Cyan
-}
-
-# Run the Docker container
-Write-Host "Starting truefa-py container with persistent storage..." -ForegroundColor Green
-Write-Host "Press Ctrl+C to stop the container when done." -ForegroundColor Yellow
-Write-Host "Your data will be saved in Docker volumes and persist between runs." -ForegroundColor Cyan
-Write-Host "To use QR codes, place images in: $imagesDir" -ForegroundColor Cyan
-
-# Check if the image exists
-$imageExists = docker images -q truefa-py 2>$null
-if (-not $imageExists) {
-    Write-Host "Warning: truefa-py Docker image not found. Make sure you've built it first with:" -ForegroundColor Yellow
-    Write-Host "docker build -t truefa-py -f docker/Dockerfile ." -ForegroundColor Yellow
-    $buildNow = Read-Host "Would you like to build the Docker image now? (y/n)"
-    if ($buildNow -eq 'y') {
-        docker build -t truefa-py -f docker/Dockerfile .
+while (-not $buildSuccess -and $retryCount -lt $maxRetries) {
+    docker build -t truefa-py -f docker/Dockerfile .
+    
+    if ($LASTEXITCODE -eq 0) {
+        $buildSuccess = $true
+        Write-Host "Docker build successful!" -ForegroundColor Green
     } else {
-        exit 1
+        $retryCount++
+        if ($retryCount -lt $maxRetries) {
+            Write-Host "Docker build failed, retrying (attempt $retryCount of $maxRetries)..." -ForegroundColor Yellow
+        }
     }
 }
 
-# Run the container with named volumes for persistence and local directory mount for images
-docker run -it --rm `
-    -v "truefa-vault:/home/truefa/.truefa" `
-    -v "$imagesDir`:/app/images" `
-    -e "HOME=/home/truefa" `
-    -e "TRUEFA_DEBUG=1" `
-    -e "TRUEFA_USE_FALLBACK=1" `
-    -e "TRUEFA_PORTABLE=1" `
-    -e "TRUEFA_DATA_DIR=/home/truefa/.truefa" `
-    -e "TRUEFA_EXPORTS_DIR=/home/truefa/.truefa/exports" `
-    -e "PYTHONUNBUFFERED=1" `
-    truefa-py
+# If build still fails, offer to run with fallback mode
+if (-not $buildSuccess) {
+    Write-Host "Docker build failed after $maxRetries attempts." -ForegroundColor Red
+    $fallbackChoice = Read-Host "Would you like to run in Python fallback mode? (y/n)"
+    
+    if ($fallbackChoice -ne "y") {
+        Write-Host "Exiting..." -ForegroundColor Red
+        exit 1
+    }
+    
+    Write-Host "Running in Python fallback mode..." -ForegroundColor Yellow
+    $forceFallback = $true
+} else {
+    $forceFallback = $false
+}
+
+# Run the container with persistent volumes
+Write-Host "Running container with persistent storage..." -ForegroundColor Green
+Write-Host "- Vault data and exports will be stored in: $vaultDir" -ForegroundColor Yellow
+Write-Host "- Place QR code images in: $imagesDir" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "IMPORT/EXPORT FUNCTIONALITY:" -ForegroundColor Cyan
+Write-Host "- Export secrets: Use menu option 5" -ForegroundColor Cyan
+Write-Host "- Import secrets: Use menu option 6" -ForegroundColor Cyan
+Write-Host "- Exported files are saved to the vault_data directory" -ForegroundColor Cyan
+Write-Host "- Import files from the images directory or specify full path" -ForegroundColor Cyan
+Write-Host ""
+
+# Set up environment variables
+$envParams = @(
+    "-e", "TRUEFA_PORTABLE=1"
+)
+
+# Add fallback flag if needed
+if ($forceFallback) {
+    $envParams += "-e"
+    $envParams += "TRUEFA_USE_FALLBACK=1"
+    Write-Host "Using Python fallback implementation" -ForegroundColor Yellow
+}
+
+# Run the container with all the parameters
+$params = @(
+    "run", "-it", "--rm",
+    "-v", "${imagesDir}:/app/images",
+    "-v", "${vaultDir}:/home/truefa/.truefa"
+)
+$params += $envParams
+$params += "truefa-py"
+
+docker $params
+
+# Show completion message
+Write-Host ""
+Write-Host "Container execution completed." -ForegroundColor Green
