@@ -302,6 +302,14 @@ def get_secure_vault_dir():
     Returns:
         str: Path to the secure vault directory
     """
+    # First check environment variable override - this should take precedence over everything else
+    env_data_dir = os.environ.get('TRUEFA_DATA_DIR')
+    if env_data_dir:
+        logger.info(f"Using vault directory from environment variable: {env_data_dir}")
+        # Ensure directory exists
+        os.makedirs(env_data_dir, exist_ok=True)
+        return env_data_dir
+    
     # Check if running in Docker
     running_in_docker = is_running_in_docker()
     
