@@ -1,4 +1,4 @@
-"""
+﻿"""
 Secure Storage System for TOTP Secrets
 
 Provides robust cryptographic storage for sensitive TOTP authentication secrets
@@ -1056,22 +1056,17 @@ class SecureStorage:
 
     def export_secrets(self, export_path, export_password):
         """
-        Export secrets as an encrypted JSON file.
+        Export all secrets to an encrypted file
         
         Args:
             export_path: Path to save the exported file
-            export_password: Password to encrypt the export
+            export_password: Password to encrypt the exported file
             
         Returns:
             tuple: (success, error_message)
-            
-        Security:
-        - Uses AES-256 encryption in CBC mode
-        - Password-based key derivation with PBKDF2
-        - Standard, interoperable JSON format
-        - Secure file operations
-        - Proper cleanup
         """
+        debug(f"Attempting to export secrets to {export_path}")
+        
         if not self.is_unlocked:
             debug("Storage must be unlocked to export secrets")
             return False, "Vault is locked. Please unlock it first."
@@ -1083,19 +1078,30 @@ class SecureStorage:
             # Make sure exports directory exists
             self._ensure_secure_directory(self.exports_path)
             
+            # If no specific path is provided or the path doesn't include a directory,
+            # default to the exports directory
+            if not export_path or os.path.basename(export_path) == export_path:
+                # Create a default filename if none provided
+                if not export_path:
+                    export_path = "TrueFA_export.json"
+                # Ensure the export goes to the exports directory
+                export_path = os.path.join(self.exports_path, export_path)
+            
+            debug(f"Using export path: {export_path}")
+            
             # Create a dictionary of secrets to export
-                secrets = {}
+            secrets = {}
             secrets_count = 0
             
             debug(f"Loading secrets from {self._vault_directory} for export")
-                for filename in os.listdir(self._vault_directory):
-                    if filename.endswith('.enc'):
-                        name = filename[:-4]
+            for filename in os.listdir(self._vault_directory):
+                if filename.endswith('.enc'):
+                    name = filename[:-4]
                     # Use the existing load_secret method that already has proper decryption logic
                     secret_data = self.load_secret(name)
                     if secret_data:
                         secrets[name] = secret_data
-                                secrets_count += 1
+                        secrets_count += 1
                         debug(f"Successfully loaded secret '{name}' for export")
                     else:
                         warning(f"Failed to load secret '{name}' for export")
@@ -1108,23 +1114,17 @@ class SecureStorage:
             exporter = SecretExporter(self.exports_path)
             success, error_message = exporter.export_to_encrypted_json(secrets, export_path, export_password)
             
-            if not success and error_message:
-                error(f"Export failed: {error_message}")
+            if success:
+                info(f"Successfully exported {secrets_count} secrets to {export_path}")
+            else:
+                error(f"Failed to export secrets: {error_message}")
                 
             return success, error_message
-                
+            
         except Exception as e:
-            # Provide more detailed error information and handle encoding errors
-            error_detail = str(e)
-            error_type = type(e).__name__
-            
-            error(f"Export failed ({error_type}): {error_detail}")
-            
-            # Ensure error message doesn't have encoding issues
-            if isinstance(e, UnicodeError):
-                return False, "Error processing text encoding (UnicodeError)"
-            else:
-                return False, f"Export error: {error_detail}"
+            error_message = f"Error exporting secrets: {str(e)}"
+            error(error_message)
+            return False, error_message
 
     def import_secrets(self, import_path, import_password):
         """
@@ -1748,3 +1748,4 @@ class SecureStorage:
     def vault_file(self):
         """Get the vault file path"""
         return self._vault_file
+
