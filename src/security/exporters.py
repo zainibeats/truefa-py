@@ -44,7 +44,9 @@ class SecretExporter:
             tuple: (success, error_message)
         """
         if not export_path:
-            return False, "No export path provided"
+            # Create a default filename if none is provided
+            export_path = "TrueFA_export.json"
+            debug(f"No export path provided, using default filename: {export_path}")
         
         # Check if we have any secrets to export
         if not secrets_dict or len(secrets_dict) == 0:
@@ -106,11 +108,18 @@ class SecretExporter:
         
         # Use Downloads folder for relative paths
         if not os.path.isabs(export_path):
-            if platform.system() == 'Windows':
-                downloads_dir = os.path.expanduser('~\\Downloads')
+            # First, try to use the exports_path that was provided to the constructor
+            if self.exports_path and os.path.isdir(self.exports_path):
+                export_path = os.path.join(self.exports_path, export_path)
+                debug(f"Using exports directory for relative path: {export_path}")
+            # Fall back to Downloads folder if exports_path isn't valid
             else:
-                downloads_dir = os.path.expanduser('~/Downloads')
-            export_path = os.path.join(downloads_dir, export_path)
+                if platform.system() == 'Windows':
+                    downloads_dir = os.path.expanduser('~\\Downloads')
+                else:
+                    downloads_dir = os.path.expanduser('~/Downloads')
+                export_path = os.path.join(downloads_dir, export_path)
+                debug(f"Using Downloads directory for relative path: {export_path}")
         
         # Ensure .json extension
         if not export_path.endswith('.json'):
