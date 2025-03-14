@@ -220,8 +220,8 @@ def main():
                     
                     # Get export path
                     export_path = input("Enter path for export file (or press Enter for default): ")
-                    if not export_path:
-                        export_path = os.path.expanduser("~/TrueFA_export.json")
+                    # Don't set a default path here, let secure_storage.export_secrets handle it
+                    # This will use the exports directory inside the vault path
                     
                     # Get export password
                     export_password = getpass.getpass("Enter password to encrypt export: ")
