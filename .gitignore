@@ -35,6 +35,8 @@ check_dll.py
 vault_test.py
 vault/
 test_vault/
+*.enc
+*.json
 
 # Backup files
 *.backup
