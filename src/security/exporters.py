@@ -37,7 +37,7 @@ class SecretExporter:
         
         Args:
             secrets_dict: Dictionary of secrets to export
-            export_path: Path to save the exported file
+            export_path: Path to save the exported file (absolute path or filename)
             export_password: Password to encrypt the export
             
         Returns:
@@ -106,7 +106,7 @@ class SecretExporter:
             debug(f"Export path is a directory, using default filename")
             export_path = os.path.join(export_path, "TrueFA_export.json")
         
-        # Use Downloads folder for relative paths
+        # Use exports directory or fall back to Downloads for relative paths
         if not os.path.isabs(export_path):
             # First, try to use the exports_path that was provided to the constructor
             if self.exports_path and os.path.isdir(self.exports_path):
