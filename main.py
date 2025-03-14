@@ -599,9 +599,9 @@ try:
                             elif export_choice == "2":
                                 # Get export path
                                 export_path = input("Enter path for export file (or press Enter for default): ")
-                                if not export_path:
-                                    export_path = os.path.expanduser("~/TrueFA_export.json")
-                        
+                                # Don't set a default path here, let secure_storage.export_secrets handle it
+                                # This will use the exports directory inside the vault path
+                                
                                 # Export to encrypted file
                                 export_password = getpass.getpass("Enter password for encryption: ")
                                 confirm_password = getpass.getpass("Confirm password: ")
@@ -619,16 +619,8 @@ try:
                                 success, message = storage.export_secrets(export_path, export_password)
                                 if success:
                                     print(f"Secrets successfully exported to encrypted file.")
-                                    # Show full path if it's not an absolute path
-                                    if not os.path.isabs(export_path):
-                                        if platform.system() == 'Windows':
-                                            downloads_dir = os.path.expanduser('~\\Downloads')
-                                        else:
-                                            downloads_dir = os.path.expanduser('~/Downloads')
-                                        full_path = os.path.join(downloads_dir, export_path)
-                                        if not full_path.endswith('.json'):
-                                            full_path += '.json'
-                                        print(f"Export location: {full_path}")
+                                    # Don't try to show full path - the secure_storage.export_secrets function 
+                                    # has already handled setting the correct path in the exports directory
                                 else:
                                     print(f"Export failed: {message}")
                                     if args.debug:
