@@ -182,6 +182,7 @@ VAULT_FILE = os.environ.get('TRUEFA_VAULT_FILE') or os.path.join(DATA_DIR, "vaul
 VAULT_CRYPTO_DIR = os.environ.get('TRUEFA_CRYPTO_DIR') or os.path.join(SECURE_DATA_DIR, "crypto")
 
 # Check environment variable override for exports directory
+# This directory is prioritized for all file exports
 EXPORTS_DIR = os.environ.get('TRUEFA_EXPORTS_DIR') or os.path.join(DATA_DIR, "exports")
 TEMP_DIR = os.environ.get('TRUEFA_TEMP_DIR') or os.path.join(DATA_DIR, "temp")
 
