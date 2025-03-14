@@ -97,15 +97,11 @@ TrueFA-Py provides secure export and import functionality for vault secrets:
 - **Direct AES-256 Encryption**: Exports use AES-256 in CBC mode with PKCS#7 padding
 - **Password-Derived Keys**: Export files are encrypted with keys derived from user-provided passwords using PBKDF2
 - **Unique Initialization Vectors**: Each export uses a randomly generated IV for enhanced security
-- **Custom File Format**: Export files include versioning, application metadata, and secure structure
-- **Structured Format**: Exports contain both the encrypted data and necessary cryptographic metadata
-- **Non-Dependency on External Tools**: Implementation uses built-in cryptography to avoid external dependencies
-- **Serialization Security**: Special handling for sensitive data types during serialization
-- **Path Security**: Verification of export paths with proper error handling for permissions
-- **Format Detection**: Auto-detection of import file formats for better user experience
-- **Secure Import Validation**: Rigorous validation of imported data before adding to vault
-- **Conflict Resolution**: Safe handling of naming conflicts during import
-- **Multi-Format Support**: Support for encrypted JSON, plaintext JSON, and OTPAuth URI formats
+- **Environment-Aware Paths**: Export paths prioritize environment variables and application-defined secure directories
+- **Directory Structure Preservation**: Exports maintain the application's secure directory structure
+- **Default Path Security**: When no path is specified, exports go to a dedicated exports directory with appropriate permissions
+- **Fallback Mechanism**: Secure fallback paths when preferred directories are unavailable
+- **Path Validation**: Extensive validation of export paths with proper error handling for permissions
 
 Implementation: 
 - [src/security/exporters.py](../src/security/exporters.py) handles all export operations with a modular design.
