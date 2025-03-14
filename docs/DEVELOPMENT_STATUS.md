@@ -11,6 +11,7 @@ Key components include:
 - QR code scanning for TOTP secret import
 - Import/export system with multiple format support
 - Cross-platform compatibility with fallback mechanisms
+- Docker deployment with persistent storage and secure exports
 
 ## Outstanding Issues
 
@@ -20,12 +21,18 @@ Key components include:
 
 ## Recently Completed Milestones
 
+### Docker Containerization
+- Enhanced Docker implementation with proper persistent storage mapping
+- Fixed export path handling to correctly use configured export directories
+- Implemented environment variable prioritization for vault location
+- Improved security of exported files by ensuring consistent directory structure 
+- Added proper fallback mechanisms for cross-platform compatibility
+
 ### Import/Export System
 - Implemented secure export of TOTP secrets with AES-256 encryption
 - Created standard encrypted JSON format for interoperability with other authenticator apps
 - Added OTPAuth URI display for easy copying to other applications
-- Implemented format auto-detection for seamless import experience
-- Enhanced security with PBKDF2 key derivation and proper error handling
+- Enhanced path handling with proper defaults and environment variable support
 
 ### Standardized Logging System
 - Unified logging with flexible configuration and multiple output channels
