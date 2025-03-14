@@ -1,5 +1,7 @@
 # TrueFA-Py Docker Runner (Persistent Mode)
 # This script builds and runs the TrueFA-Py Docker container with persistent storage
+# Note: After the first run, you can reuse the existing image by running the Docker command directly
+# without rebuilding the image each time.
 
 # Display header
 Write-Host "TrueFA-Py Docker Runner (Persistent Mode)" -ForegroundColor Cyan
