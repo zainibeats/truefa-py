@@ -36,6 +36,17 @@ For detailed information about the security implementation, please refer to the 
   - Download from [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)
   - This is required for both the portable executable and installed versions
 
+#### Pre-built Releases
+
+**Version 0.1.0 Now Available!**
+
+- **Windows Installer**: Setup wizard for easy installation with all dependencies
+  - Note: The installed version creates an images directory at `C:\Users\<USERNAME>\Documents\images` for QR code scanning
+- **Portable Version**: Standalone executable that can run without installation
+  - Uses the local directory structure for more flexibility
+
+[Download the latest release](https://github.com/zainibeats/truefa-py/releases/tag/v0.1.0)
+
 #### From Source
 ```bash
 git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
