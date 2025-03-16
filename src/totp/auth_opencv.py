@@ -503,15 +503,34 @@ class TwoFactorAuth:
                 try:
                     value = secret.get_value()
                     if isinstance(value, bytes):
-                        secret_value = value.decode('utf-8')
+                        # Bytes should be handled as base32 for TOTP
+                        try:
+                            secret_value = value.decode('utf-8', errors='strict')
+                        except UnicodeDecodeError:
+                            # If we can't decode as UTF-8, log error
+                            debug_print(f"Error: Unable to decode bytes as UTF-8. TOTP may be incorrect.")
+                            secret_value = str(value)
                     else:
                         secret_value = str(value)
                 except Exception as e:
                     debug_print(f"Error getting value: {e}")
                     secret_value = str(secret)
             else:
-                # Try direct string conversion as a last resort
-                secret_value = str(secret)
+                # Process direct string or bytes
+                if isinstance(secret, bytes):
+                    try:
+                        secret_value = secret.decode('utf-8', errors='strict')
+                    except UnicodeDecodeError:
+                        debug_print(f"Error: Unable to decode bytes as UTF-8. TOTP may be incorrect.")
+                        secret_value = str(secret)
+                else:
+                    # Try direct string conversion as a last resort
+                    secret_value = str(secret)
+            
+            # Ensure the secret is in the correct format for TOTP
+            # TOTP expects base32 encoded strings
+            if secret_value and not self._is_valid_base32(secret_value):
+                debug_print(f"Warning: Secret does not appear to be valid base32. TOTP may be incorrect.")
             
             # Debug print
             if os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"):
@@ -718,12 +737,33 @@ class TwoFactorAuth:
                     # Already in the right format
                     data_to_save = secret
                 else:
-                    # Convert to dict format
-                    data_to_save = {
-                        'secret': str(secret),
-                        'issuer': self.issuer or '',
-                        'account': self.account or ''
-                    }
+                    # Get the raw value and ensure it's properly encoded for JSON
+                    try:
+                        raw_value = secret.get_raw_value()
+                        
+                        # TOTP secrets must be preserved in their original format
+                        # They are typically base32-encoded strings, so we'll store as-is
+                        if isinstance(raw_value, bytes):
+                            # For bytes, we need to ensure consistent decoding
+                            # TOTP secrets are typically base32 encoded
+                            try:
+                                # First try UTF-8 which should work for most base32 strings
+                                secret_str = raw_value.decode('utf-8', errors='strict')
+                            except UnicodeDecodeError:
+                                # If that fails, preserve the exact bytes with base64
+                                secret_str = "base64:" + base64.b64encode(raw_value).decode('ascii')
+                        else:
+                            # If it's already a string, keep it exactly as-is
+                            secret_str = str(raw_value)
+                        
+                        data_to_save = {
+                            'secret': secret_str,
+                            'issuer': self.issuer or '',
+                            'account': self.account or ''
+                        }
+                    except Exception as e:
+                        debug_print(f"Exception while processing secret data: {e}")
+                        return f"Error processing secret data: {str(e)}"
             else:
                 # Use the current secret from the instance
                 if self.secret is None:
@@ -733,24 +773,26 @@ class TwoFactorAuth:
                 try:
                     raw_value = self.secret.get_raw_value()
                     
-                    # Convert bytes to base64 string if needed
+                    # TOTP secrets must be preserved in their original format
+                    # They are typically base32-encoded strings, so we'll store as-is
                     if isinstance(raw_value, bytes):
-                        # If it's bytes, we need to ensure it's saved as a string
+                        # For bytes, we need to ensure consistent decoding
+                        # TOTP secrets are typically base32 encoded
                         try:
-                            # Try to decode as UTF-8 first (if it's text)
-                            secret_str = raw_value.decode('utf-8', errors='replace')
-                        except (UnicodeDecodeError, AttributeError):
-                            # If that fails, use base64 encoding (for binary data)
-                            secret_str = base64.b64encode(raw_value).decode('utf-8')
-                    else:
-                        # If it's already a string or something else, convert to string
-                        secret_str = str(raw_value)
-                    
-                    data_to_save = {
-                        'secret': secret_str,
-                        'issuer': self.issuer or '',
-                        'account': self.account or ''
-                    }
+                            # First try UTF-8 which should work for most base32 strings
+                            secret_str = raw_value.decode('utf-8', errors='strict')
+                        except UnicodeDecodeError:
+                            # If that fails, preserve the exact bytes with base64
+                            secret_str = "base64:" + base64.b64encode(raw_value).decode('ascii')
+                        else:
+                            # If it's already a string, keep it exactly as-is
+                            secret_str = str(raw_value)
+                        
+                        data_to_save = {
+                            'secret': secret_str,
+                            'issuer': self.issuer or '',
+                            'account': self.account or ''
+                        }
                 except Exception as e:
                     debug_print(f"Exception while processing secret data: {e}")
                     return f"Error processing secret data: {str(e)}"
@@ -819,6 +861,17 @@ class TwoFactorAuth:
                     if not secret_value:
                         return "Invalid secret data: missing 'secret' field"
                         
+                    # Handle specially encoded base64 values
+                    if isinstance(secret_value, str) and secret_value.startswith("base64:"):
+                        try:
+                            # Extract and decode the base64 part
+                            base64_part = secret_value[7:]  # Remove "base64:" prefix
+                            secret_value = base64.b64decode(base64_part)
+                            debug_print(f"Decoded base64 secret, length: {len(secret_value)}")
+                        except Exception as e:
+                            debug_print(f"Error decoding base64 secret: {e}")
+                            # Continue with the original value if decoding fails
+                    
                     # Set the extracted values
                     self.set_secret(secret_value, issuer, account)
                     return f"Secret: {name}"
@@ -1070,55 +1123,61 @@ class TwoFactorAuth:
             debug_print(f"Using fallback images directory: {fallback_dir}")
             return fallback_dir
 
-    def set_secret(self, secret_value, issuer="", account=""):
+    def set_secret(self, secret, issuer=None, account=None):
         """
-        Set the TOTP secret and associated metadata.
+        Set the secret key, issuer, and account for TOTP generation.
         
         Args:
-            secret_value (str): The base32-encoded secret key
-            issuer (str): The issuer of the TOTP (e.g., Google, Microsoft)
-            account (str): The account identifier (e.g., email address)
-        
+            secret (str or bytes): The secret key
+            issuer (str): The service provider (e.g., 'Google')
+            account (str): The user account (e.g., 'user@example.com')
+            
         Returns:
             bool: True if successful, False otherwise
         """
         from ..utils.debug import debug_print
         
         try:
-            # Convert string to SecureString if needed
-            if isinstance(secret_value, str):
-                # Make sure it's a proper base32 string first
-                base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
-                if not base32_pattern.match(secret_value):
-                    debug_print("Warning: Secret doesn't appear to be in base32 format. Attempting to encode it.")
-                    try:
-                        # Try to encode it as base32 if it's not already
-                        secret_bytes = secret_value.encode('utf-8')
-                        secret_value = base64.b32encode(secret_bytes).decode('utf-8')
-                    except Exception as encoding_error:
-                        debug_print(f"Error encoding secret as base32: {encoding_error}")
-                
-                # Create a SecureString with the correct encoding
-                self.secret = SecureString(secret_value.encode('utf-8'))
-            else:
-                self.secret = secret_value
-                
-            # Store metadata
-            self.issuer = issuer
-            self.account = account
+            # Process the secret to ensure it's in a format suitable for TOTP
+            if isinstance(secret, str) and secret.startswith("base64:"):
+                try:
+                    # Extract and decode the base64 part
+                    base64_part = secret[7:]  # Remove "base64:" prefix
+                    secret = base64.b64decode(base64_part)
+                    debug_print(f"Decoded base64 secret in set_secret, length: {len(secret)}")
+                except Exception as e:
+                    debug_print(f"Error decoding base64 secret in set_secret: {e}")
             
-            # Validate that we can generate a TOTP code with this secret
-            try:
-                totp = pyotp.TOTP(self.secret.get())
-                test_code = totp.now()
-                if test_code:
-                    debug_print(f"Secret validated successfully.")
-                    return True
-            except Exception as totp_error:
-                debug_warning(f"Could not generate TOTP code with the provided secret: {totp_error}")
-                # We'll continue anyway since the secret might be valid in another format
+            # Ensure the secret is a secure string
+            from ..security.secure_string import SecureString
+            if not isinstance(secret, SecureString):
+                secret = SecureString(secret)
+                debug_print(f"Converted secret to SecureString in set_secret")
+            
+            # Set the secret
+            self.secret = secret
+            
+            # Set issuer and account
+            if issuer:
+                self.issuer = issuer
+            if account:
+                self.account = account
                 
             return True
         except Exception as e:
             debug_print(f"Error setting secret: {e}")
             return False
+
+    def _is_valid_base32(self, secret_value):
+        """
+        Check if the secret is a valid base32 string.
+        
+        Args:
+            secret_value (str): The secret to check
+            
+        Returns:
+            bool: True if the secret is valid base32, False otherwise
+        """
+        # Base32 encoding uses only uppercase letters and digits 2-7
+        base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
+        return bool(base32_pattern.match(secret_value))

@@ -241,7 +241,33 @@ def main():
                         print(f"Export failed: {message}")
                 elif choice == '6':
                     # Import secrets
-                    if not secure_storage.is_unlocked:
+                    # First check if vault exists and needs to be created
+                    debug_print("Checking vault initialization before import...")
+                    
+                    if not secure_storage.is_initialized:
+                        # No vault exists yet, need to create one
+                        print("\nNo vault found. You need to create a vault before importing secrets.")
+                        
+                        # Ask for master password and create vault
+                        master_password = getpass.getpass("Create a master password for your vault: ")
+                        if len(master_password) < 8:
+                            print("Password must be at least 8 characters long")
+                            continue
+                        
+                        confirm_password = getpass.getpass("Confirm master password: ")
+                        if master_password != confirm_password:
+                            print("Passwords do not match")
+                            continue
+                        
+                        print("Creating new vault...")
+                        if secure_storage.create_vault(master_password):
+                            print("Vault created successfully.")
+                            # Vault is now unlocked after creation
+                        else:
+                            print("Failed to create vault")
+                            continue
+                    elif not secure_storage.is_unlocked:
+                        # Vault exists but is locked - need to unlock it
                         master_password = getpass.getpass("Enter your vault password: ")
                         if not secure_storage.unlock_vault(master_password):
                             print("Failed to unlock vault. Incorrect password.")
