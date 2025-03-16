@@ -88,6 +88,19 @@ class MainWindow(QMainWindow):
         # Header with logo/title
         header_layout = QVBoxLayout()
         
+        # Add icon above the title
+        icon_label = QLabel()
+        icon_pixmap = QPixmap("truefa2.png")
+        if not icon_pixmap.isNull():
+            icon_pixmap = icon_pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            icon_label.setPixmap(icon_pixmap)
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        else:
+            # If icon can't be loaded, use a placeholder text
+            icon_label.setText("🔒")
+            icon_label.setFont(QFont("Arial", 48))
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         title_label = QLabel("TrueFA-Py")
         title_label.setFont(QFont("Arial", 24, QFont.Weight.Bold))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -96,6 +109,7 @@ class MainWindow(QMainWindow):
         subtitle_label.setFont(QFont("Arial", 14))
         subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        header_layout.addWidget(icon_label)
         header_layout.addWidget(title_label)
         header_layout.addWidget(subtitle_label)
         
@@ -187,7 +201,7 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.lock_button)
         
         # Create tab widget for different functions
-        tab_widget = QTabWidget()
+        self.tab_widget = QTabWidget()
         
         # Create tabs
         token_tab = self.create_token_tab()
@@ -195,13 +209,13 @@ class MainWindow(QMainWindow):
         settings_tab = self.create_settings_tab()
         
         # Add tabs to widget
-        tab_widget.addTab(token_tab, "TOTP Tokens")
-        tab_widget.addTab(accounts_tab, "Accounts")
-        tab_widget.addTab(settings_tab, "Settings")
+        self.tab_widget.addTab(token_tab, "TOTP Tokens")
+        self.tab_widget.addTab(accounts_tab, "Accounts")
+        self.tab_widget.addTab(settings_tab, "Settings")
         
         # Add layouts to page
         layout.addLayout(header_layout)
-        layout.addWidget(tab_widget)
+        layout.addWidget(self.tab_widget)
         
         return page
     
@@ -308,8 +322,27 @@ class MainWindow(QMainWindow):
         change_password_button = QPushButton("Change Master Password")
         change_password_button.clicked.connect(self.on_change_password)
         
+        delete_vault_button = QPushButton("Delete Vault")
+        delete_vault_button.setStyleSheet("background-color: #ff3860; color: white;")
+        delete_vault_button.clicked.connect(self.on_delete_vault)
+        
         security_layout.addWidget(security_title)
         security_layout.addWidget(change_password_button)
+        security_layout.addWidget(delete_vault_button)
+        
+        # Testing section
+        testing_frame = QFrame()
+        testing_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        testing_layout = QVBoxLayout(testing_frame)
+        
+        testing_title = QLabel("Testing & Troubleshooting")
+        testing_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        
+        generate_qr_button = QPushButton("Generate Test QR Code")
+        generate_qr_button.clicked.connect(self.on_generate_test_qr)
+        
+        testing_layout.addWidget(testing_title)
+        testing_layout.addWidget(generate_qr_button)
         
         # About section
         about_frame = QFrame()
@@ -326,6 +359,7 @@ class MainWindow(QMainWindow):
         # Add to layout
         layout.addWidget(appearance_frame)
         layout.addWidget(security_frame)
+        layout.addWidget(testing_frame)
         layout.addWidget(about_frame)
         layout.addStretch(1)
         
@@ -387,33 +421,7 @@ class MainWindow(QMainWindow):
     def check_vault_exists(self):
         """Check if the vault exists"""
         try:
-            # Check if the vault file exists
-            if hasattr(self.vault, 'exists'):
-                return self.vault.exists()
-            else:
-                # Fallback method if exists() is not available
-                vault_path = os.environ.get('TRUEFA_VAULT_FILE')
-                if not vault_path:
-                    # Try to get the vault path from the vault object
-                    if hasattr(self.vault, 'vault_path'):
-                        vault_path = self.vault.vault_path
-                    else:
-                        # Use default path
-                        data_dir = os.environ.get('TRUEFA_DATA_DIR')
-                        if not data_dir:
-                            if sys.platform == 'win32':
-                                base_dir = os.environ.get('APPDATA')
-                                if not base_dir:
-                                    base_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
-                                data_dir = os.path.join(base_dir, "TrueFA-Py")
-                            elif sys.platform == 'darwin':
-                                data_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', "TrueFA-Py")
-                            else:
-                                data_dir = os.path.join(os.path.expanduser('~'), '.truefa')
-                        vault_path = os.path.join(data_dir, "vault", "vault.json")
-                
-                # Check if the vault file exists
-                return os.path.exists(vault_path)
+            return self.vault.exists()
         except Exception as e:
             error(f"Error checking if vault exists: {str(e)}")
             return False
@@ -478,9 +486,11 @@ class MainWindow(QMainWindow):
                 # Create empty secrets dictionary
                 self.secrets_dict = {}
                 
+                # Make sure the vault state is properly recognized
+                self.is_vault_unlocked = True
+                
                 # Switch to main page
                 self.stacked_widget.setCurrentIndex(1)
-                self.is_vault_unlocked = True
                 
                 info("Vault created successfully")
                 QMessageBox.information(self, "Success", "Vault created successfully")
@@ -491,6 +501,22 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create vault: {str(e)}")
             error(f"Error creating vault: {str(e)}")
+    
+    def refresh_login_page(self):
+        """Refresh the login page UI based on whether vault exists"""
+        # Check if vault exists
+        vault_exists = self.check_vault_exists()
+        
+        # Remove old login page and create a new one
+        old_login_page = self.login_page
+        self.login_page = self.create_login_page()
+        
+        # Replace in stacked widget
+        self.stacked_widget.removeWidget(old_login_page)
+        self.stacked_widget.insertWidget(0, self.login_page)
+        
+        info(f"Refreshed login page. Vault exists: {vault_exists}")
+        return vault_exists
     
     def on_lock_vault(self):
         """Handle lock vault button click"""
@@ -503,6 +529,9 @@ class MainWindow(QMainWindow):
             self.current_account_name = None
             self.current_issuer = None
             self.token_display.clear()
+            
+            # Refresh the login page to ensure it shows the correct UI
+            self.refresh_login_page()
             
             # Switch to login page
             self.stacked_widget.setCurrentIndex(0)
@@ -522,14 +551,29 @@ class MainWindow(QMainWindow):
             return
         
         try:
+            # Validate the secret format
+            if not self.totp_auth.validate_totp_secret(secret):
+                QMessageBox.warning(self, "Error", "Invalid secret key format. Please check your input.")
+                return
+            
             # Set current secret and display
             self.current_secret = secret
             self.current_account_name = "Test Account"
             self.current_issuer = "Test"
             
+            # Set up the TOTP auth with the extracted secret
+            self.totp_auth.set_secret(secret, self.current_issuer, self.current_account_name)
+            
             # Update display
             self.token_display.set_account(self.current_account_name, self.current_issuer)
             self.update_totp()
+            
+            # Display a success message
+            QMessageBox.information(
+                self,
+                "TOTP Token Generated",
+                f"Test token successfully generated!\n\nUse this token with your authentication service."
+            )
             
             info(f"Generated test token for secret of length {len(secret)}")
         
@@ -597,14 +641,21 @@ class MainWindow(QMainWindow):
                 # Update account list
                 self.update_account_list()
                 
-                # Switch to the account
+                # Select the newly added account in the account list
+                self.account_list.select_account(name)
+                
+                # Switch to the account for immediate token display
                 self.current_secret = secret
                 self.current_account_name = name
                 self.current_issuer = issuer
                 
-                # Update display
+                # Update token display
                 self.token_display.set_account(name, issuer)
                 self.update_totp()
+                
+                # Switch to the tokens tab to show the new token
+                if hasattr(self, 'tab_widget'):
+                    self.tab_widget.setCurrentIndex(0)  # Tokens tab
                 
                 info(f"Added account: {name}")
                 QMessageBox.information(self, "Success", f"Account '{name}' added successfully")
@@ -893,6 +944,156 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to change master password: {str(e)}")
             error(f"Error changing master password: {str(e)}")
+    
+    def on_delete_vault(self):
+        """Handle delete vault button click"""
+        # Show critical warning
+        confirm = QMessageBox.critical(
+            self,
+            "Delete Vault?",
+            "WARNING: This will permanently delete your vault and all stored accounts.\n\n"
+            "This action CANNOT be undone. Are you absolutely sure?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Double-confirm with password
+        password, ok = QInputDialog.getText(
+            self,
+            "Confirm with Password",
+            "Enter your master password to confirm vault deletion:",
+            QLineEdit.EchoMode.Password
+        )
+        
+        if not ok or not password:
+            return
+        
+        # Verify password
+        if not self.vault.verify_password(password):
+            QMessageBox.warning(self, "Error", "Incorrect password. Vault deletion canceled.")
+            return
+        
+        try:
+            # Get vault path
+            vault_path = self.vault.vault_path
+            
+            # Lock vault first
+            self.vault.lock()
+            
+            # Delete vault file
+            if os.path.exists(vault_path):
+                os.remove(vault_path)
+                
+                # Show success message
+                QMessageBox.information(
+                    self,
+                    "Vault Deleted",
+                    "Your vault has been permanently deleted."
+                )
+                
+                # Reset UI state
+                self.is_vault_unlocked = False
+                self.secrets_dict = {}
+                self.current_secret = None
+                self.current_account_name = None
+                self.current_issuer = None
+                
+                # Refresh the login page to reflect the vault deletion
+                self.refresh_login_page()
+                
+                # Switch to login page
+                self.stacked_widget.setCurrentIndex(0)
+                
+                # Log deletion
+                info("Vault deleted successfully")
+            else:
+                QMessageBox.warning(self, "Error", "Vault file not found.")
+        
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to delete vault: {str(e)}")
+            error(f"Error deleting vault: {str(e)}")
+    
+    def on_generate_test_qr(self):
+        """Generate a test QR code for scanning tests"""
+        try:
+            # Import necessary modules
+            import qrcode
+            from PIL import Image
+            import tempfile
+            import os
+            
+            # Ask for a test secret key
+            test_secret, ok = QInputDialog.getText(
+                self,
+                "Test Secret",
+                "Enter a test secret (or leave empty for a sample one):",
+                QLineEdit.EchoMode.Normal,
+                "JBSWY3DPEHPK3PXP"  # Google's sample TOTP secret
+            )
+            
+            if not ok:
+                return
+            
+            # Use default if empty
+            if not test_secret:
+                test_secret = "JBSWY3DPEHPK3PXP"
+            
+            # Create OTPAuth URI
+            issuer = "TrueFA-Test"
+            account = "test@example.com"
+            otpauth_uri = f"otpauth://totp/{issuer}:{account}?secret={test_secret}&issuer={issuer}"
+            
+            # Generate QR code
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(otpauth_uri)
+            qr.make(fit=True)
+            
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Save to temporary file
+            temp_dir = tempfile.gettempdir()
+            qr_path = os.path.join(temp_dir, "truefa_test_qr.png")
+            img.save(qr_path)
+            
+            # Show success message with the file path
+            QMessageBox.information(
+                self,
+                "QR Code Generated",
+                f"A test QR code has been saved to:\n{qr_path}\n\n"
+                f"You can use this file to test the QR code scanning functionality.\n\n"
+                f"Secret: {test_secret}"
+            )
+            
+            # Try to open the folder containing the QR code
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(temp_dir)
+                elif sys.platform == 'darwin':  # macOS
+                    import subprocess
+                    subprocess.Popen(['open', temp_dir])
+                else:  # Linux
+                    import subprocess
+                    subprocess.Popen(['xdg-open', temp_dir])
+            except Exception:
+                pass  # Ignore errors when trying to open folder
+            
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "Missing Dependencies",
+                "The qrcode and Pillow packages are required to generate QR codes.\n"
+                "Install them with: pip install qrcode pillow"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to generate QR code: {str(e)}")
     
     def update_account_list(self):
         """Update the account list with current secrets"""
