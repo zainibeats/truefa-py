@@ -2,15 +2,18 @@
 Simplified SecureVault for TrueFA-Py GUI
 
 This module provides a simplified version of the SecureVault class
-for use in the GUI application.
+for use in the GUI application, while ensuring compatibility with
+the core vault functionality.
 """
 
 import os
 import sys
 import json
 import hashlib
+import logging
 from pathlib import Path
 import base64
+import shutil
 from Crypto.Cipher import AES
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Random import get_random_bytes
@@ -21,7 +24,8 @@ class SecureVault:
     Simplified SecureVault for storing and retrieving TOTP secrets
     
     This class provides a simplified interface for the GUI application
-    to interact with the vault.
+    to interact with the vault while maintaining compatibility with
+    the core functionality.
     """
     
     def __init__(self):
@@ -36,6 +40,9 @@ class SecureVault:
         # Initialize state
         self.master_password = None
         self.is_unlocked = False
+        
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
     
     def _get_vault_path(self):
         """Get the path to the vault file"""
@@ -57,10 +64,32 @@ class SecureVault:
             else:
                 data_dir = os.path.join(os.path.expanduser('~'), '.truefa')
         
-        return os.path.join(data_dir, "vault", "vault.json")
+        # Ensure the vault directory exists
+        vault_dir = os.path.join(data_dir, "vault")
+        os.makedirs(vault_dir, exist_ok=True)
+        
+        # Use appropriate permissions on non-Windows systems
+        if sys.platform != 'win32':
+            try:
+                import stat
+                os.chmod(vault_dir, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)  # 0o700
+            except Exception as e:
+                self.logger.warning(f"Failed to set secure permissions: {e}")
+        
+        return os.path.join(vault_dir, "vault.json")
+    
+    @property
+    def is_initialized(self):
+        """Check if the vault exists and is initialized"""
+        return os.path.exists(self.vault_path)
     
     def exists(self):
-        """Check if the vault exists"""
+        """
+        Check if the vault file exists
+        
+        Returns:
+            bool: True if the vault file exists, False otherwise
+        """
         return os.path.exists(self.vault_path)
     
     def create(self, password):
@@ -74,6 +103,11 @@ class SecureVault:
             bool: True if successful, False otherwise
         """
         try:
+            # Validate password
+            if not password or len(password) < 8:
+                self.logger.error("Password must be at least 8 characters long")
+                return False
+            
             # Create empty secrets dictionary
             secrets = {}
             
@@ -84,9 +118,12 @@ class SecureVault:
             self.master_password = password
             self.is_unlocked = True
             
+            # Log success
+            self.logger.info("Vault created successfully")
+            
             return True
         except Exception as e:
-            print(f"Error creating vault: {str(e)}")
+            self.logger.error(f"Error creating vault: {str(e)}")
             return False
     
     def unlock(self, password):
@@ -107,9 +144,12 @@ class SecureVault:
             self.master_password = password
             self.is_unlocked = True
             
+            # Log success
+            self.logger.info("Vault unlocked successfully")
+            
             return True
         except Exception as e:
-            print(f"Error unlocking vault: {str(e)}")
+            self.logger.error(f"Error unlocking vault: {str(e)}")
             return False
     
     def lock(self):
@@ -124,9 +164,45 @@ class SecureVault:
             self.master_password = None
             self.is_unlocked = False
             
+            # Log success
+            self.logger.info("Vault locked successfully")
+            
             return True
         except Exception as e:
-            print(f"Error locking vault: {str(e)}")
+            self.logger.error(f"Error locking vault: {str(e)}")
+            return False
+    
+    def delete_vault(self):
+        """
+        Delete the vault completely
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Check if vault exists
+            if not os.path.exists(self.vault_path):
+                return False
+            
+            # Lock vault first
+            self.lock()
+            
+            # Delete vault file
+            os.remove(self.vault_path)
+            
+            # Delete any associated files (state files, etc.)
+            state_file = os.path.join(self.vault_dir, "state.json")
+            if os.path.exists(state_file):
+                os.remove(state_file)
+                
+            master_file = os.path.join(self.vault_dir, "master.json")
+            if os.path.exists(master_file):
+                os.remove(master_file)
+            
+            self.logger.info("Vault deleted successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error deleting vault: {str(e)}")
             return False
     
     def load_secrets(self):
@@ -142,7 +218,7 @@ class SecureVault:
         try:
             return self._load_encrypted(self.master_password)
         except Exception as e:
-            print(f"Error loading secrets: {str(e)}")
+            self.logger.error(f"Error loading secrets: {str(e)}")
             return None
     
     def save_secrets(self, secrets):
@@ -160,9 +236,10 @@ class SecureVault:
         
         try:
             self._save_encrypted(secrets, self.master_password)
+            self.logger.info("Secrets saved successfully")
             return True
         except Exception as e:
-            print(f"Error saving secrets: {str(e)}")
+            self.logger.error(f"Error saving secrets: {str(e)}")
             return False
     
     def verify_password(self, password):
@@ -194,6 +271,11 @@ class SecureVault:
             bool: True if successful, False otherwise
         """
         try:
+            # Validate new password
+            if not new_password or len(new_password) < 8:
+                self.logger.error("New password must be at least 8 characters long")
+                return False
+                
             # Verify old password
             if not self.verify_password(old_password):
                 return False
@@ -207,9 +289,10 @@ class SecureVault:
             # Update state
             self.master_password = new_password
             
+            self.logger.info("Password changed successfully")
             return True
         except Exception as e:
-            print(f"Error changing password: {str(e)}")
+            self.logger.error(f"Error changing password: {str(e)}")
             return False
     
     def _load_encrypted(self, password):
@@ -285,9 +368,23 @@ class SecureVault:
             'ciphertext': base64.b64encode(ciphertext).decode('utf-8')
         }
         
-        # Save to file
-        with open(self.vault_path, 'w') as f:
+        # Save to file (using atomic write pattern)
+        temp_path = f"{self.vault_path}.tmp"
+        with open(temp_path, 'w') as f:
             json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        
+        # Rename for atomic replacement
+        if sys.platform == 'win32':
+            # Windows requires special handling
+            if os.path.exists(self.vault_path):
+                os.replace(temp_path, self.vault_path)
+            else:
+                os.rename(temp_path, self.vault_path)
+        else:
+            # Unix systems can use atomic rename
+            os.rename(temp_path, self.vault_path)
     
     def _decrypt_legacy(self, encrypted_data, password):
         """
