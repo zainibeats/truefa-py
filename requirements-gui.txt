@@ -1,0 +1,21 @@
+# TrueFA-Py GUI Requirements
+# Core GUI dependencies
+PyQt6>=6.5.0
+PyQt6-Qt6>=6.5.0
+PyQt6-sip>=13.5.0
+
+# Core dependencies
+pycryptodome>=3.18.0
+pyotp>=2.8.0
+qrcode>=7.4.2
+pillow>=10.0.0
+
+# Image processing for QR code scanning
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Optional: Memory security on Windows
+# psutil>=5.9.0
+
+# Optional: For improved memory security on Windows
+pywin32>=306; sys_platform == 'win32' 
