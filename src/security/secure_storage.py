@@ -1139,6 +1139,12 @@ class SecureStorage:
                 - success: True if import was successful
                 - message: Success message or error message
         """
+        # First check if a vault is initialized
+        if not self.is_initialized:
+            debug("Cannot import secrets - no vault initialized")
+            return False, "No vault exists. Please create a vault first."
+            
+        # Then check if it's unlocked
         if not self.is_unlocked:
             debug("Storage must be unlocked to import secrets")
             return False, "Vault is locked. Please unlock it first."
@@ -1335,7 +1341,8 @@ class SecureStorage:
         self._unlocked = False
         
         if not self.vault.is_initialized:
-            info("No vault exists yet. You'll be prompted to create one when saving a secret.")
+            info("No vault exists yet. You'll need to create one first.")
+            debug("Vault is not initialized in unlock_vault")
             return False
             
         if self.vault.unlock(master_password):

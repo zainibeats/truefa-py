@@ -637,8 +637,37 @@ try:
                     
                     elif choice == "6":
                         try:
-                            # Check if vault is unlocked
-                            if not storage.is_unlocked:
+                            debug_print("Before processing choice 6:")
+                            debug_print(f"  - session_state: {session_state}")
+                            debug_print(f"  - storage.is_unlocked: {storage.is_unlocked}")
+                            
+                            # First check if vault exists and needs to be created
+                            if not storage.is_initialized:
+                                # No vault exists yet, need to create one
+                                print("\nNo vault found. You need to create a vault before importing secrets.")
+                                
+                                # Ask for master password and create vault
+                                master_password = getpass.getpass("Create a master password for your vault: ")
+                                if len(master_password) < 8:
+                                    print("Password must be at least 8 characters long")
+                                    continue
+                                
+                                confirm_password = getpass.getpass("Confirm master password: ")
+                                if master_password != confirm_password:
+                                    print("Passwords do not match")
+                                    continue
+                                
+                                print("Creating new vault...")
+                                if storage.create_vault(master_password):
+                                    print("Vault created successfully.")
+                                    # Store in session state for future operations
+                                    session_state["vault_unlocked_this_session"] = True
+                                    session_state["master_password"] = master_password
+                                else:
+                                    print("Failed to create vault")
+                                    continue
+                            elif not storage.is_unlocked:
+                                # Vault exists but is locked - need to unlock it
                                 print("Vault is locked. Please enter your master password to import secrets.")
                                 vault_password = SecureString(getpass.getpass("Enter your vault master password: "))
                                 if not storage.unlock_vault(vault_password.get_raw_value()):
