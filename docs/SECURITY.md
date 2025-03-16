@@ -13,6 +13,7 @@ This document describes the security model, cryptographic implementations, and b
 7. [Audit Guidelines](#audit-guidelines)
 8. [References](#references)
 9. [Related Documentation](#related-documentation)
+10. [GUI Security](#gui-security)
 
 ## Cryptographic Design
 
@@ -229,4 +230,34 @@ For security auditing, focus on these critical components:
 - [Developer Guide](DEVELOPER_GUIDE.md) - Development setup and technical details
 - [Development Status](DEVELOPMENT_STATUS.md) - Current state and security improvements
 - [Documentation Index](README.md) - Overview of all available documentation
-- [Main README](../README.md) - Project overview and high-level security architecture 
+- [Main README](../README.md) - Project overview and high-level security architecture
+
+## GUI Security
+
+The TrueFA-Py GUI implementation follows the same security principles as the CLI version, while providing a user-friendly interface:
+
+### Authentication and Vault Security
+- Master password authentication with PBKDF2 key derivation (100,000 iterations)
+- Auto-locking of vault when switching to the login screen
+- Password masking in all input fields
+- Automatic clearing of password fields after use
+
+### TOTP Secret Handling
+- Secrets are only stored in memory when the vault is unlocked
+- All secrets are cleared from memory when the vault is locked
+- The application never logs actual TOTP tokens or secrets
+- Token display is ephemeral and cleared when switching accounts
+
+### Data Security
+- The same two-layer encryption model used in the CLI version
+- AES-GCM authenticated encryption for vault data
+- Atomic file operations to prevent data corruption
+- Secure export/import functionality with password protection
+
+### UI Security Considerations
+- No screenshots are stored by the application
+- The application does not retain or cache sensitive information
+- Minimal logging of sensitive operations
+- Support for secure vault deletion
+
+For detailed information about the core security implementation, please refer to the sections above. 
