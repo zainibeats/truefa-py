@@ -28,6 +28,7 @@ MANIFEST
 
 # Test files
 qrtest.png
+test_gui.py
 .master
 dist-electron/
 node_modules/
@@ -37,6 +38,7 @@ vault/
 test_vault/
 *.enc
 *.json
+ref/
 
 # Backup files
 *.backup
