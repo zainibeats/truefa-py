@@ -383,6 +383,63 @@ class TwoFactorAuth:
             debug_print(f"Exception in extract_secret_from_qr: {str(e)}")
             return None, f"Error processing QR code: {str(e)}"
 
+    def process_qr_code(self, image_path):
+        """
+        Process a QR code image and extract TOTP account information.
+        
+        This method is primarily used by the GUI to extract formatted account 
+        information from a QR code image. It wraps extract_secret_from_qr with
+        additional processing to format the data for the GUI.
+        
+        Args:
+            image_path (str): Path to the QR code image
+            
+        Returns:
+            tuple: (account_data, error_message)
+                - account_data: Dictionary with keys 'secret', 'account', 'issuer'
+                  or None if extraction failed
+                - error_message: Error message if failed, None if successful
+        """
+        from ..utils.debug import debug_print
+        
+        try:
+            # First extract the secret using the base method
+            secret_obj, error_msg = self.extract_secret_from_qr(image_path)
+            
+            if error_msg or not secret_obj:
+                debug_print(f"Failed to extract secret: {error_msg}")
+                return None, error_msg or "Failed to extract TOTP data from QR code"
+            
+            # Get the raw secret value
+            if hasattr(secret_obj, 'get_raw_value'):
+                secret_value = secret_obj.get_raw_value()
+            elif hasattr(secret_obj, 'get'):
+                secret_value = secret_obj.get()
+            else:
+                secret_value = str(secret_obj)
+            
+            # Ensure it's a string
+            if isinstance(secret_value, bytes):
+                try:
+                    secret_value = secret_value.decode('utf-8')
+                except UnicodeDecodeError:
+                    # If we can't decode as UTF-8, use base64 encoding
+                    secret_value = "base64:" + base64.b64encode(secret_value).decode('ascii')
+            
+            # Create the account data dictionary
+            account_data = {
+                'secret': secret_value,
+                'account': self.account or "Unknown",
+                'issuer': self.issuer or ""
+            }
+            
+            debug_print(f"Successfully processed QR code: account={account_data['account']}, issuer={account_data['issuer']}")
+            return account_data, None
+            
+        except Exception as e:
+            debug_print(f"Exception in process_qr_code: {str(e)}")
+            return None, f"Error processing QR code: {str(e)}"
+
     def _validate_image_path(self, image_path):
         """
         Validate and resolve an image path securely.
@@ -1170,14 +1227,58 @@ class TwoFactorAuth:
 
     def _is_valid_base32(self, secret_value):
         """
-        Check if the secret is a valid base32 string.
+        Check if the string is valid base32 encoding
         
         Args:
-            secret_value (str): The secret to check
+            secret_value (str): The string to check
             
         Returns:
-            bool: True if the secret is valid base32, False otherwise
+            bool: True if valid base32, False otherwise
         """
-        # Base32 encoding uses only uppercase letters and digits 2-7
-        base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
-        return bool(base32_pattern.match(secret_value))
+        try:
+            # Remove any spaces
+            secret_value = secret_value.replace(" ", "")
+            
+            # Basic pattern check (BASE32 alphabet)
+            base32_pattern = re.compile(r'^[A-Z2-7]+=*$')
+            if not base32_pattern.match(secret_value):
+                return False
+                
+            # Add proper padding if missing
+            if len(secret_value) % 8 != 0:
+                padding = 8 - (len(secret_value) % 8)
+                secret_value = secret_value + ('=' * padding)
+                
+            # Try to decode
+            import base64
+            base64.b32decode(secret_value)
+            return True
+        except Exception:
+            return False
+    
+    def validate_totp_secret(self, secret):
+        """
+        Validate if a string is a valid TOTP secret.
+        
+        This method checks if the provided string is a valid TOTP secret
+        by verifying it's proper base32 encoding format, which is the standard
+        for TOTP secrets.
+        
+        Args:
+            secret (str): The secret key to validate
+            
+        Returns:
+            bool: True if the secret is valid, False otherwise
+        """
+        if not secret:
+            return False
+            
+        # Remove spaces which are sometimes used for readability
+        secret = secret.replace(" ", "")
+        
+        # Basic validation
+        if len(secret) < 16:  # Most TOTP secrets are at least 16 chars
+            return False
+            
+        # Use existing base32 validation
+        return self._is_valid_base32(secret)
