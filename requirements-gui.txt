@@ -14,8 +14,17 @@ pillow>=10.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
 
+# Security dependencies
+cryptography>=41.0.0
+
 # Optional: Memory security on Windows
 # psutil>=5.9.0
 
 # Optional: For improved memory security on Windows
-pywin32>=306; sys_platform == 'win32' 
+pywin32>=306; sys_platform == 'win32'
+
+# Documentation notes:
+# - OpenCV is required for camera-based QR code scanning
+# - PyQt6 is required for the GUI
+# - Cryptography is used for secure key derivation and encryption
+# - Pillow and qrcode are used for QR code generation 
