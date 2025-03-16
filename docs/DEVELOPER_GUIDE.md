@@ -10,10 +10,11 @@ This guide provides information for developing, building, testing, and securing 
 4. [Logging System](#logging-system)
 5. [Import/Export System](#import-export-system)
 6. [Testing](#testing)
-7. [Security Considerations](#security-considerations)
-8. [Distribution](#distribution)
-9. [Troubleshooting](#troubleshooting)
-10. [Related Documentation](#related-documentation)
+7. [GUI Implementation](#gui-implementation)
+8. [Security Considerations](#security-considerations)
+9. [Distribution](#distribution)
+10. [Troubleshooting](#troubleshooting)
+11. [Related Documentation](#related-documentation)
 
 ## Development Environment Setup
 
@@ -23,6 +24,7 @@ This guide provides information for developing, building, testing, and securing 
 - **Rust**: Install via [rustup](https://rustup.rs/) (required for cryptography)
 - **NSIS**: [NSIS website](https://nsis.sourceforge.io/Download) (for Windows installers)
 - **Visual C++ Redistributable 2015-2022**: [Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe) (required for Windows)
+- **PyQt6**: `pip install PyQt6` (required for GUI)
 
 ### Setting up the Development Environment
 
@@ -31,6 +33,7 @@ This guide provides information for developing, building, testing, and securing 
 git clone https://github.com/zainibeats/truefa-py.git && cd truefa-py
 python -m venv venv && .\venv\Scripts\Activate.ps1
 pip install -r dev-tools/dev-requirements.txt
+pip install PyQt6
 python dev-tools\setup.py
 ```
 
@@ -41,6 +44,7 @@ python dev-tools\setup.py
 3. **Vault Management** (`src/security/`): Encrypted storage and authentication
 4. **Import/Export Module** (`src/security/importers.py`, `src/security/exporters.py`): Secure import and export functionality
 5. **Configuration System** (`src/config.py`): Settings and path management
+6. **GUI Components** (`src/gui/`): PyQt6-based graphical user interface
 
 ### Environment Variables
 
@@ -336,6 +340,97 @@ Common issues include:
 - **Container Access**: Ensure Windows containers mode and proper permissions
 - **Installation Issues**: Check paths and try without silent mode if needed
 
+## GUI Implementation
+
+TrueFA-Py now includes a PyQt6-based GUI interface that provides a user-friendly way to interact with the application. The GUI implementation follows the same security principles as the CLI version, ensuring that sensitive data is handled securely.
+
+## GUI Architecture
+
+The GUI is built using PyQt6 and follows a modular architecture:
+
+- **Main Window**: The central component that manages the overall application state and UI
+- **Secure Vault**: A simplified interface to the vault for storing and retrieving TOTP secrets
+- **Token Display**: A widget for displaying TOTP tokens with countdown timer
+- **Account List**: A widget for displaying and selecting TOTP accounts
+- **Add Account Dialog**: A dialog for adding new accounts manually or via QR code
+- **Style System**: A theming system with support for light and dark modes
+
+## Running the GUI
+
+To run the GUI application:
+
+```bash
+# Basic run
+python truefa_gui.py
+
+# With debug logging
+python truefa_gui.py --debug
+
+# With custom vault directory
+python truefa_gui.py --vault-dir /path/to/vault
+
+# With specific theme
+python truefa_gui.py --style dark
+```
+
+## Core Functionality
+
+The GUI provides the following core functionality:
+
+1. **Vault Management**: Create, unlock, and lock a secure vault with a master password
+2. **Account Management**: Add, view, and delete TOTP accounts
+3. **Token Generation**: Generate and display TOTP tokens with countdown timer
+4. **QR Code Scanning**: Add accounts by scanning QR codes from image files
+5. **Import/Export**: Import and export accounts in encrypted format
+6. **Theme Support**: Switch between light and dark modes
+
+## User Experience
+
+The GUI is designed to be intuitive and user-friendly:
+
+- **Login Screen**: Simple interface for creating or unlocking a vault
+- **Main Interface**: Tabbed interface for accessing different features
+- **Token Display**: Large, easy-to-read token display with countdown timer
+- **Account List**: Clear list of accounts with easy selection
+- **Add Account**: Simple dialog for adding accounts manually or via QR code
+
+## Security Integration
+
+The GUI maintains the same security standards as the CLI version:
+
+- **Secure Vault**: All secrets are stored in an encrypted vault
+- **Memory Protection**: Sensitive data is cleared from memory when no longer needed
+- **Password Handling**: Passwords are never stored in plaintext
+- **Encryption**: Strong encryption is used for all sensitive data
+
+## Best Practices
+
+When developing for the GUI, follow these best practices:
+
+1. **Separation of Concerns**: Keep UI logic separate from business logic
+2. **Error Handling**: Provide clear error messages and graceful error recovery
+3. **Responsive Design**: Ensure the UI works well at different window sizes
+4. **Accessibility**: Make the UI accessible to all users
+5. **Security First**: Always prioritize security in all design decisions
+
+## Customizing the GUI
+
+The GUI can be customized in several ways:
+
+- **Styling**: Modify the style.py file to change the appearance
+- **Components**: Add or modify UI components in the gui directory
+- **Functionality**: Extend the functionality by adding new features
+
+## Ensuring Security
+
+When working with the GUI, always ensure that security features are maintained:
+
+1. **Vault Integration**: Use the SecureVault class for all secret storage
+2. **Password Handling**: Never store passwords in plaintext
+3. **Memory Protection**: Clear sensitive data from memory when no longer needed
+4. **Input Validation**: Validate all user input to prevent security issues
+5. **Error Handling**: Handle errors gracefully to prevent security breaches
+
 ## Security Considerations
 
 TrueFA-Py implements a comprehensive security model to protect sensitive authentication data. For detailed information about the security implementation, please refer to the [Security Documentation](SECURITY.md).
@@ -384,6 +479,11 @@ For security auditing, focus on these critical components:
 #### Permission Issues
 - Run as administrator for system directories
 - Use custom vault location with `-VaultDir` option
+
+#### GUI Issues
+- Ensure PyQt6 is installed correctly (`pip install PyQt6`)
+- Check for proper path configuration if imports fail
+- If QR code scanning fails, verify OpenCV installation
 
 ## Related Documentation
 

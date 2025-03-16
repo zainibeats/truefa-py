@@ -154,6 +154,32 @@ This will start the command-line interface with the following options:
 
 For details on all command-line options, logging configuration, and development information, please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md).
 
+## GUI Interface
+
+TrueFA-Py now includes a modern, user-friendly GUI interface built with PyQt6. The GUI provides all the functionality of the CLI version with an intuitive interface:
+
+- Secure vault with master password protection
+- TOTP token generation with visual countdown
+- Account management (add, view, delete)
+- QR code scanning from image files
+- Import/export functionality
+- Dark mode support
+
+### Running the GUI
+
+```bash
+# Start the GUI application
+python truefa_gui.py
+
+# Enable dark mode
+python truefa_gui.py --style dark
+
+# Enable debugging
+python truefa_gui.py --debug
+```
+
+For more information about the GUI, please refer to the [Developer Guide](docs/DEVELOPER_GUIDE.md).
+
 ## License
 
 This project is licensed under the MIT License.
