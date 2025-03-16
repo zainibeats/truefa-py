@@ -103,4 +103,26 @@ class AccountList(QWidget):
             name = current_item.data(Qt.ItemDataRole.UserRole)
             return self.accounts.get(name)
         
-        return None 
+        return None
+        
+    def select_account(self, name):
+        """
+        Select an account by name
+        
+        Args:
+            name (str): Name of the account to select
+            
+        Returns:
+            bool: True if account was found and selected, False otherwise
+        """
+        # Find the item with the matching name
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item_name = item.data(Qt.ItemDataRole.UserRole)
+            
+            if item_name == name:
+                # Select the item
+                self.list_widget.setCurrentItem(item)
+                return True
+                
+        return False 
