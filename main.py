@@ -380,20 +380,26 @@ try:
                         issuer = input("Enter the issuer (e.g., Google, Microsoft): ")
                         account = input("Enter the account (e.g., user@example.com): ")
                         
-                        # Set the secret and attributes
-                        auth.secret = SecureString(secret_key.encode('utf-8'))
-                        auth.issuer = issuer
-                        auth.account = account
-                        print("Secret set successfully.")
-                        
-                        # Generate codes in real-time
-                        try:
-                            print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
-                            auth.continuous_generate()
-                        except KeyboardInterrupt:
-                            print("\nStopped code generation.")
-                        except Exception as gen_error:
-                            print(f"Error generating codes: {gen_error}")
+                        # Use the proper set_secret method instead of directly setting attributes
+                        if auth.set_secret(secret_key, issuer, account):
+                            print("Secret set successfully.")
+                            
+                            # Generate TOTP code immediately to verify it's working
+                            code, remaining = auth.generate_totp()
+                            if code:
+                                # Show the initial code
+                                print(f"\nCurrent TOTP code: {code} (expires in {remaining}s)")
+                            
+                            # Generate codes in real-time
+                            try:
+                                print("\nGenerating TOTP codes in real-time. Press Ctrl+C to return to menu.")
+                                auth.continuous_generate()
+                            except KeyboardInterrupt:
+                                print("\nStopped code generation.")
+                            except Exception as gen_error:
+                                print(f"Error generating codes: {gen_error}")
+                        else:
+                            print("Error setting secret. Please ensure you entered a valid secret key.")
                     
                     elif choice == "4":
                         # View saved secrets
